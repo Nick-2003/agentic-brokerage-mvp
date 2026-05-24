@@ -1,0 +1,81 @@
+# SCOPE.md — what we build, what we don't
+
+**This file is the boundary.** Anything new gets weighed against the amendment rule at the bottom. The point of this doc is to make scope creep visible — every "while we're at it…" idea has to clear an explicit bar before it joins the build.
+
+## What's in the MVP
+
+### Six demo flows, end-to-end with real synthesis
+
+1. **Morning brief** — personalised to user's paper portfolio + overnight news; pinnable
+2. **Stock research card** — BUY/HOLD/SELL with target + cited thesis + catalysts + risks
+3. **Talk-to-your-charts (TradingView MCP)** — add indicators, draw S/R, scroll to dates, screenshot back
+4. **Place trade** — notional or share-count, with TP/SL from prompt or research
+5. **Live trade card + monitor** — real Alpaca paper fills, real P&L, "new info surfaced" since trade
+6. **Portfolio risk audit** — concentration, correlation, suggested hedges
+
+### Cross-cutting capabilities
+
+- Persistent chat bar (text-only)
+- Animated thinking breadcrumbs (Perplexity-style, not raw reasoning)
+- Citation chips on every numeric claim
+- Pin-to-home dashboard with persistence across sessions
+- Light magic-link auth via Supabase
+- Shareable URL
+- PostHog instrumentation (retention, activation, prompt count per session)
+
+### Five follow-up chips on the research card
+
+The five chips from the demo (Alert, Run TA, Place trade, Compare to AMD, Bear case) are in scope because they tour the agent's capability surface in one card. If any chip kills demo time without driving retention, it gets cut at the end of the build.
+
+## What's NOT in the MVP
+
+These were considered and deliberately excluded. Adding them requires an amendment per the rule below.
+
+- **Real-money execution** — no FINRA/SEC registration; Alpaca paper only
+- **Mobile native app** — mobile web only, phone-frame layout
+- **Voice input** — Web Speech API is poor on mobile; defer until text-PMF validated
+- **KYC / identity verification / anti-fraud**
+- **Real-time market data** for non-charting flows (yfinance 15-min delay is enough; TradingView gives real-time for charts)
+- **Crypto, options, futures** — US equities only
+- **Push notifications, mobile alerts**
+- **Multi-portfolio / family-office mode**
+- **Polished onboarding flow** — re-use the existing 4-screen swipeys from the demo
+- **Multi-language / non-US markets**
+- **Pine Script generation from prompts** — TradingView MCP has it; defer
+- **Conversational memory across sessions** beyond pinned widgets (no "remember our conversation last Tuesday")
+- **Multi-user collaboration / sharing positions**
+
+## Edge cases we deliberately don't handle (for now)
+
+- Order rejections from Alpaca (we show a generic error, no recovery flow)
+- Concurrent trades on the same ticker (last-write-wins, no transaction)
+- Market closed (we still show real quotes, but mark the order as "queued for next open")
+- Ticker not in our universe (we say "I don't cover that yet" — no synthetic data)
+- Pagination of >50 messages per chat (truncate to recent)
+- Mobile keyboard covering the chat bar (best-effort — use 100dvh)
+- Slow Claude API responses (>30s — show timeout, user can retry)
+
+## Scope amendment rule
+
+**A feature only gets added when:**
+
+> Three or more users have told us *in interviews* that they cannot get genuine value from the product without it.
+
+Not when:
+- Tom feels enthusiastic about it mid-session
+- A friend says "you should add X"
+- It would be easy to ship
+- A competitor has it
+- It would make the demo more impressive
+
+The amendment process:
+1. Write the proposed addition in `docs/AMENDMENTS_PROPOSED.md` with the user evidence
+2. Wait at least 3 days (cool-off)
+3. If the evidence still holds, edit this file to move the feature from "NOT in MVP" to "In MVP" with the date and the evidence link
+4. Update CLAUDE.md if the architecture has to change
+
+## Sign-off
+
+This scope is written down so that "should we build X?" is replaced with "does X clear the amendment rule?" That's the only change that matters.
+
+When in doubt: cut, don't add. The MVP that ships at week 2 with 6 polished flows learns more than the one that ships at week 4 with 12 half-finished flows.

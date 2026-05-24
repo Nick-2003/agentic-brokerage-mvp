@@ -1,0 +1,37 @@
+[project]
+name = "agentic-brokerage-backend"
+version = "0.1.0"
+description = "Agent-first brokerage MVP backend — FastAPI + Anthropic SDK + Alpaca paper trading"
+requires-python = ">=3.13"
+dependencies = [
+    "anthropic>=0.45.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "sse-starlette>=2.1.0",
+    "pydantic>=2.9.0",
+    "python-dotenv>=1.0.1",
+    "httpx>=0.27.0",
+    "alpaca-py>=0.33.0",
+    "yfinance>=0.2.50",
+]
+
+[dependency-groups]
+# `auth` group — Supabase + PostHog. Not imported by any backend code yet
+# (auth is deferred to Phase 7). Kept out of the default sync so the backend
+# installs without pulling `cryptography`. Install with: uv sync --group auth
+auth = [
+    "supabase>=2.10.0",
+    "posthog>=3.7.0",
+]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.7.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM"]

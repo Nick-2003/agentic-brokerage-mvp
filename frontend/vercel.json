@@ -1,0 +1,16 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "buildCommand": "pnpm install --no-frozen-lockfile && pnpm build",
+  "installCommand": "pnpm install --no-frozen-lockfile",
+  "rewrites": [
+    {
+      "source": "/api/chat",
+      "destination": "https://CHANGE-ME.up.railway.app/api/chat"
+    },
+    {
+      "source": "/api/healthz",
+      "destination": "https://CHANGE-ME.up.railway.app/healthz"
+    }
+  ]
+}

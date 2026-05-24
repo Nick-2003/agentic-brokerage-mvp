@@ -1,0 +1,295 @@
+'use client';
+
+import { ChatBar } from '@/components/ChatBar';
+import { ThinkingCard, type Thought } from '@/components/ThinkingCard';
+import { WidgetRenderer } from '@/components/widgets/WidgetRenderer';
+import { streamChat, type ChatEvent } from '@/lib/sse';
+import type { Widget } from '@/lib/widgets';
+import { useRef, useState } from 'react';
+
+// One agent run: user turn + chain of thoughts + zero or more widgets + final text
+type Turn = {
+  id: string;
+  userText: string;
+  thoughts: Thought[];
+  done: boolean;
+  elapsedMs?: number;
+  widgets: Widget[];
+  messages: string[];
+  error?: string;
+};
+
+export default function Home() {
+  const [turns, setTurns] = useState<Turn[]>([]);
+  const [streaming, setStreaming] = useState(false);
+  const [pinnedWidgets, setPinnedWidgets] = useState<Widget[]>([]);
+  const ctrlRef = useRef<AbortController | null>(null);
+  const screenRef = useRef<HTMLDivElement>(null);
+
+  function handleSubmit(text: string) {
+    if (streaming) return;
+    setStreaming(true);
+    const turnId = crypto.randomUUID();
+    const startedAt = performance.now();
+
+    // Insert a fresh turn we'll keep mutating
+    setTurns((prev) => [
+      ...prev,
+      { id: turnId, userText: text, thoughts: [], done: false, widgets: [], messages: [] },
+    ]);
+
+    ctrlRef.current = streamChat({ message: text }, (ev: ChatEvent) => {
+      setTurns((prev) =>
+        prev.map((t) => {
+          if (t.id !== turnId) return t;
+          const next = { ...t };
+          if (ev.event === 'thought') {
+            // Mark prior thought as done, add new as active
+            const newThoughts: Thought[] = next.thoughts.map((th) => ({
+              ...th,
+              state: 'done' as const,
+            }));
+            newThoughts.push({ text: ev.data.text, state: 'active' });
+            next.thoughts = newThoughts;
+          } else if (ev.event === 'tool_result') {
+            // Mark the latest active thought as done
+            next.thoughts = next.thoughts.map((th, i, arr) =>
+              i === arr.length - 1 && th.state === 'active'
+                ? { ...th, state: 'done' as const }
+                : th,
+            );
+          } else if (ev.event === 'widget') {
+            next.widgets = [...next.widgets, ev.data];
+          } else if (ev.event === 'message') {
+            next.messages = [...next.messages, ev.data.text];
+          } else if (ev.event === 'error') {
+            next.error = ev.data.message;
+          } else if (ev.event === 'done') {
+            next.done = true;
+            next.elapsedMs = performance.now() - startedAt;
+            // Mark any remaining active thought as done
+            next.thoughts = next.thoughts.map((th) => ({ ...th, state: 'done' as const }));
+          }
+          return next;
+        }),
+      );
+
+      if (ev.event === 'done') {
+        setStreaming(false);
+        // Scroll to bottom after done
+        setTimeout(() => screenRef.current?.scrollTo({ top: screenRef.current.scrollHeight, behavior: 'smooth' }), 50);
+      }
+    });
+  }
+
+  function handleMicTap() {
+    // Voice mode is mocked for now — surface a hint
+    alert('Voice input is mocked in the MVP. Type your message instead.');
+  }
+
+  function pinWidget(w: Widget) {
+    setPinnedWidgets((prev) => [w, ...prev]);
+  }
+
+  return (
+    <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#2c2c2a] to-[#444441] p-6">
+      <div className="w-[390px] h-[844px] bg-bg rounded-[48px] shadow-2xl ring-[14px] ring-[#1a1a1a] relative overflow-hidden flex flex-col">
+        {/* Notch */}
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 w-28 h-7 bg-[#1a1a1a] rounded-3xl z-50" />
+
+        {/* Status bar */}
+        <div className="px-7 pt-4 pb-2 flex justify-between text-sm font-medium text-text shrink-0">
+          <span>9:41</span>
+          <span>●●●● 5G</span>
+        </div>
+
+        {/* Scrollable screen */}
+        <div ref={screenRef} className="flex-1 overflow-y-auto overflow-x-hidden no-scrollbar pb-[120px]">
+          <Header />
+          <Hero pinnedCount={pinnedWidgets.length} />
+
+          {/* Pinned widgets (dashboard) */}
+          {pinnedWidgets.length > 0 && (
+            <div className="px-4 mt-1 space-y-2.5">
+              <SectionTitle>Pinned on home</SectionTitle>
+              {pinnedWidgets.map((w, i) => (
+                <WidgetRenderer key={i} widget={w} />
+              ))}
+            </div>
+          )}
+
+          {/* Conversation turns */}
+          {turns.length === 0 && (
+            <div className="px-6 mt-4 text-[13px] text-text-3 leading-relaxed">
+              Tap one to begin — or type your own below:
+              <div className="mt-3 space-y-1.5">
+                {[
+                  'give me a tldr on my portfolio',
+                  'research on Tencent',
+                  'how risky is my book?',
+                  'buy 10 shares of TSLA at limit 246, TP 290, SL 225',
+                ].map((ex) => (
+                  <button
+                    key={ex}
+                    onClick={() => handleSubmit(ex)}
+                    disabled={streaming}
+                    className="block w-full text-left px-3 py-2 bg-surface rounded-lg active:scale-[0.98] transition-transform disabled:opacity-50"
+                  >
+                    {ex}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {turns.map((t) => (
+            <div key={t.id} className="px-4 mt-3">
+              {/* User bubble */}
+              <div className="flex justify-end">
+                <div className="bg-accent text-white text-sm px-3.5 py-2 rounded-2xl rounded-br-md max-w-[85%]">
+                  {t.userText}
+                </div>
+              </div>
+
+              {/* Thinking */}
+              {t.thoughts.length > 0 && (
+                <ThinkingCard thoughts={t.thoughts} done={t.done} elapsedMs={t.elapsedMs} />
+              )}
+
+              {/* Widgets — pin button beneath each */}
+              {t.widgets.map((w, i) => (
+                <div key={i} className="mt-3">
+                  <WidgetRenderer widget={w} />
+                  <button
+                    onClick={() => pinWidget(w)}
+                    className="mt-2 w-full py-2 rounded-full text-[12.5px] font-semibold bg-accent-bg text-accent border border-accent/20 active:scale-95 transition-transform"
+                  >
+                    Pin to home
+                  </button>
+                </div>
+              ))}
+
+              {/* Plain text messages */}
+              {t.messages.map((m, i) => (
+                <div key={i} className="mt-3 bg-surface border border-border text-sm px-3.5 py-2.5 rounded-2xl rounded-bl-md max-w-[85%]">
+                  {m}
+                </div>
+              ))}
+
+              {/* Error */}
+              {t.error && (
+                <div className="mt-3 bg-red-bg text-red-DEFAULT text-sm px-3.5 py-2.5 rounded-2xl">
+                  {t.error}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Chat bar */}
+        <ChatBar onSubmit={handleSubmit} onMicTap={handleMicTap} disabled={streaming} />
+      </div>
+
+      {/* Side panel — info / demo script */}
+      <SidePanel pinnedCount={pinnedWidgets.length} streaming={streaming} onPick={handleSubmit} />
+    </main>
+  );
+}
+
+function Header() {
+  return (
+    <div className="px-6 pt-1 flex items-center justify-between">
+      <div className="text-[12px] font-semibold tracking-[0.08em] text-text-2">INVESTING</div>
+      <div className="w-8 h-8 rounded-full bg-accent text-white text-[13px] font-semibold flex items-center justify-center">
+        G
+      </div>
+    </div>
+  );
+}
+
+function Hero({ pinnedCount }: { pinnedCount: number }) {
+  return (
+    <div className="px-6 pt-5 pb-1">
+      <div className="text-xs text-text-3 uppercase tracking-[0.06em] mb-1.5">Portfolio value</div>
+      <div className="text-4xl font-semibold -tracking-tight">$51,000.00</div>
+      <div className="mt-1 text-sm text-green-DEFAULT font-medium">+$964.10 (+1.93%) today</div>
+      {pinnedCount === 0 && (
+        <div className="mt-2 text-[11px] text-text-3">Your home is empty — pin a widget to start building it.</div>
+      )}
+    </div>
+  );
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-text-3">{children}</div>
+  );
+}
+
+function SidePanel({
+  pinnedCount,
+  streaming,
+  onPick,
+}: {
+  pinnedCount: number;
+  streaming: boolean;
+  onPick: (text: string) => void;
+}) {
+  const prompts = [
+    'give me a tldr on my portfolio',
+    'research on Tencent',
+    'add the 50 and 200-day SMA on NVDA',
+    'build my thesis on TSLA',
+    'buy 10 shares of TSLA at limit 246, TP 290, SL 225',
+    'how risky is my book?',
+  ];
+  return (
+    <div className="ml-8 w-[320px] text-[#f5f5f0] text-[13px] leading-relaxed self-start mt-12">
+      <h2 className="text-lg font-medium text-white mb-2">Agentic Brokerage — Live</h2>
+      <p className="opacity-85 mb-4">
+        Tap a prompt below, or type into the chat bar at the bottom of the phone. Every response streams from real Claude. Widgets appear inline — tap{' '}
+        <strong className="text-white">Pin to home</strong> to keep them.
+      </p>
+
+      <div className="rounded-lg bg-white/5 px-3.5 py-2.5 mb-4 text-[12px]">
+        <div className="text-white/55 uppercase tracking-[0.12em] text-[10px] mb-1">Status</div>
+        <div className="text-white">{streaming ? 'Streaming…' : 'Idle'}</div>
+        <div className="text-white/60 mt-1">{pinnedCount} pinned widget{pinnedCount === 1 ? '' : 's'}</div>
+      </div>
+
+      <h3 className="text-white text-[14px] font-medium uppercase tracking-[0.08em] mb-2">Try these</h3>
+      <div className="space-y-1.5 text-[12.5px] font-mono">
+        {prompts.map((p) => (
+          <Prompt key={p} onClick={() => onPick(p)} disabled={streaming}>
+            {p}
+          </Prompt>
+        ))}
+      </div>
+
+      <div className="mt-6 text-[11px] text-white/45">
+        Backend status: <a href="/api/healthz" target="_blank" className="underline">/api/healthz</a>
+      </div>
+    </div>
+  );
+}
+
+function Prompt({
+  children,
+  onClick,
+  disabled,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="block w-full text-left px-3 py-2 rounded bg-white/[0.06] border border-white/[0.08] hover:bg-white/[0.1] active:scale-[0.98] transition disabled:opacity-50"
+    >
+      {children}
+    </button>
+  );
+}

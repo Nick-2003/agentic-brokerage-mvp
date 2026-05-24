@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+  html, body {
+    height: 100%;
+    background: #f5f5f0;
+    color: #1a1a1a;
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior-y: contain;
+  }
+  body { margin: 0; }
+  * { box-sizing: border-box; }
+  /* Hide scrollbars on mobile-frame scrollers */
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { scrollbar-width: none; }
+}
+
+@layer utilities {
+  /* Subtle dot indicator used in the chat bar */
+  .pulse-dot {
+    width: 6px; height: 6px; border-radius: 9999px;
+    background: #534AB7;
+    animation: pulseDot 1.6s ease-in-out infinite;
+  }
+  .live-dot {
+    width: 8px; height: 8px; border-radius: 9999px;
+    background: #0F6E56;
+    animation: pulseDot 1.6s ease-in-out infinite;
+  }
+}

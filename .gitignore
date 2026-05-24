@@ -1,0 +1,41 @@
+# Env / secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.uv/
+dist/
+build/
+
+# Node
+node_modules/
+.next/
+out/
+.vercel/
+
+# DBs
+*.db
+*.sqlite
+
+# Local mock state (not committed — regenerated per run)
+backend/data/mock_orders.json
+
+# Python tooling caches
+.pytest_cache/
+.ruff_cache/
+
+# Next.js
+next-env.d.ts
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+*.swp
