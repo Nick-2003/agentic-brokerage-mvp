@@ -39,3 +39,5 @@ next-env.d.ts
 .vscode/
 .idea/
 *.swp
+
+self_management/
