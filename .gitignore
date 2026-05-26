@@ -41,3 +41,4 @@ next-env.d.ts
 *.swp
 
 self_management/
+proposed_changes/
