@@ -50,7 +50,7 @@ These are non-negotiable. They're what distinguishes us from a chat-with-PDF wra
 | Broker | Alpaca paper trading | Real broker API, $100k paper, no KYC, no real money |
 | Market data | yfinance | 15-min delayed, free, no rate limits in practice |
 | News | Anthropic web search | Already in Claude API, no separate provider |
-| Charts | TradingView MCP | The talk-to-charts wedge |
+| Charts | TradingView MCP (`tradesdontlie/tradingview-mcp`) | The talk-to-charts wedge (Real chart in local dev; mock in production until containerised TV Desktop (v2)) |
 | Indicators math | ta-lib (Python) | For portfolio risk / correlation, not chart rendering |
 | Analytics | PostHog Cloud | Already in Tom's stack, free tier covers MVP |
 
