@@ -4,6 +4,12 @@ import { SafeHtml, Sources, WidgetCard } from './Sources';
 export function TAChart({ data, sources }: { data: TAChartData; sources: Source[] }) {
   const r1 = data.key_levels.resistance[0];
   const s1 = data.key_levels.support[0];
+  // Bug fix from proposal 002 §4.8: the prior version rendered <MockChartSvg /> unconditionally
+  // and ignored `data.screenshot_url`. Even when the backend returned a real TradingView
+  // screenshot (base64 data URL), the user saw the mock SVG. Now render the screenshot when
+  // present, fall back to the inline SVG otherwise.
+  const hasScreenshot = typeof data.screenshot_url === 'string' && data.screenshot_url.length > 0;
+
   return (
     <WidgetCard eyebrow={`Technical · ${data.timeframe} · powered by TradingView`}>
       <div className="text-[15px] font-semibold mb-2">{data.ticker} · {data.timeframe} chart</div>
@@ -14,8 +20,16 @@ export function TAChart({ data, sources }: { data: TAChartData; sources: Source[
           <span className="font-semibold text-text text-[12px]">${data.current_price.toFixed(2)}</span>
           <span className="text-text-3">{data.timeframe}</span>
         </div>
-        {/* Inline animated SVG fallback that we always render — looks like a real chart */}
-        <MockChartSvg />
+        {hasScreenshot ? (
+          <img
+            src={data.screenshot_url}
+            alt={`${data.ticker} ${data.timeframe} chart`}
+            loading="lazy"
+            className="w-full block rounded-md"
+          />
+        ) : (
+          <MockChartSvg />
+        )}
         <div className="flex gap-3.5 text-[11px] text-text-2 mt-2">
           <Legend swatch="bg-accent" label="Price" />
           {data.indicators_applied.includes('SMA 50') && <Legend swatch="bg-amber-DEFAULT" label="SMA 50" />}
@@ -60,6 +74,8 @@ function LevelCell({ label, value, variant }: { label: string; value: string; va
 
 function MockChartSvg() {
   // Static-feeling animated chart drawing — same shape as the demo's golden cross chart.
+  // Used as a graceful fallback when no real screenshot URL is present (mock mode,
+  // or real MCP unreachable).
   return (
     <svg viewBox="0 0 300 140" preserveAspectRatio="none" className="w-full h-[140px] block">
       <path
