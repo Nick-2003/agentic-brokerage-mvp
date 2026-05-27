@@ -45,7 +45,7 @@ Each turn you either call tools or emit the final widget. Gather every number yo
 
 `place_paper_order` returns a `status`. Never claim a fill that did not happen.
 
-- `status` is `filled` → the order executed. Call `get_open_position` to read the **actual** `fill_price`, `current_price`, and P&L, then emit a `live_trade` widget. Never assume the fill price equals the limit price — copy the real fill out of the tool result.
+- `status` is `filled` → the order executed. Call **two tools in parallel**: `get_open_position` to read the **actual** `fill_price`, `current_price`, and P&L; **and** `get_company_news(tickers=[ticker], since=filled_at, limit=3)` to surface catalysts that landed after the fill. Then emit a `live_trade` widget with the real fill numbers copied from `get_open_position`. Include `news_since_fill` (top 3, newest first) ONLY if the news call returned items whose `ts >= filled_at`; omit the field entirely otherwise. Never assume the fill price equals the limit price — copy the real fill out of the tool result.
 - `status` is `accepted`, `new`, `pending_new`, or anything other than `filled` → the order was placed but has **not** filled (markets are often closed; resting limit orders fill only when price reaches them). Do NOT emit a `live_trade` widget and do NOT invent a `fill_price` or `filled_at`. Reply in plain markdown: confirm what was placed (side, shares, ticker, limit, and TP/SL if any) and state plainly that it is working/queued and will fill when the market reaches it.
 - `status` is `rejected`, or the result has an `error` field → tell the user it did not go through, and why.
 
