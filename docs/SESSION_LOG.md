@@ -173,3 +173,59 @@
 
 **Next session:** unchanged from above — filled-order path during market hours; consider making the Hero portfolio value live.
 
+---
+
+## 2026-05-27 · P1.1 prep + P1.2 TradingView MCP applied + `proposed_changes/` workflow
+
+**Built / applied (P1.2 — TradingView MCP / `PRIORITIES.md` P1.2):**
+
+- Proposal 002 drafted then applied to the live repo. The deferred SDK question (`claude-agent-sdk` vs Anthropic-beta-MCP) is **resolved: neither** — stay on the raw Anthropic SDK and host MCP servers as backend-side stdio clients. Mirrors `docs/TRUENORTH_MCP_INTEGRATION.md` §3. Verified agent loop and SSE protocol unchanged; Bug A (widget emission) and Bug C (status-honest fills) are not re-opened.
+- **NEW `backend/mcp_client.py`** — long-lived stdio MCP session manager. Single `asyncio.Lock` per server (CDP is single-controller; serialises every `tv_call`). Lazy init, retry+backoff on spawn, graceful close on FastAPI shutdown. Surfaces `tradingview_mcp_unreachable` / `tradingview_mcp_call_failed` / `tradingview_cdp_refused` to the agent — **no silent fall-through to mock**, same discipline as `alpaca_fetch_failed`.
+- **EDIT `backend/tools/technicals.py`** — real path beside the existing mock, gated by `USE_MOCK_TA`. `get_technical_levels` orchestrates 5–7 MCP calls (`tv_health_check → chart_set_symbol → chart_set_timeframe → chart_manage_indicator × N → data_get_study_values → data_get_pine_lines → capture_screenshot`) into a single agent-visible tool result. Indicator name translation table (`"SMA 50"` → `"Moving Average Simple"` length=50; etc.) — single source of truth. Plus three new agent-visible verb tools for the wedge: `chart_apply_indicator`, `chart_draw_levels`, `chart_scroll_to_date`.
+- **EDIT `backend/prompts/system.md`** — new row in the intent→widget table for chart-modification verbs; new section requiring honest error reporting on MCP failures (don't fabricate a chart change that didn't happen). Built on top of 001's `news_since_fill` rule — no regression.
+- **EDIT `backend/.env.example` + `backend/pyproject.toml`** — added `mcp>=1.0` to main deps; four new env vars (`USE_MOCK_TA=1` default, `TRADINGVIEW_MCP_COMMAND`, `TRADINGVIEW_MCP_ARGS`, `TRADINGVIEW_MCP_CDP_PORT=9222`).
+- **FIX `frontend/components/widgets/TAChart.tsx`** — latent bug surfaced while drafting the proposal. The component hardcoded `<MockChartSvg />` and **never read `data.screenshot_url`**. Without this fix the entire P1.2 effort would have been invisible — backend could emit real screenshots, frontend would still draw the SVG. Now renders `<img src={screenshot_url}>` when present, falls back to `MockChartSvg` otherwise. `data:image/png;base64,…` works natively in `<img>`, no plumbing.
+- **EDIT `README.md`** — new "Talk-to-your-charts (TradingView MCP)" local-setup section (TV Desktop install, CDP flag, sibling clone of `tradesdontlie/tradingview-mcp`, npm install, env vars). Explicitly calls out the local-only/mock-in-prod posture.
+- **EDIT `CLAUDE.md` tech-stack table** — Charts row updated to name the canonical fork (`tradesdontlie/tradingview-mcp`) and lock the deployment posture: *"Real chart in local dev; mock in production until containerised TV Desktop (v2)."*
+
+**Built / applied (P1.1 — filled → live_trade / `PRIORITIES.md` P1.1):**
+
+- Proposal 001 drafted then applied to the live repo — closes SCOPE flow 5's third sub-item ("new info surfaced since trade"), which was previously unwired (no schema field, no system-prompt rule, no `get_company_news(since=...)` arg). Now: on `status: filled`, the agent fires `get_open_position` AND `get_company_news(tickers=[ticker], since=filled_at, limit=3)` **in parallel**; the `live_trade` widget includes `news_since_fill` (top 3, newest first) only when the news call returned items post-dating `filled_at`.
+- **Actual filled-path market-hours verification is still pending.** The full session pre-dated US RTH (started ~06:02 EDT; market opens 09:30 EDT). A runbook was built in chat for the operator to execute: boot real-Alpaca backend (no `USE_MOCK_*` flags), `curl` a marketable limit on F at `ask+$0.05`, confirm SSE sequence `place_paper_order(filled) → get_open_position → widget(live_trade)` with `fill_price ≠ limit_price`, cross-check Alpaca dashboard, optionally keep 2 shares of F as a real-portfolio seed. The `accepted` and bracket branches are already verified (2026-05-20); only the `filled → live_trade` branch is outstanding.
+
+**Process — `proposed_changes/` workflow established:**
+
+- New rule: any proposed file change goes into `proposed_changes/<NNN-slug>/` (mirroring the repo tree) **before** being applied to the live repo. Top-level `proposed_changes/README.md` documents the rule; `proposed_changes/STATUS.md` tracks in-flight + applied proposals.
+- On apply: the proposal subfolder is moved to `proposed_changes/applied/<slug>/`. Proposal 001 already there. Proposal 002 moves on the next commit pass.
+- Drove the discipline this session — both 001 and 002 went through the `proposed_changes/` tree before landing live.
+
+**Decisions surfaced:**
+
+- **SDK decision for MCP — locked: stay on Anthropic SDK, add backend-side MCP client.** Same pattern for every external MCP server (TradingView today, TrueNorth tomorrow). Neither `claude-agent-sdk` nor Anthropic-beta-MCP add enough to justify re-validating widget emission / fill-honesty / SSE control.
+- **Canonical TradingView MCP fork — `tradesdontlie/tradingview-mcp`.** ~68 tools, CDP-based via `localhost:9222`, has its own integration docs. Competing forks rejected (Lewis/Jackson is a thinner fork; `harshil1502/` has fewer tools; `atilaahmettaner/` is crypto-focused — wrong fit). Sibling clone, pull-only, never pushed — same rule as TrueNorth.
+- **Concurrency model — single `asyncio.Lock` per MCP session, no timeout.** Chrome DevTools Protocol is single-controller; two simultaneous `chart_set_symbol` would clobber state. Lock serialises every `tv_call`. Reject-when-busy and per-user TV instances both rejected for MVP scale.
+- **Screenshot encoding — inline base64 `data:image/png;base64,…`** in widget JSON. Zero infra; not cacheable but chart screenshots stale immediately anyway. Switch to a `/api/screenshots/<hash>.png` static route only when SSE bandwidth becomes a real problem or pinned-widget caching demands it. Schema field is format-agnostic; one-file swap when the time comes.
+- **Chart-modify intents — three new verb tools, not param-expansion.** Separates read from write semantics; prompt-tunes per intent; cheap to add more verbs later. Costs ~100 tokens per turn in tool descriptions — worth it.
+- **Production posture — local-demo-only, mock in Railway.** TradingView Desktop is a local Electron app; Railway containers cannot run it. `USE_MOCK_TA=1` in Railway env. The wedge is gated to in-person demos and dev laptops until containerised TV ships (v2). This single fact appears in four doc surfaces (proposal §3, `.env.example`, README "Production posture", CLAUDE.md Charts row).
+
+**Assumptions introduced:**
+
+- `mcp>=1.0` Python SDK is stable enough to depend on. Worth re-checking at the next live-apply pass — if PyPI is still <1.0, pin to a specific minor.
+- `tradesdontlie/tradingview-mcp::capture_screenshot` returns base64-encoded PNG in a `data` or `base64` field of its result. Defensive parsing handles both; if upstream uses a different shape, the screenshot will be empty and the chart falls back to the inline SVG (graceful).
+- `data_get_study_values` returns either a scalar `value` or a series whose last element is the current. Both shapes handled defensively.
+- TradingView Desktop with CDP on port 9222 is reachable from the spawned MCP subprocess on the same machine — untested end-to-end this session; needs a developer-laptop run with TV Desktop open + the sibling repo cloned.
+
+**Did NOT do:**
+
+- Did NOT run the actual P1.1 filled-order verification — market hours.
+- Did NOT exercise the real TradingView MCP path end-to-end — stayed at proposal-and-code level. First integration test is the next session.
+- Did NOT fix the silent-fallback bug in `backend/tools/market.py::get_quote` (surfaced this session by Yahoo's crumb 401 — `yfinance.info` raised `TypeError`, the path caught it silently and returned mock with no `error` field). Queued as **Proposal 003** for next session.
+- Did NOT wire the widget numeric validator — still deferred per CLAUDE.md trust principle #3 (decision unchanged from 2026-05-20 prompt-fix session).
+
+**Next session:**
+
+- **P1.1:** run the runbook at next US market open to verify `filled → live_trade`; update this log + tick the P1.1 checkbox in `PRIORITIES.md`.
+- **P1.2:** first end-to-end real run on a dev machine with TV Desktop + the sibling repo cloned. Verify each of the four acceptance prompts (show NVDA daily / add RSI / draw S/R / scroll to date) returns a real screenshot in the `ta_chart` widget.
+- **Proposal 003:** draft the `get_quote` silent-fallback fix (small change — surface `error: "yfinance_fetch_failed"` instead of falling through to mock).
+- **Supabase planning:** the question "how was Supabase initially implemented + how is it intended to be used overall after the priority list" was paused mid-session in plan mode; resume.
+
