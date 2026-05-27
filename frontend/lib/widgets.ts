@@ -56,6 +56,7 @@ export type OrderTicketData = {
 };
 
 // ── live_trade ──
+export type NewsItem = { headline: string; source: string; ts: string };
 export type LiveTradeData = {
   order_id: string;
   ticker: string;
@@ -69,6 +70,7 @@ export type LiveTradeData = {
   tp_armed_at?: number;
   sl_armed_at?: number;
   filled_at: string;
+  news_since_fill?: NewsItem[];
 };
 
 // ── thesis ──
