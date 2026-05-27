@@ -13,6 +13,10 @@ dependencies = [
     "httpx>=0.27.0",
     "alpaca-py>=0.33.0",
     "yfinance>=0.2.50",
+    # MCP Python SDK — used by backend/mcp_client.py to host stdio MCP
+    # client sessions against external servers (TradingView today, TrueNorth
+    # tomorrow). See proposed_changes/002-tradingview-mcp/README.md §4.7.
+    "mcp>=1.0",
 ]
 
 [dependency-groups]
