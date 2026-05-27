@@ -1,0 +1,11 @@
+## Cross-cutting elaborations the proposal didn't spell out
+
+**1. The encapsulation property pays off twice.** Because the widget JSON contract (4.4) and `widgets.ts` are untouched, the frontend has no idea whether it's looking at a mock or real chart. That property holds even when *implementations of MCP calls change inside TradingView's own repo*. They can rename `chart_manage_indicator` to something else; only `technicals.py`'s translation table changes. Agent + prompts + frontend + widget schema are all insulated.
+
+**2. Production posture is a first-class architectural decision, not a deployment note.** §3 (the local-only constraint) interacts with 4.6 (env defaults), 4.9 (README), and 4.10 (CLAUDE.md). All four point at the same fact: *until v2 ships containerised TV, P1.2 is a local-demo capability, and Railway runs in mock mode.* This is the single most important sentence in the proposal. If it doesn't land in CLAUDE.md and README, the architecture won't survive its first deployment review.
+
+**3. The new tools (chart_*) are static-registered regardless of MCP health.** They're always in the registry. Agent always sees them. If MCP is down, they return `tradingview_mcp_unreachable`. **Not dynamic.** Alternative — registering them only when MCP is reachable — was rejected: it changes the agent's known toolset at runtime, which makes prompt-tuning and tests non-deterministic. Constant tool surface is simpler even if some tools sometimes fail.
+
+**4. The split between "agent-visible tools" and "MCP-internal tools".** TradingView MCP exposes 68 tools. We expose four: `get_technical_levels` (orchestrates many) plus the three verb tools. The other 64 are reachable only via `tv_call` inside our code; the agent never sees them. This is deliberate — too many tools degrades model tool-selection accuracy. The four we expose are the ones the wedge prompt needs.
+
+**5. The "open question" anchor.** All five open questions in §8 attach to specific architectural decisions in §4: Q1 (mock-in-prod) → 4.6 + 4.9 + 4.10; Q2 (fork) → 4.9; Q3 (concurrency) → 4.1; Q4 (screenshot URL form) → 4.8; Q5 (new tools vs reuse) → 4.2. They're not orthogonal — answering Q1 differently would change three sections.
