@@ -138,14 +138,20 @@ Every widget has:
     "unrealized_pnl_pct": 0.23,
     "tp_armed_at": 1100,
     "sl_armed_at": 880,
-    "filled_at": "2026-05-19T22:32:00Z"
+    "filled_at": "2026-05-19T22:32:00Z",
+    "news_since_fill": [
+      {"headline": "Goldman raises NVDA price target to $1,200, citing data-center share gains", "source": "Bloomberg", "ts": "2026-05-20T11:14:00Z"}
+    ]
   },
   "sources": [
     {"name": "Alpaca paper fill"},
-    {"name": "Real-time quote"}
+    {"name": "Real-time quote"},
+    {"name": "News since fill"}
   ]
 }
 ```
+
+- `news_since_fill` is **optional**. Include only if `get_company_news(since=filled_at)` returned at least one item. Cap at 3. Order by `ts` descending (newest first). Drop the `{"name":"News since fill"}` source entry when the field is omitted.
 
 ## thesis
 

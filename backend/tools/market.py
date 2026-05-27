@@ -162,14 +162,23 @@ MOCK_NEWS: dict[str, list[dict[str, Any]]] = {
 
 
 async def get_company_news(args: dict[str, Any], user_id: str) -> dict[str, Any]:
-    """Get recent news for one or more tickers (mock for now)."""
+    """Get recent news for one or more tickers (mock for now).
+
+    Optional `since` (ISO-8601) filters to items at or after that timestamp —
+    used by the filled-trade flow to surface what's happened since the fill.
+    """
     tickers = args.get("tickers") or []
     if isinstance(tickers, str):
         tickers = [tickers]
     limit = int(args.get("limit", 5))
+    since = args.get("since")  # ISO-8601 string; lexicographic compare works for ISO-8601 UTC
     out: dict[str, list[dict[str, Any]]] = {}
     for t in tickers[:10]:
         items = MOCK_NEWS.get(t.upper(), [])
+        if since:
+            items = [it for it in items if it["ts"] >= since]
+        # Newest first
+        items = sorted(items, key=lambda it: it["ts"], reverse=True)
         out[t.upper()] = items[:limit]
     return {"news_by_ticker": out, "is_mock": True}
 
@@ -234,7 +243,8 @@ register(
         description=(
             "Get the latest news headlines for one or more tickers. Returns a list of "
             "headlines per ticker, each with source and timestamp. Use this to explain "
-            "moves or surface catalysts."
+            "moves or surface catalysts. Pass `since` (ISO-8601) to filter to news at "
+            "or after that time — e.g. since a trade's fill timestamp."
         ),
         input_schema={
             "type": "object",
@@ -250,6 +260,11 @@ register(
                     "minimum": 1,
                     "maximum": 10,
                     "default": 5,
+                },
+                "since": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "ISO-8601 timestamp; only return news with ts >= this value.",
                 },
             },
             "required": ["tickers"],
