@@ -229,3 +229,59 @@
 - **Proposal 003:** draft the `get_quote` silent-fallback fix (small change — surface `error: "yfinance_fetch_failed"` instead of falling through to mock).
 - **Supabase planning:** the question "how was Supabase initially implemented + how is it intended to be used overall after the priority list" was paused mid-session in plan mode; resume.
 
+---
+
+## 2026-05-28 · Proposals 003–008 applied · P2b FMP research live · P1.1 blocked · active front → P2b
+
+**Built / applied (proposals 003–008 — all drafted by claude through `proposed_changes/`, applied by Tom):**
+
+- **003 + 004 applied** — the two `market.py` mock-data fixes (`get_quote` surfaces `yfinance_fetch_failed` instead of silently masking yfinance exceptions; `MOCK_NEWS` → `_NEWS_TEMPLATES` with per-call timestamps so `since=filled_at` can match) and the `technicals.py` `_branch` coroutine-leak fix (delete the helper, inline `if _use_mock_ta()`). 003 verified **12/12** via a deterministic test now saved at `scripts/test_P1_003.py`. Both applied with inert user-added commented-out stubs at EOF (`get_news_by_sector`, `get_sector_exposure`) — not part of the proposals.
+- **005 drafted + applied** — `execution.py` mock path back-dates `filled_at` by `MOCK_FILL_BACKDATE_MINUTES` (default 30) so the `news_since_fill` window `[filled_at, now]` is non-empty in the immediate post-fill turn. Completes the SCOPE-flow-5 "since you bought" mock demo end-to-end (**001 + 003 + 005** chain). Real Alpaca path untouched.
+- **006 drafted + applied + VERIFIED — P2b: real research data via Financial Modeling Prep.** New `backend/fmp_client.py` (httpx REST on FMP's `/stable/` API; `USE_MOCK_RESEARCH` + `FMP_API_KEY` gating; `fmp_fetch_failed` on error — no silent mock; defensive `_pick(...)` field mapping). Real paths added to all four research tools (`get_company_fundamentals`, `get_consensus_targets`, `get_full_research`, `get_peer_set`); the hand-tuned 7-ticker mock preserved. **`get_full_research` real path returns raw facts** (`needs_synthesis:true`, no thesis/catalysts/risks strings) and the agent synthesises the narrative — new `system.md` section "Research cards — synthesise the narrative when the data is real". `.env.example` + `scripts/fmp_probe.py` (field-name confirmation helper). No pyproject/widget/frontend change. **Verified:** claude ran the key-independent layers (imports/18 tools, mock-first preserved, gating, `fmp_fetch_failed` on all 4 tools); Tom ran Layers 1–3 — a live `analyze AAPL` fired `get_full_research` → real FMP data (BUY, target $324, P/E 37.31x, PEG 1.29, margins 47.86%/32.64%, 70 buy / 7 sell / 110 analysts) → `research_card` with an agent-synthesised, fully-cited thesis. P2b's core works.
+- **007 applied** — latent import bug in the applied 002 `technicals.py`: `from backend.mcp_client` (×4) but `backend/` is **not** a package → `ModuleNotFoundError: No module named 'backend'`. Invisible in mock mode (lazy imports), but would crash the real TradingView path (`USE_MOCK_TA=0`). Fixed to `from mcp_client`. Found while determining 006's import path.
+- **008 applied** — `research_card` price fix, found in 006's Layer-3 run: `analyze AAPL` returned `current_price: null` (yfinance crumb-401 → 003 surfaced the error → agent honestly nulled the price), which **crashes `ResearchCard.tsx`** (`null.toFixed()` / divide-by-null) in the browser. Fix: expose FMP `profile.price` as `current_price` in `get_full_research`/`get_company_fundamentals` real paths (a price source independent of the broken yfinance) + null-guard the renderer + `current_price: number | null` in `widgets.ts` and a note in `widget_contract.md`.
+
+**P1.1 — `filled → live_trade`:**
+
+- The **`accepted` (unfilled) branch is verified against real Alpaca** — a confirmation-style prompt placed a real order (real Alpaca UUID, not `mock_…`) and the agent emitted the honest markdown "working/queued" reply per the system-prompt rule. (An earlier run had hit the mock broker because `USE_MOCK_BROKER=1` was set in the shell env — confirmed via `/healthz` `alpaca_configured:true`.)
+- The **`filled → live_trade` branch is now BLOCKED** — Tom's Alpaca paper account is closed; no fill is possible until it's reopened. Parked (not just pending) in `PRIORITIES.md`.
+
+**Decisions surfaced:**
+
+- **Active front pivoted P4 → P2b.** With P1.1 blocked on the Alpaca account, the build focus moved to P2b (real research data). P4 (auth → persistence + RLS) remains the next track, P4.1 Supabase magic-link auth first (it gates persistence/RLS/memory).
+- **The earlier "how was Supabase initially implemented" scoping exercise is cancelled** — superseded by the decision to implement P4 directly when its turn comes.
+- **Research provider = FMP** (US MVP default). Tom expanded the P2b decision matrix in `PRIORITIES.md` (12 candidates; `DECISION_p2_data_sources.md`) — FMP is the only contender exposing analyst consensus on a free tier; Twelve Data / EODHD are the HK-capable alternatives parked for P7-HK.
+- **`get_full_research` real path returns raw facts; the agent writes the thesis.** FMP has no pre-written thesis. Keeps trust principle #3 intact — agent composes *prose*, never *numbers*. (Pattern from `docs/TRUENORTH_MCP_INTEGRATION.md` §7.)
+- **Import convention locked (codebase-wide):** `backend/` is not a package; the app runs `uvicorn main:app` with `backend/` on `sys.path` (dev *and* Docker/Railway). Sibling modules import top-level — `from mcp_client import`, `from fmp_client import` — **never** `from backend.X` (verified: that raises `ModuleNotFoundError`). 007 fixed the one violation.
+- **`proposed_changes/applied/` archival convention** — on apply, the proposal's `README.md` is renamed `README-<slug>.md`, moved to `applied/`, and the rest of the folder deleted (the code is live). **Tom keeps this manual.**
+
+**Assumptions introduced:**
+
+- **FMP "stable" API field names** are coded defensively (`_pick` with candidate keys) because the docs 403-block automated fetch and no key was available at draft time. `scripts/fmp_probe.py` confirms them on first live run; tighten `_pick` lists if anything maps to `None`.
+- **FMP free tier = ~87 sample symbols (AAPL/TSLA/AMZN…) + 250 calls/day.** Consensus/targets for arbitrary tickers (e.g. CRM) need **FMP Starter (~$22/mo)** — on the free tier a non-sample symbol 403s the consensus calls → `fmp_fetch_failed` (correct, not a bug).
+- **FMP `profile.price` is acceptable as the research-card `current_price`** — a recent close, not a live tick; fine as a context anchor for a research card.
+- **mock-fill back-date (30 min)** must exceed the largest recent-tier `minutes_ago` in `_NEWS_TEMPLATES` (currently 28). Documented cross-file coupling.
+
+**A theme this session — bugs caught by trust-but-verify (each became a proposal):**
+
+- yfinance silently masking failures with mock (Yahoo crumb-401) → **003**.
+- `_branch` leaking an un-awaited coroutine → **004**.
+- `from backend.mcp_client` crashing the real TV path → **007**.
+- `current_price: null` crashing `ResearchCard.tsx` → **008**.
+
+Every one was found by diffing applied vs proposed, running key-independent tests, or reading the actual widget output — not by the happy-path demo.
+
+**Did NOT do:**
+
+- Did NOT verify P1.1's `filled → live_trade` — Alpaca account closed (blocked).
+- Did NOT run P1.2's real TradingView integration test — needs TV Desktop + the sibling `tradesdontlie/tradingview-mcp` clone on a dev machine. **007 now unblocks it** (the import no longer crashes).
+- Did NOT verify FMP on a **non-sample** ticker (CRM / full universe) — needs FMP Starter.
+- Did NOT start P4 (auth) — queued behind P2b.
+
+**Next session:**
+
+- **P2b:** verify a non-sample ticker (CRM) on FMP Starter; eyeball synthesised-thesis quality vs the hand-tuned mocks and tune `system.md` if the prose is thin.
+- **P1.2:** first real TradingView integration test on a dev machine (007 applied → import safe).
+- **P4.1:** Supabase magic-link auth — the next track, gates persistence/RLS/memory.
+- **P1.1:** unblock + verify the `filled → live_trade` path when the Alpaca account is reopened.
+
