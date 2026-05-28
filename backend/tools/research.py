@@ -241,6 +241,7 @@ async def _fmp_fundamentals(ticker: str) -> dict[str, Any]:
         "ticker": ticker,
         "rating": grades["consensus_rating"],
         "target_price": cons["mean_target"],
+        "current_price": prof["price"],  # Proposal 008 — FMP profile price; robust to yfinance being down
         "horizon_months": 12,  # FMP consensus targets are ~12-month
         "fundamentals": {
             "revenue_growth_pct": growth["revenue_growth_pct"],
@@ -299,6 +300,7 @@ async def _fmp_full_research(ticker: str) -> dict[str, Any]:
         "company_name": prof["company_name"],
         "rating": grades["consensus_rating"],
         "target_price": cons["mean_target"],
+        "current_price": prof["price"],  # Proposal 008 — FMP profile price; robust to yfinance being down
         "horizon_months": 12,
         "valuation": {
             "pe_fy25e": rat["pe"],

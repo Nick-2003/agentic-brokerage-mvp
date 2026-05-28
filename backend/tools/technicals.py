@@ -3,7 +3,7 @@
 Two paths per tool, gated by USE_MOCK_TA:
 
   USE_MOCK_TA=1  → deterministic mock data (preserved, matches the demo HTML).
-  USE_MOCK_TA=0  → real TradingView MCP via backend.mcp_client. Requires
+  USE_MOCK_TA=0  → real TradingView MCP via mcp_client. Requires
                    TradingView Desktop running locally with CDP enabled and
                    the tradesdontlie/tradingview-mcp Node server installed.
 
@@ -137,7 +137,7 @@ async def _real_technical_levels(
     both identically. The only differences are `is_mock: False` and
     `source: "tradingview_mcp"`.
     """
-    from backend.mcp_client import MCPClientError, tv_call
+    from mcp_client import MCPClientError, tv_call
 
     try:
         # 1. Health probe
@@ -335,7 +335,7 @@ async def chart_apply_indicator(args: dict[str, Any], user_id: str) -> dict[str,
         return result
 
     try:
-        from backend.mcp_client import MCPClientError, tv_call
+        from mcp_client import MCPClientError, tv_call
 
         full_name, params = _translate_indicator(indicator)
         await tv_call("chart_set_symbol", {"symbol": ticker})
@@ -365,7 +365,7 @@ async def chart_draw_levels(args: dict[str, Any], user_id: str) -> dict[str, Any
         return result
 
     try:
-        from backend.mcp_client import MCPClientError, tv_call
+        from mcp_client import MCPClientError, tv_call
 
         await tv_call("chart_set_symbol", {"symbol": ticker})
         await tv_call("chart_set_timeframe", {"timeframe": timeframe})
@@ -400,7 +400,7 @@ async def chart_scroll_to_date(args: dict[str, Any], user_id: str) -> dict[str, 
         return result
 
     try:
-        from backend.mcp_client import MCPClientError, tv_call
+        from mcp_client import MCPClientError, tv_call
 
         await tv_call("chart_set_symbol", {"symbol": ticker})
         await tv_call("chart_set_timeframe", {"timeframe": timeframe})

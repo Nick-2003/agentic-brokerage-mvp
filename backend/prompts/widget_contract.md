@@ -64,6 +64,8 @@ Every widget has:
 
 `rating` must be one of: `BUY`, `HOLD`, `SELL`.
 
+`current_price` is normally a number (from FMP profile or `get_quote`), but **may be `null`** when no live price source is available (e.g. real-market mode with yfinance down and no FMP profile price). The frontend renders `—` and omits the upside figure in that case — never fabricate a price to fill it.
+
 ## ta_chart
 
 ```json

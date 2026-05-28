@@ -15,7 +15,7 @@ export type Rating = 'BUY' | 'HOLD' | 'SELL';
 export type ResearchCardData = {
   ticker: string;
   company_name: string;
-  current_price: number;
+  current_price: number | null; // null when no live price source (yfinance down + no FMP profile price) — Proposal 008
   currency: string;
   rating: Rating;
   target_price: number;
