@@ -1,17 +1,45 @@
 """Research tools — fundamentals, consensus targets, full thesis data.
 
-Hand-tuned mock data for NVDA / AAPL / MSFT / TSLA / AMD / GOOGL matching the
-demo. Real implementation uses yfinance fundamentals + analyst recommendations.
+Two paths per tool, mock-first (PRIORITIES.md P2b):
+  - USE_MOCK_RESEARCH=1 OR no FMP_API_KEY → hand-tuned mock for 7 demo tickers
+    (NVDA/AAPL/MSFT/TSLA/AMD/GOOGL/TCEHY), matching the demo HTML.
+  - else → real Financial Modeling Prep (FMP) data for ANY US ticker, via
+    backend.fmp_client. On failure, surface `fmp_fetch_failed` (no silent mock).
+
+Key nuance (get_full_research): the mock returns a *finished* thesis/catalysts/
+risks (someone hand-wrote them). FMP has no written thesis, so the real path
+returns the *raw material* (rating, target, valuation, fundamentals, sector,
+recent filings) and the agent synthesises thesis/catalysts/risks itself — see
+the matching rule in backend/prompts/system.md.
 """
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from . import ToolDef, register
 
+# Top-level sibling module (backend/ is NOT a package — the app runs as
+# `uvicorn main:app` with backend/ on sys.path in both dev and Docker/Railway).
+# So this is `from fmp_client`, NOT `from backend.fmp_client`. (The latter
+# raises ModuleNotFoundError — see proposal 007, which fixes the same mistake
+# in the applied technicals.py.)
+from fmp_client import (  # noqa: E402
+    FMPError,
+    financial_growth,
+    fmp_enabled,
+    grades_consensus,
+    price_target_consensus,
+    profile,
+    ratios_ttm,
+    sec_filings,
+    stock_peers,
+)
+
 # ---------------------------------------------------------------------------
-# Per-ticker hand-tuned research data (thesis, catalysts, risks, valuation).
+# Per-ticker hand-tuned research data (mock path). Unchanged — the deterministic
+# demo for the 7 names. Real (FMP) path covers everything else.
 # ---------------------------------------------------------------------------
 
 RESEARCH: dict[str, dict[str, Any]] = {
@@ -199,13 +227,146 @@ _PEER_SET = {
 
 
 # ---------------------------------------------------------------------------
-# Tools
+# FMP real-path builders — each composes our return shape from FMP endpoints,
+# fanning out concurrent calls. Raise FMPError on failure (caller surfaces it).
+# ---------------------------------------------------------------------------
+
+
+async def _fmp_fundamentals(ticker: str) -> dict[str, Any]:
+    prof, rat, growth, cons, grades = await asyncio.gather(
+        profile(ticker), ratios_ttm(ticker), financial_growth(ticker),
+        price_target_consensus(ticker), grades_consensus(ticker),
+    )
+    return {
+        "ticker": ticker,
+        "rating": grades["consensus_rating"],
+        "target_price": cons["mean_target"],
+        "horizon_months": 12,  # FMP consensus targets are ~12-month
+        "fundamentals": {
+            "revenue_growth_pct": growth["revenue_growth_pct"],
+            "gross_margin_pct": rat["gross_margin_pct"],
+            "op_margin_pct": rat["op_margin_pct"],
+            "fcf_margin_pct": rat["fcf_margin_pct"],
+        },
+        "valuation": {
+            "pe_fy25e": rat["pe"],
+            "ev_ebitda": rat["ev_ebitda"],
+            "peg_ratio": rat["peg"],
+            "ev_sales": rat["ev_sales"],
+        },
+        "sector": prof["sector"],
+        "is_mock": False,
+        "sources": [
+            {"name": "FMP — ratios (TTM)"},
+            {"name": "FMP — analyst consensus"},
+            {"name": "FMP — company profile"},
+        ],
+    }
+
+
+async def _fmp_consensus(ticker: str) -> dict[str, Any]:
+    cons, grades = await asyncio.gather(
+        price_target_consensus(ticker), grades_consensus(ticker),
+    )
+    return {
+        "ticker": ticker,
+        "consensus_rating": grades["consensus_rating"],
+        "high_target": cons["high_target"],
+        "median_target": cons["median_target"],
+        "low_target": cons["low_target"],
+        "n_analysts": grades["n_analysts"],
+        "distribution": grades["distribution"],
+        # FMP's stable consensus endpoint doesn't expose 30-day upgrade/downgrade
+        # counts cleanly — omit rather than fabricate (trust principle #5).
+        "is_mock": False,
+        "sources": [{"name": "FMP — price target consensus"}, {"name": "FMP — analyst grades"}],
+    }
+
+
+async def _fmp_full_research(ticker: str) -> dict[str, Any]:
+    """Real path returns RAW FACTS, not a written thesis.
+
+    No `thesis` / `catalysts` / `risks` keys — the agent synthesises those from
+    these facts + filings (see system.md). This is the deliberate difference
+    from the mock, which returns finished prose.
+    """
+    prof, rat, growth, cons, grades, filings = await asyncio.gather(
+        profile(ticker), ratios_ttm(ticker), financial_growth(ticker),
+        price_target_consensus(ticker), grades_consensus(ticker), sec_filings(ticker, limit=3),
+    )
+    return {
+        "ticker": ticker,
+        "company_name": prof["company_name"],
+        "rating": grades["consensus_rating"],
+        "target_price": cons["mean_target"],
+        "horizon_months": 12,
+        "valuation": {
+            "pe_fy25e": rat["pe"],
+            "ev_ebitda": rat["ev_ebitda"],
+            "peg_ratio": rat["peg"],
+            "ev_sales": rat["ev_sales"],
+        },
+        "fundamentals": {
+            "revenue_growth_pct": growth["revenue_growth_pct"],
+            "gross_margin_pct": rat["gross_margin_pct"],
+            "op_margin_pct": rat["op_margin_pct"],
+            "fcf_margin_pct": rat["fcf_margin_pct"],
+        },
+        "sector": prof["sector"],
+        "analyst_distribution": grades["distribution"],
+        "n_analysts": grades["n_analysts"],
+        "recent_filings": filings,
+        # NOTE: no thesis/catalysts/risks — agent writes them from these facts.
+        "needs_synthesis": True,
+        "is_mock": False,
+        "sources": [
+            {"name": "FMP — consensus + ratios + profile"},
+            {"name": "SEC EDGAR (via FMP) — recent filings"},
+        ],
+    }
+
+
+async def _fmp_peers(ticker: str) -> dict[str, Any]:
+    prof = await profile(ticker)
+    sector = prof["sector"]
+    peers = await stock_peers(ticker)
+    if not peers:
+        # Fall back to the static sector map (editorial peer choice).
+        peers = [p for p in _PEER_SET.get(sector, []) if p != ticker]
+    peers = peers[:4]
+
+    async def _peer_row(p: str) -> dict[str, Any] | None:
+        try:
+            rat, grades = await asyncio.gather(ratios_ttm(p), grades_consensus(p))
+        except FMPError:
+            return None
+        return {
+            "ticker": p,
+            "pe_fy25e": rat["pe"],
+            "ev_ebitda": rat["ev_ebitda"],
+            "peg_ratio": rat["peg"],
+            "ev_sales": rat["ev_sales"],
+            "rating": grades["consensus_rating"],
+        }
+
+    rows = [r for r in await asyncio.gather(*[_peer_row(p) for p in peers]) if r]
+    return {"sector": sector, "anchor": ticker, "peers": rows, "is_mock": False,
+            "sources": [{"name": "FMP — stock peers + ratios"}]}
+
+
+# ---------------------------------------------------------------------------
+# Tools (mock-first dispatch)
 # ---------------------------------------------------------------------------
 
 
 async def get_company_fundamentals(args: dict[str, Any], user_id: str) -> dict[str, Any]:
-    """Pull a single ticker's financial snapshot."""
+    """Pull a single ticker's financial snapshot (FMP real, or mock for the 7)."""
     ticker = (args.get("ticker") or "").upper()
+    if fmp_enabled():
+        try:
+            return await _fmp_fundamentals(ticker)
+        except FMPError as e:
+            return {"error": e.code, "ticker": ticker, "message": str(e)}
     r = RESEARCH.get(ticker)
     if not r:
         return {"error": "no_coverage", "ticker": ticker, "message": f"No coverage data for {ticker} yet."}
@@ -222,12 +383,16 @@ async def get_company_fundamentals(args: dict[str, Any], user_id: str) -> dict[s
 
 
 async def get_consensus_targets(args: dict[str, Any], user_id: str) -> dict[str, Any]:
-    """Get the sell-side consensus picture for a ticker."""
+    """Get the sell-side consensus picture for a ticker (FMP real, or mock)."""
     ticker = (args.get("ticker") or "").upper()
+    if fmp_enabled():
+        try:
+            return await _fmp_consensus(ticker)
+        except FMPError as e:
+            return {"error": e.code, "ticker": ticker, "message": str(e)}
     r = RESEARCH.get(ticker)
     if not r:
         return {"error": "no_coverage", "ticker": ticker}
-    # Mock distribution around our own target
     target = r["target_price"]
     return {
         "ticker": ticker,
@@ -243,12 +408,18 @@ async def get_consensus_targets(args: dict[str, Any], user_id: str) -> dict[str,
 
 
 async def get_full_research(args: dict[str, Any], user_id: str) -> dict[str, Any]:
-    """Convenience tool — returns thesis + catalysts + risks + valuation in one call.
+    """Full research package in one call.
 
-    Lets the agent produce a research_card widget without orchestrating multiple
-    smaller tool calls. Cheaper on tokens and faster.
+    Mock: finished thesis + catalysts + risks + valuation (hand-written prose).
+    Real (FMP): RAW FACTS only (`needs_synthesis: true`) — the agent writes the
+    thesis/catalysts/risks from the facts + recent filings (see system.md).
     """
     ticker = (args.get("ticker") or "").upper()
+    if fmp_enabled():
+        try:
+            return await _fmp_full_research(ticker)
+        except FMPError as e:
+            return {"error": e.code, "ticker": ticker, "message": str(e)}
     r = RESEARCH.get(ticker)
     if not r:
         return {"error": "no_coverage", "ticker": ticker, "message": f"No coverage for {ticker} yet."}
@@ -258,6 +429,11 @@ async def get_full_research(args: dict[str, Any], user_id: str) -> dict[str, Any
 async def get_peer_set(args: dict[str, Any], user_id: str) -> dict[str, Any]:
     """Return the peer set for a ticker, with valuation data for each peer."""
     ticker = (args.get("ticker") or "").upper()
+    if fmp_enabled():
+        try:
+            return await _fmp_peers(ticker)
+        except FMPError as e:
+            return {"error": e.code, "ticker": ticker, "message": str(e)}
     r = RESEARCH.get(ticker)
     if not r:
         return {"error": "no_coverage", "ticker": ticker}
@@ -274,7 +450,7 @@ async def get_peer_set(args: dict[str, Any], user_id: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Registration
+# Registration (unchanged signatures — only the data source behind them changed)
 # ---------------------------------------------------------------------------
 
 register(
