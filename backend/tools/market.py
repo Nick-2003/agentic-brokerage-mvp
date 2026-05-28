@@ -94,7 +94,15 @@ async def _fetch_yfinance_quote(ticker: str) -> dict[str, Any] | None:
 
 
 async def get_quote(args: dict[str, Any], user_id: str) -> dict[str, Any]:
-    """Get one or more current quotes."""
+    """Get one or more current quotes.
+
+    Proposal 003 — bug A: when the real (yfinance) path RAISES we surface the
+    failure per-ticker as `source: "yfinance_error"` + `error: "yfinance_fetch_failed"`,
+    rather than silently falling through to `_mock_quote`. The `None` return
+    path (unknown ticker) still falls through to mock — that's a "ticker
+    coverage" signal, not a "provider broken" signal. Same discipline as
+    `alpaca_fetch_failed` in execution.py.
+    """
     tickers = args.get("tickers") or []
     if isinstance(tickers, str):
         tickers = [tickers]
@@ -110,8 +118,20 @@ async def get_quote(args: dict[str, Any], user_id: str) -> dict[str, Any]:
                 if q is not None:
                     results.append({**q, "source": "yfinance"})
                     continue
-            except Exception:
-                pass
+                # yfinance returned None → unknown ticker. Fall through to
+                # _mock_quote (synthetic) is acceptable for the demo.
+            except Exception as e:
+                # yfinance was expected to work but raised. Surface the
+                # per-ticker failure honestly — do NOT silently fall through
+                # to mock, per the "no silent fallback" rule
+                # (SESSION_LOG.md 2026-05-20).
+                results.append({
+                    "ticker": t.upper(),
+                    "error": "yfinance_fetch_failed",
+                    "message": str(e),
+                    "source": "yfinance_error",
+                })
+                continue
         m = _mock_quote(t)
         if m is not None:
             results.append({**m, "source": "mock"})
@@ -119,44 +139,76 @@ async def get_quote(args: dict[str, Any], user_id: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Mock news — hand-tuned headlines tied to demo flows.
+# Mock news — templates with offset-from-now (minutes); timestamps computed
+# at call time so the `since=filled_at` filter introduced by proposal 001
+# can actually match recent items.
+#
+# Pre-003, mock news timestamps were anchored to `_NOW = datetime.now(...)` at
+# module-import time, so they were strictly before the moment the backend
+# booted. Any `since=filled_at` filter (filled_at always > module-load _NOW)
+# returned the empty set — news_since_fill could never populate in mock mode.
+#
+# Headlines and sources are preserved verbatim from the pre-003 MOCK_NEWS;
+# only the timestamp encoding changed. Each ticker keeps at least one entry
+# with `minutes_ago` ≤ 30 so news_since_fill can populate for flows where
+# filled_at is a few minutes in the past (e.g. once execution.py back-dates
+# its mock fills — see proposal 003 README's "Follow-ups").
 # ---------------------------------------------------------------------------
 
-_NOW = datetime.now(timezone.utc)
-MOCK_NEWS: dict[str, list[dict[str, Any]]] = {
+_NEWS_TEMPLATES: dict[str, list[dict[str, Any]]] = {
     "NVDA": [
-        {"headline": "Blackwell production ramps faster than expected; lead times shrink to 8 weeks", "source": "Bloomberg", "ts": (_NOW - timedelta(hours=2)).isoformat()},
-        {"headline": "NVIDIA secures multi-year deal with Saudi PIF for sovereign AI infrastructure", "source": "FT", "ts": (_NOW - timedelta(hours=6)).isoformat()},
-        {"headline": "Unusual call volume at $960 strike ahead of earnings next Wednesday", "source": "CNBC", "ts": (_NOW - timedelta(days=1)).isoformat()},
-        {"headline": "Goldman raises NVDA price target to $1,200, citing data-center share gains", "source": "Bloomberg", "ts": (_NOW - timedelta(hours=2)).isoformat()},
+        {"headline": "Goldman raises NVDA price target to $1,200, citing data-center share gains",
+         "source": "Bloomberg", "minutes_ago": 5},
+        {"headline": "Blackwell production ramps faster than expected; lead times shrink to 8 weeks",
+         "source": "Bloomberg", "minutes_ago": 18},
+        {"headline": "NVIDIA secures multi-year deal with Saudi PIF for sovereign AI infrastructure",
+         "source": "FT", "minutes_ago": 360},  # 6 hours
+        {"headline": "Unusual call volume at $960 strike ahead of earnings next Wednesday",
+         "source": "CNBC", "minutes_ago": 1440},  # 24 hours
     ],
     "AAPL": [
-        {"headline": "Apple ships Vision Pro 2 to enterprise customers ahead of consumer launch", "source": "Bloomberg", "ts": (_NOW - timedelta(hours=3)).isoformat()},
-        {"headline": "iPhone 17 supply chain checks point to record Q4 shipments", "source": "Reuters", "ts": (_NOW - timedelta(hours=8)).isoformat()},
-        {"headline": "Services revenue crosses $100B annual run-rate for first time", "source": "WSJ", "ts": (_NOW - timedelta(days=1)).isoformat()},
+        {"headline": "Apple ships Vision Pro 2 to enterprise customers ahead of consumer launch",
+         "source": "Bloomberg", "minutes_ago": 12},
+        {"headline": "iPhone 17 supply chain checks point to record Q4 shipments",
+         "source": "Reuters", "minutes_ago": 480},  # 8 hours
+        {"headline": "Services revenue crosses $100B annual run-rate for first time",
+         "source": "WSJ", "minutes_ago": 1440},
     ],
     "MSFT": [
-        {"headline": "EU regulators open new probe into Microsoft–OpenAI partnership structure", "source": "Reuters", "ts": (_NOW - timedelta(hours=4)).isoformat()},
-        {"headline": "Azure AI revenue tops $10B annual run-rate, up 280% YoY", "source": "WSJ", "ts": (_NOW - timedelta(hours=12)).isoformat()},
-        {"headline": "Copilot enterprise seats hit 50M as Office bundling kicks in", "source": "Bloomberg", "ts": (_NOW - timedelta(days=1)).isoformat()},
+        {"headline": "EU regulators open new probe into Microsoft–OpenAI partnership structure",
+         "source": "Reuters", "minutes_ago": 22},
+        {"headline": "Azure AI revenue tops $10B annual run-rate, up 280% YoY",
+         "source": "WSJ", "minutes_ago": 720},  # 12 hours
+        {"headline": "Copilot enterprise seats hit 50M as Office bundling kicks in",
+         "source": "Bloomberg", "minutes_ago": 1440},
     ],
     "TSLA": [
-        {"headline": "Robotaxi event teased for August; Musk confirms 'unsupervised FSD' demo", "source": "CNBC", "ts": (_NOW - timedelta(hours=1)).isoformat()},
-        {"headline": "Cybertruck deliveries to surpass 30K in Q2 — analyst note", "source": "Reuters", "ts": (_NOW - timedelta(hours=7)).isoformat()},
+        {"headline": "Robotaxi event teased for August; Musk confirms 'unsupervised FSD' demo",
+         "source": "CNBC", "minutes_ago": 8},
+        {"headline": "Cybertruck deliveries to surpass 30K in Q2 — analyst note",
+         "source": "Reuters", "minutes_ago": 420},  # 7 hours
     ],
     "AMD": [
-        {"headline": "MI325 production samples shipping to hyperscale customers", "source": "Bloomberg", "ts": (_NOW - timedelta(hours=5)).isoformat()},
-        {"headline": "AMD takes share in server CPU market, hits 33% unit share", "source": "WSJ", "ts": (_NOW - timedelta(hours=11)).isoformat()},
-        {"headline": "Earnings preview: Q1 guide watched for AI accelerator ramp", "source": "CNBC", "ts": (_NOW - timedelta(days=1)).isoformat()},
+        {"headline": "MI325 production samples shipping to hyperscale customers",
+         "source": "Bloomberg", "minutes_ago": 28},
+        {"headline": "AMD takes share in server CPU market, hits 33% unit share",
+         "source": "WSJ", "minutes_ago": 660},  # 11 hours
+        {"headline": "Earnings preview: Q1 guide watched for AI accelerator ramp",
+         "source": "CNBC", "minutes_ago": 1440},
     ],
     "GOOGL": [
-        {"headline": "Waymo expands to Phoenix, ride volume up 5× YoY", "source": "Reuters", "ts": (_NOW - timedelta(hours=4)).isoformat()},
-        {"headline": "DOJ search remedy ruling expected Q3", "source": "WSJ", "ts": (_NOW - timedelta(days=1)).isoformat()},
+        {"headline": "Waymo expands to Phoenix, ride volume up 5× YoY",
+         "source": "Reuters", "minutes_ago": 24},
+        {"headline": "DOJ search remedy ruling expected Q3",
+         "source": "WSJ", "minutes_ago": 1440},
     ],
     "TCEHY": [
-        {"headline": "Tencent games revenue re-accelerates on stronger domestic release slate", "source": "Bloomberg", "ts": (_NOW - timedelta(hours=3)).isoformat()},
-        {"headline": "Video Accounts ad load rising — analysts lift advertising estimates", "source": "FT", "ts": (_NOW - timedelta(hours=9)).isoformat()},
-        {"headline": "Tencent extends HK$100B+ buyback; board signals continued repurchases", "source": "Reuters", "ts": (_NOW - timedelta(days=1)).isoformat()},
+        {"headline": "Tencent games revenue re-accelerates on stronger domestic release slate",
+         "source": "Bloomberg", "minutes_ago": 18},
+        {"headline": "Video Accounts ad load rising — analysts lift advertising estimates",
+         "source": "FT", "minutes_ago": 540},  # 9 hours
+        {"headline": "Tencent extends HK$100B+ buyback; board signals continued repurchases",
+         "source": "Reuters", "minutes_ago": 1440},
     ],
 }
 
@@ -166,6 +218,13 @@ async def get_company_news(args: dict[str, Any], user_id: str) -> dict[str, Any]
 
     Optional `since` (ISO-8601) filters to items at or after that timestamp —
     used by the filled-trade flow to surface what's happened since the fill.
+
+    Proposal 003 — bug B: timestamps are computed at CALL TIME, not at
+    module-import time, so the `since=filled_at` filter can actually match
+    recent items. Pre-003, the static anchor `_NOW = datetime.now(...)` at
+    module load meant every mock-news ts was strictly before the moment the
+    backend booted, and therefore strictly before any post-boot filled_at —
+    the filter rejected everything.
     """
     tickers = args.get("tickers") or []
     if isinstance(tickers, str):
@@ -173,8 +232,17 @@ async def get_company_news(args: dict[str, Any], user_id: str) -> dict[str, Any]
     limit = int(args.get("limit", 5))
     since = args.get("since")  # ISO-8601 string; lexicographic compare works for ISO-8601 UTC
     out: dict[str, list[dict[str, Any]]] = {}
+    now = datetime.now(timezone.utc)
     for t in tickers[:10]:
-        items = MOCK_NEWS.get(t.upper(), [])
+        templates = _NEWS_TEMPLATES.get(t.upper(), [])
+        items = [
+            {
+                "headline": tpl["headline"],
+                "source": tpl["source"],
+                "ts": (now - timedelta(minutes=tpl["minutes_ago"])).isoformat(),
+            }
+            for tpl in templates
+        ]
         if since:
             items = [it for it in items if it["ts"] >= since]
         # Newest first
@@ -292,3 +360,30 @@ register(
         thought_template="Reading S&P futures, 10Y yield, DXY, and Fed calendar",
     )
 )
+
+# register(
+#     ToolDef(
+#         name="get_news_by_sector",
+#         description=(
+#             "Get the latest news headlines for one or more sectors. Returns a list of "
+#             "headlines per sector, each with source and timestamp. Use this to explain "
+#             "moves or surface catalysts. Pass `since` (ISO-8601) to filter to news at "
+#             "or after that time — e.g. since a trade's fill timestamp."
+#         ),
+#         input_schema={
+#             "type": "object",
+#             "properties": {
+#                 "sectors": {
+#                     "type": "array",
+#                     "items": {"type": "string"},
+#                     "minItems": 1,
+#                     "maxItems": 10,
+#                 },
+#             },
+#             "required": ["sectors"],
+#             "additionalProperties": False,
+#         },
+#         callable=get_news_by_sector,
+#         thought_template="Scanning news catalysts for {sectors}",
+#     )
+# )

@@ -10,7 +10,7 @@ Two paths per tool, gated by USE_MOCK_TA:
 Mock-first preserved per CLAUDE.md / SCOPE.md discipline — never delete the
 mock path. Real path is the wedge; mock keeps the deterministic demo working
 when TV Desktop isn't around (and is the Railway production default until
-containerised TV ships, see proposed_changes/002-tradingview-mcp/README.md §3).
+containerised TV ships, see proposed_changes/applied/002-tradingview-mcp/README.md §3).
 
 New tools added for the "talk to your chart" wedge:
     - chart_apply_indicator     "add RSI to NVDA"
@@ -297,18 +297,6 @@ def _infer_trend(price: float, indicators: dict[str, float]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Branch dispatcher — every public tool calls _branch() to pick mock vs real.
-# ---------------------------------------------------------------------------
-
-
-async def _branch(real_coro, mock_coro):
-    """Pick the right branch based on USE_MOCK_TA."""
-    if _use_mock_ta():
-        return await mock_coro
-    return await real_coro
-
-
-# ---------------------------------------------------------------------------
 # Public tools
 # ---------------------------------------------------------------------------
 
@@ -322,10 +310,14 @@ async def get_technical_levels(args: dict[str, Any], user_id: str) -> dict[str, 
     ticker = (args.get("ticker") or "").upper()
     timeframe = args.get("timeframe", "1D")
     indicators = args.get("indicators") or ["SMA 50", "SMA 200"]
-    return await _branch(
-        _real_technical_levels(ticker, timeframe, indicators),
-        _mock_technical_levels(ticker, timeframe, indicators),
-    )
+    # Inline if/else (matches the three verb tools below). The previous
+    # `_branch(real_coro, mock_coro)` helper eagerly constructed both
+    # coroutines and only awaited one — the other leaked, triggering a
+    # `RuntimeWarning: coroutine '_mock_technical_levels' was never awaited`.
+    # Proposal 004.
+    if _use_mock_ta():
+        return await _mock_technical_levels(ticker, timeframe, indicators)
+    return await _real_technical_levels(ticker, timeframe, indicators)
 
 
 async def chart_apply_indicator(args: dict[str, Any], user_id: str) -> dict[str, Any]:
@@ -623,3 +615,29 @@ register(
         thought_template="Computing 60-day correlation matrix",
     )
 )
+
+# register(
+#     ToolDef(
+#         name="get_sector_exposure",
+#         description=(
+#             "Compute a 60-day rolling sector exposure for a set of tickers. Returns "
+#             "the sector mix plus the average exposure. Use this for portfolio_risk "
+#             "widgets when the user asks about sector exposure."
+#         ),
+#         input_schema={
+#             "type": "object",
+#             "properties": {
+#                 "tickers": {
+#                     "type": "array",
+#                     "items": {"type": "string"},
+#                     "minItems": 2,
+#                     "maxItems": 12,
+#                 }
+#             },
+#             "required": ["tickers"],
+#             "additionalProperties": False,
+#         },
+#         callable=get_sector_exposure,
+#         thought_template="Computing 60-day sector exposure",
+#     )
+# )
