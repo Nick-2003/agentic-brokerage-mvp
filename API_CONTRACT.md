@@ -1,199 +1,208 @@
 # API_CONTRACT.md — Agentic Brokerage MVP
 
-**Last changed:** 2026-05-22 · **Status:** draft v0.1
+**Last changed:** 2026-05-29 · **Status:** v1.0 — matches the live Python backend
 
 This is the **single source of truth for the HTTP boundary** between:
 
-- **Frontend** — Next.js PWA on Vercel (the mobile app). Owns `frontend/`.
-- **Backend** — Node serverless on Vercel, evolved from `github.com/Nick-2003/Finance_Chatbot`. Owns `backend/`.
+- **Frontend** — Next.js 15 PWA on Vercel (the mobile app). Owns `frontend/`.
+- **Backend** — **Python · FastAPI + uvicorn**, deployed on **Railway**. Owns `backend/`. Runs a Claude agent loop (Anthropic SDK directly) and streams Server-Sent Events. (The earlier Node-on-Vercel design in this doc was wrong and never built — Plan A / Python is LOCKED, see `CLAUDE.md`.)
 
 **Rules:**
 1. Neither side ships a field that isn't in this document.
-2. Any change is a PR that edits this file *first*, reviewed by both devs.
-3. If this doc and `CLAUDE.md` disagree, the same PR fixes one of them — never leave them divergent.
+2. Field names are **`snake_case`** (Python convention) — on the wire, in widgets, everywhere.
+3. The widget `data` schemas are owned by **`backend/prompts/widget_contract.md`** and mirrored in **`frontend/lib/widgets.ts`** — change those two together; this doc summarises them.
+4. If this doc and `CLAUDE.md` / `widget_contract.md` disagree, the same change fixes one of them — never leave them divergent.
 
 ---
 
 ## 1. Environments & base URL
 
-- The frontend reads the backend base URL from `NEXT_PUBLIC_API_BASE_URL`. **Never hardcoded.**
-- Local dev: `http://localhost:3000` (via `vercel dev`). Production: the deployed Vercel URL.
-- All endpoints live under `/api`.
+- Backend runs as `uvicorn main:app` (dev: `cd backend && uv run uvicorn main:app --reload --port 8000`; prod: Railway, see `backend/railway.json`). `backend/` is on `sys.path` — there is no `backend.` package prefix.
+- Frontend reaches the backend either via Next.js rewrites (`/api/* → <backend>/api/*`, see `frontend/next.config.js`) or directly via `NEXT_PUBLIC_API_URL`. **Never hardcoded.**
+- Local dev: backend `http://localhost:8000`, frontend `http://localhost:3000`.
+- Only two endpoints exist today: `GET /healthz` and `POST /api/chat` (§5, §6). Everything else is **planned, not built** (§9).
 
-## 2. Authentication
+## 2. Authentication — NONE yet ⚠️
 
-- Scheme: **Supabase JWT** (magic-link login). The frontend obtains the session access token from Supabase Auth and sends it on every request:
-
-  ```
-  Authorization: Bearer <supabase_access_token>
-  ```
-
-- The backend verifies the token and derives `userId` server-side. **The frontend never sends `userId` in the body.**
-- **Transition mode:** until multi-user auth lands, the backend MAY accept tokenless requests and fall back to a single dev user (`gerald`). This is dev-only and must be removed before any external tester. See migration Phase 3.
-- Missing/invalid token when one is required → `401` (see §8).
+- **There is currently no auth.** `POST /api/chat` takes a `user_id` **in the request body**, defaulting to the string `"demo"`. It is client-supplied and therefore spoofable (SECURITY_AUDIT **HIGH-2**).
+- **Do not ship to separate real users in this state.** Real auth is **P4.1** (Supabase magic-link): the frontend will send `Authorization: Bearer <supabase_jwt>`, the backend will verify it and derive `user_id` server-side, and `user_id` will be **removed from the request body**. When P4.1 lands, update §5 + this section together.
+- No endpoint returns `401` today (nothing is gated).
 
 ## 3. CORS
 
-For the frontend origin, the backend must return:
+Configured in `backend/main.py` via `CORSMiddleware`:
 
-- `Access-Control-Allow-Origin: <exact frontend origin>` — an exact origin in production, not `*`.
-- `Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS`
-- `Access-Control-Allow-Headers: Content-Type, Authorization` — **`Authorization` is required.**
-- `OPTIONS` preflight answered with `204`.
+- `allow_origins` = the `CORS_ALLOW_ORIGINS` env var (comma-separated), default `http://localhost:3000`.
+- `allow_credentials` = `true`; `allow_methods` = `*`; `allow_headers` = `*`.
+- In production set `CORS_ALLOW_ORIGINS` to the exact Vercel origin (not `*`). Note: when the frontend uses Next.js rewrites, requests are same-origin and CORS doesn't apply — CORS only matters for direct `NEXT_PUBLIC_API_URL` calls (e.g. `pnpm dev`).
 
 ## 4. Conventions
 
 - JSON bodies, UTF-8.
-- Field names: `camelCase`.
-- Timestamps: ISO 8601 UTC, e.g. `2026-05-22T09:57:32Z`.
-- Money: JSON **numbers** in the instrument's quote currency (USD) — not strings, not pre-formatted.
-- Errors: every error response uses the shape in §8.
+- **Field names: `snake_case`.**
+- Timestamps: ISO 8601 UTC strings, e.g. `2026-05-29T13:57:16Z` (and fractional-second forms from `datetime.isoformat()`).
+- Money: JSON **numbers**. A separate `currency` field carries the **symbol string** (`"$"`, `"€"`, `"£"`) — values are not pre-formatted.
+- `*_html` fields may contain only `<strong>` and `<em>` (sanitised on render). No other tags.
+- Numbers in widgets must trace to a tool result (the *"no number without a source"* trust rule). It is enforced by the system prompt, surfaced via the `sources` array (§7) — there is **no** machine-checked `tool_call_id` link on widget fields today (the validator in `CLAUDE.md` is deliberately deferred).
 
 ---
 
-## 5. `POST /api/chat` — the conversation endpoint
+## 5. `GET /healthz` — liveness + config diagnostics
 
-The one endpoint that matters. The frontend sends the conversation; the backend streams back thinking breadcrumbs and generative widgets.
-
-### Request
-
-Headers: `Authorization: Bearer ...`, `Content-Type: application/json`, `Accept: text/event-stream`.
-
-Body:
+No auth, no body. Returns `200` with:
 
 ```json
 {
-  "conversationId": "uuid-or-null",
-  "messages": [
-    { "role": "user", "content": "what's NVDA doing today?" }
-  ],
-  "context": {
-    "activeAsset": "NVDA",
-    "timeframe": "1D",
-    "position": { "symbol": "NVDA", "side": "LONG", "entry": 920.0, "size": 10 }
-  }
+  "ok": true,
+  "model": "claude-opus-4-5",
+  "tools_registered": ["get_portfolio", "get_quote", "...", "chart_apply_indicator"],
+  "alpaca_configured": true,
+  "anthropic_key_present": true
 }
 ```
 
-- `messages` — full running history; the last item is the new user turn. Required, non-empty.
-- `conversationId` — `null` on the first turn. The backend returns the created id in the `done` event.
-- `context` — optional. Mirrors what the user is looking at; `position` may be omitted.
-
-### Response — Server-Sent Events
-
-`Content-Type: text/event-stream`. The backend emits a sequence of events, each:
-
-```
-event: <type>
-data: <single-line JSON>
-
-```
-
-> **Backend note:** the frontend consumes a *stream of events*. It does **not** care whether the backend emits them token-by-token in real time or flushes them all in one burst at the end. A "burst" implementation satisfies this contract today; true streaming can be added later **without any frontend change**. See migration Phase 0.
-
-Event types, in typical emission order:
-
-| event         | `data` payload                                              | meaning                                              |
-|---------------|-------------------------------------------------------------|------------------------------------------------------|
-| `thought`     | `{ "text": "Reading NVDA 10-Q…" }`                          | one human-readable breadcrumb. 0..N.                 |
-| `tool_call`   | `{ "id": "tc_1", "name": "get_quote", "args": { ... } }`    | a tool was invoked. diagnostic.                      |
-| `tool_result` | `{ "id": "tc_1", "ok": true, "summary": "NVDA $942.50" }`   | result of the matching `tool_call`. diagnostic.      |
-| `widget`      | a Widget object (§6)                                        | a generative UI card. 0..N.                          |
-| `message`     | `{ "text": "markdown…" }`                                   | plain chat reply (loose, not pinnable). 0..1.        |
-| `error`       | `{ "code": "...", "message": "..." }`                       | terminal failure.                                    |
-| `done`        | `{ "conversationId": "uuid", "elapsedMs": 8421 }`           | stream complete. always the final event on success. |
-
-Rules:
-
-- A successful response contains **at least one** of `widget` or `message`.
-- A `tool_call` and its `tool_result` share the same `id`.
-- `done` is always the final event on success; `error` is the final event on failure.
-- Frontend rendering: `thought` → breadcrumbs, `widget` → cards, `message` → chat bubble. `tool_call` / `tool_result` are shown in **dev mode only**.
+- `model` — the `ANTHROPIC_MODEL` in use.
+- `tools_registered` — the agent's tool names (18 as of 2026-05-29). Diagnostic only; not part of the chat contract.
+- `alpaca_configured` / `anthropic_key_present` — booleans derived from key presence/prefix. Used to spot mis-configured deploys.
 
 ---
 
-## 6. Widget objects
+## 6. `POST /api/chat` — the conversation endpoint
 
-Every `widget` event's `data` is one object matching this envelope:
+The one endpoint that matters. The frontend sends a single user message; the backend streams thinking breadcrumbs and one generative widget (or a plain message).
+
+### Request
+
+Headers: `Content-Type: application/json` (and `Accept: text/event-stream`). No `Authorization` yet (§2).
+
+Body (`ChatRequest` in `main.py`):
+
+```json
+{
+  "message": "what's NVDA doing today?",
+  "user_id": "demo"
+}
+```
+
+- `message` — **required**, string, length 1–4096. The single new user turn. *(There is no server-side history today — each call is one turn. Multi-turn / `conversation_id` arrives with P4.2, §9.)*
+- `user_id` — optional, string, length 1–128, default `"demo"`. **Client-supplied today** (§2); will move to the JWT at P4.1.
+
+### Response — Server-Sent Events
+
+`Content-Type: text/event-stream` (via `sse-starlette`). The backend emits a sequence of frames, each:
+
+```
+event: <type>\r\n
+data: <single-line JSON>\r\n
+\r\n
+```
+
+> **Framing notes (these have bitten us — keep them):**
+> - Lines end with `\r\n`; frames are separated by a blank line, i.e. `\r\n\r\n`. The frontend SSE parser (`frontend/lib/sse.ts`) splits frames on `/\r?\n\r?\n/` and lines on `/\r?\n/`. Splitting on `\n\n` alone parses **zero** events — that was a real bug.
+> - `sse-starlette` injects periodic keep-alive **comment** lines (`: ping - <timestamp>`). They are not events; ignore any line starting with `:`.
+> - Emission is incremental but the contract only promises a *stream of events* in order — a consumer must not assume timing.
+
+Event types (`agent.py`), in typical emission order:
+
+| `event`       | `data` payload                                              | meaning |
+|---------------|-------------------------------------------------------------|---------|
+| `thought`     | `{ "text": "Reading your portfolio…" }`                     | one human-readable breadcrumb. 0..N. |
+| `tool_call`   | `{ "id": "toolu_…", "name": "get_quote", "args": { … } }`   | a tool was invoked. diagnostic. |
+| `tool_result` | `{ "id": "toolu_…", "ok": true, "summary": "get_quote → 1 quotes" }` | result of the matching `tool_call` (same `id`). diagnostic. |
+| `widget`      | a Widget object — `{ "type", "data", "sources" }` (§7)      | the generative UI card. Typically exactly one, terminal. |
+| `message`     | `{ "text": "markdown…" }`                                   | plain markdown reply (loose chat, not pinnable). Terminal alternative to `widget`. |
+| `error`       | `{ "message": "…" }`                                         | failure. terminal. |
+| `done`        | `{ "elapsed_ms": 8421, "iterations": 3 }`                   | stream complete. always the final event on success. |
+
+Rules:
+
+- A successful turn ends with **exactly one** terminal payload — a `widget` **or** a `message` — followed by `done`.
+- `tool_call` and its `tool_result` share the same `id`. Tool calls may run in parallel; results may arrive in any order.
+- On failure, an `error` event is emitted; `done` may or may not follow. (Pre-stream failures surface as a normal HTTP error instead.)
+- Frontend rendering: `thought` → breadcrumbs; `widget` → card; `message` → chat bubble; `tool_call` / `tool_result` → **dev mode only**.
+
+---
+
+## 7. Widget objects
+
+Every `widget` event's `data` is one object with this envelope:
 
 ```json
 {
   "type": "research_card",
-  "id": "w_abc123",
-  "title": "NVDA — Equity Research",
-  "data": { "...": "type-specific, see below" },
+  "data": { "…": "type-specific, see below" },
   "sources": [
-    { "name": "Alpaca", "toolCallId": "tc_1", "url": null }
-  ],
-  "pinnable": true
+    { "name": "FMP — consensus + ratios + profile" },
+    { "name": "SEC 10-Q", "url": "https://www.sec.gov/…" }
+  ]
 }
 ```
 
-- `type` — one of the schemas below.
-- `sources` — **required and non-empty whenever `data` contains any number.** This enforces the *"no number without a source"* trust rule from `CLAUDE.md`: every numeric value must trace to a `tool_call` via `toolCallId`.
-- `pinnable` — whether the user may pin this card to their dashboard.
+- `type` — one of the 8 types below (`frontend/lib/widgets.ts::KNOWN_WIDGET_TYPES`). Unknown types fall back to a plain markdown bubble.
+- `data` — type-specific (below). **`snake_case`.**
+- `sources` — array of `{ "name": string, "url"?: string }`. Names the data behind the numbers. There is no `id` / `title` / `pinnable` / `tool_call_id` field (those were from the old Node design).
 
-### Widget types — the `data` shape per `type`
+### The 8 widget `data` schemas
 
-| `type`           | `data` fields |
-|------------------|---------------|
-| `morning_brief`  | `portfolioPnl: {usd, pct}`, `marketContext: string`, `watch: [{symbol, note}]` |
-| `research_card`  | `symbol`, `rating: "BUY"\|"HOLD"\|"SELL"`, `priceTarget: number`, `currentPrice: number`, `thesis: string`, `catalysts: string[]`, `risks: string[]` |
-| `ta_chart`       | `symbol`, `timeframe`, `chartUrl: string`, `indicators: [{name, value}]`, `levels: [{kind: "support"\|"resistance", price}]` |
-| `order_ticket`   | `symbol`, `side: "BUY"\|"SELL"`, `qty: number`, `orderType: "market"\|"limit"`, `limitPrice?: number`, `estCost: number`, `takeProfit?: number`, `stopLoss?: number` |
-| `live_trade`     | `symbol`, `side`, `qty`, `entryPrice`, `currentPrice`, `pnl: {usd, pct}`, `status` |
-| `thesis`         | `symbol`, `tldr: string`, `whyIn: string`, `whatToWatch: string[]`, `breakers: string[]` |
-| `tracker`        | `trade: <live_trade data>`, `thesis: <thesis data>` |
-| `portfolio_risk` | `concentrationScore: number`, `sectors: [{name, weightPct}]`, `flags: string[]`, `hedges: [{action, rationale}]` |
+Canonical JSON lives in `backend/prompts/widget_contract.md`; TS types in `frontend/lib/widgets.ts`. Summary:
+
+| `type` | `data` fields |
+|---|---|
+| `morning_brief` | `headline: string`, `paragraphs: string[]` |
+| `research_card` | `ticker`, `company_name`, `current_price: number \| null`, `currency`, `rating: "BUY"\|"HOLD"\|"SELL"`, `target_price: number`, `horizon_months: number`, `thesis_html`, `catalysts: string[]`, `risks: string[]` |
+| `ta_chart` | `ticker`, `timeframe`, `current_price: number`, `screenshot_url?: string` (a `data:image/png;base64,…` URL when real, else empty/mock SVG path), `indicators_applied: string[]`, `key_levels: { resistance: number[], support: number[] }`, `trend_summary_html` |
+| `order_ticket` | `side: "buy"\|"sell"`, `ticker`, `shares`, `notional`, `limit_price`, `currency`, `tp_price?`, `sl_price?`, `rr_ratio?`, `risk_amount?`, `reward_amount?`, `portfolio_pct?`, `within_risk_rule?: bool`, `bracket_source?: "from_prompt"\|"from_research"\|"from_default"`, `notes_html?` |
+| `live_trade` | `order_id`, `ticker`, `side: "long"\|"short"`, `shares`, `fill_price`, `current_price`, `currency`, `unrealized_pnl`, `unrealized_pnl_pct`, `tp_armed_at?`, `sl_armed_at?`, `filled_at: iso`, `news_since_fill?: [{ headline, source, ts }]` |
+| `thesis` | `ticker`, `rating`, `horizon: string`, `weight_pct_nav`, `confidence: string`, `tldr_html`, `reasons_to_be_in: string[]`, `what_to_watch_weekly: string[]`, `thesis_breakers: string[]` |
+| `tracker` | `ticker`, `thesis_tldr_html`, `trade: { side, shares, fill_price, current_price, unrealized_pnl, unrealized_pnl_pct, tp?, sl? }` |
+| `portfolio_risk` | `risk_score`, `risk_label`, `risk_summary`, `sector_exposure: [{ label, pct, severity: "normal"\|"warn"\|"danger" }]`, `flags: [{ severity: "low"\|"med"\|"high", title, detail_html }]`, `suggestions: string[]` |
+
+Notes on fields that recently changed:
+- `research_card.current_price` is `number | null` — `null` when no live price source is available (yfinance down + no FMP profile price). The frontend renders `—` and omits the upside; the agent must not fabricate a price (Proposal 008).
+- `live_trade.news_since_fill` is optional — present only when post-fill news exists (Proposal 001).
 
 ### Full example — `research_card`
 
 ```json
 {
   "type": "research_card",
-  "id": "w_9f2a",
-  "title": "NVDA — Equity Research",
   "data": {
-    "symbol": "NVDA",
+    "ticker": "AAPL",
+    "company_name": "Apple Inc.",
+    "current_price": 310.58,
+    "currency": "$",
     "rating": "BUY",
-    "priceTarget": 1100,
-    "currentPrice": 942.50,
-    "thesis": "Dominant compute platform for AI training/inference; data-center revenue compounding on Blackwell ramp.",
-    "catalysts": ["Blackwell GB200 shipping ahead of plan", "Sovereign AI commitments"],
-    "risks": ["China export restrictions", "Customer concentration"]
+    "target_price": 324.0,
+    "horizon_months": 12,
+    "thesis_html": "Apple compounds at <strong>29.0% FCF margin</strong>; reasonable at <strong>10.21× EV/Sales</strong>.",
+    "catalysts": ["iPhone 17 cycle", "Services at $100B+ run-rate"],
+    "risks": ["China demand", "App Store regulation"]
   },
   "sources": [
-    { "name": "Alpaca", "toolCallId": "tc_1", "url": null },
-    { "name": "SEC 10-Q", "toolCallId": "tc_2", "url": "https://www.sec.gov/..." }
-  ],
-  "pinnable": true
+    { "name": "FMP — consensus + ratios + profile" }
+  ]
 }
 ```
 
 ---
 
-## 7. Other REST endpoints
-
-These already exist in the backend and stay REST/JSON. Only **auth** and **CORS** change; once multi-user auth lands, every query is scoped to the authenticated `userId`.
-
-| Method · path | Response |
-|---|---|
-| `GET /api/conversations` | `{ conversations: [{id, title, activeAsset, messageCount, createdAt, updatedAt}] }` |
-| `GET /api/conversations?id=<uuid>` | full thread `{ id, title, messages, ... }` |
-| `DELETE /api/conversations?id=<uuid>` | `{ ok: true }` (soft-delete) |
-| `GET /api/trades` (`?status=`, `?symbol=`, `?limit=`) | `{ trades: [...], stats: {...} }` |
-| `POST /api/trades` | created trade object |
-| `PATCH /api/trades?id=<uuid>` | updated trade object |
-| `DELETE /api/trades?id=<uuid>` | `{ ok: true }` |
-| `GET /api/config` | deployment/diagnostic info (no auth) |
-
 ## 8. Errors
 
-- **Non-stream endpoints:** HTTP status code + body `{ "error": { "code": string, "message": string, "detail"?: string } }`.
-- **`/api/chat`:** if the failure happens *before* the stream opens, return a normal HTTP error. If *after*, emit an `error` SSE event and close the stream.
-- Codes: `unauthorized` (401), `bad_request` (400), `upstream_failed` (502), `rate_limited` (429), `server_error` (500).
+- **Before the stream opens** (e.g. malformed body → FastAPI/Pydantic 422): a normal HTTP error response.
+- **During the stream** (`/api/chat`): an `error` SSE event — `{ "message": "…" }` — and the stream closes.
+- Tool-level failures are **not** stream errors. They come back inside the relevant `tool_result` (`ok: false`) or as an `error` field on the tool's JSON output (e.g. `alpaca_fetch_failed`, `yfinance_fetch_failed`, `fmp_fetch_failed`, `tradingview_mcp_unreachable`); the agent then surfaces them honestly in the terminal `widget`/`message`.
 
-## 9. Versioning
+---
 
-- This document *is* the version. A breaking change = a PR editing this file, reviewed by both devs.
-- Bump the `Last changed` line at the top on every change.
+## 9. Planned, not yet implemented
+
+These do **not** exist on the backend today. Listed so the boundary is unambiguous — add them here (with real shapes) when they land.
+
+- **Auth headers** (`Authorization: Bearer`) — **P4.1** (Supabase magic-link). Replaces body `user_id`.
+- **`GET /api/conversations`** + optional `conversation_id` on `ChatRequest` — **P4.2** (Supabase persistence). Reuse the `Finance_Chatbot` schema shape; RLS-scoped to the authenticated `user_id`.
+- No `/api/trades`, `/api/config`, `PATCH`/`DELETE` routes are planned — those were artefacts of the old Node design and are removed.
+
+## 10. Versioning
+
+- This document *is* the version. A breaking change edits this file in the same change that ships it.
+- Bump the **Last changed** line on every edit.
