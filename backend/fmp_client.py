@@ -28,6 +28,7 @@ Uses httpx (already a backend dependency — no pyproject change).
 from __future__ import annotations
 
 import os
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -125,20 +126,53 @@ async def profile(symbol: str) -> dict[str, Any]:
     }
 
 
+def _ratio(num: Any, den: Any) -> float | None:
+    """Safe ratio helper for derived metrics. None if either side missing/zero."""
+    try:
+        n, d = float(num), float(den)
+        return round(n / d, 2) if d else None
+    except (TypeError, ValueError):
+        return None
+
+
 async def ratios_ttm(symbol: str) -> dict[str, Any]:
-    """Valuation multiples + margins. /stable/ratios-ttm?symbol="""
+    """Valuation multiples + margins. /stable/ratios-ttm?symbol=
+
+    Proposal 009 — field names confirmed against a live AAPL probe:
+    - FMP's ratios-ttm has NO free-cash-flow-margin field → derive it from
+      freeCashFlowPerShareTTM / revenuePerShareTTM.
+    - It has NO EV/Sales field → the previous `_pick` fell through to
+      priceToSalesRatioTTM, silently mislabelling P/S as EV/Sales. Derive true
+      EV/Sales = enterpriseValueMultipleTTM (EV/EBITDA) × ebitdaMarginTTM
+      (EBITDA/Sales). None if either input is missing — never mislabel P/S.
+    """
     row = _first(await _get("ratios-ttm", {"symbol": symbol}))
+
+    ev_ebitda = _num(_pick(row, "enterpriseValueMultipleTTM", "evToEBITDATTM",
+                           "enterpriseValueOverEBITDATTM"))
+
+    # EV/Sales = EV/EBITDA × EBITDA-margin (EBITDA/Sales). None if either missing
+    # — never mislabel P/S (priceToSalesRatioTTM) as EV/Sales.
+    ebitda_margin = _pick(row, "ebitdaMarginTTM")  # decimal
+    ev_sales = (round(ev_ebitda * float(ebitda_margin), 2)
+                if ev_ebitda is not None and ebitda_margin is not None else None)
+
+    # No direct FCF-margin field in ratios-ttm → FCF/share ÷ revenue/share × 100.
+    fcf_margin_pct = _ratio(_pick(row, "freeCashFlowPerShareTTM"), _pick(row, "revenuePerShareTTM"))
+    if fcf_margin_pct is not None:
+        fcf_margin_pct = round(fcf_margin_pct * 100, 2)
+
     return {
         "pe": _num(_pick(row, "priceToEarningsRatioTTM", "peRatioTTM")),
-        "ev_ebitda": _num(_pick(row, "enterpriseValueMultipleTTM", "evToEBITDATTM",
-                                 "enterpriseValueOverEBITDATTM")),
-        "ev_sales": _num(_pick(row, "evToSalesTTM", "enterpriseValueOverRevenueTTM",
-                               "priceToSalesRatioTTM")),
+        "ev_ebitda": ev_ebitda,
+        "ev_sales": ev_sales,
         "peg": _num(_pick(row, "priceToEarningsGrowthRatioTTM", "pegRatioTTM")),
         "gross_margin_pct": _pct(_pick(row, "grossProfitMarginTTM", "grossMarginTTM")),
         "op_margin_pct": _pct(_pick(row, "operatingProfitMarginTTM", "operatingMarginTTM")),
-        "fcf_margin_pct": _pct(_pick(row, "freeCashFlowMarginTTM", "freeCashFlowToRevenueTTM")),
+        "fcf_margin_pct": fcf_margin_pct,
         "net_margin_pct": _pct(_pick(row, "netProfitMarginTTM", "netMarginTTM")),
+        # P/S kept available (real field) in case the research card wants it later.
+        "ps_ratio": _num(_pick(row, "priceToSalesRatioTTM")),
     }
 
 
@@ -205,10 +239,25 @@ async def stock_peers(symbol: str) -> list[str]:
 
 
 async def sec_filings(symbol: str, limit: int = 3) -> list[dict[str, Any]]:
-    """Recent SEC filings. /stable/sec-filings-search/symbol?symbol= (defensive on path)."""
+    """Recent SEC filings. /stable/sec-filings-search/symbol?symbol=
+
+    Proposal 009 — the probe showed this returned [] with only `symbol`+`limit`.
+    FMP's stable filings-by-symbol search is a DATE-RANGE query, so we now pass
+    `from`/`to` (last ~18 months) + `page`. Still best-effort / defensive on the
+    path; re-run `scripts/fmp_probe.py` (now dumps raw sec-filings) to confirm —
+    if it's still empty, the endpoint is premium-gated on the current FMP tier
+    and filings stay an optional enrichment (the agent synthesises from news).
+    """
+    now = datetime.now(timezone.utc)
+    date_params = {
+        "from": (now - timedelta(days=550)).strftime("%Y-%m-%d"),
+        "to": now.strftime("%Y-%m-%d"),
+        "page": 0,
+        "limit": limit,
+    }
     for path in ("sec-filings-search/symbol", "sec-filings"):
         try:
-            data = await _get(path, {"symbol": symbol, "limit": limit})
+            data = await _get(path, {"symbol": symbol, **date_params})
         except FMPError:
             continue
         rows = data if isinstance(data, list) else []
