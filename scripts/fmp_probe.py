@@ -36,6 +36,10 @@ async def probe(symbol: str):
         "price-target-consensus": ("price-target-consensus", {"symbol": symbol}),
         "grades-consensus": ("grades-consensus", {"symbol": symbol}),
         "stock-peers": ("stock-peers", {"symbol": symbol}),
+        # Proposal 009 — dump sec-filings raw so we can see why it returned [].
+        "sec-filings-search/symbol": ("sec-filings-search/symbol",
+                                      {"symbol": symbol, "from": "2024-06-01", "to": "2026-06-01",
+                                       "page": 0, "limit": 5}),
     }
     print(f"\n===== RAW FMP RESPONSE KEYS for {symbol} =====")
     for label, (path, params) in raw_calls.items():
