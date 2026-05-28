@@ -8,8 +8,13 @@ function ratingClasses(r: ResearchCardData['rating']) {
 }
 
 export function ResearchCard({ data, sources }: { data: ResearchCardData; sources: Source[] }) {
-  const upside = ((data.target_price - data.current_price) / data.current_price) * 100;
-  const upPositive = upside >= 0;
+  // Proposal 008 — current_price can be null/undefined when no price source was
+  // available (e.g. real-market mode with yfinance down and no FMP profile price).
+  // Guard against it: render "—" and skip the upside calc rather than crash on
+  // null.toFixed() / divide-by-null.
+  const hasPrice = typeof data.current_price === 'number' && isFinite(data.current_price);
+  const upside = hasPrice ? ((data.target_price - data.current_price) / data.current_price) * 100 : null;
+  const upPositive = upside !== null && upside >= 0;
 
   return (
     <WidgetCard eyebrow="Equity research · generated">
@@ -31,16 +36,18 @@ export function ResearchCard({ data, sources }: { data: ResearchCardData; source
             {data.horizon_months}-mo target
           </div>
           <div className="text-[11px] text-text-3 mt-0.5">
-            vs {data.currency}{data.current_price.toFixed(2)}
+            vs {hasPrice ? `${data.currency}${data.current_price.toFixed(2)}` : '—'}
           </div>
         </div>
         <div className="ml-auto text-right">
           <div className="text-[16px] font-semibold">
             {data.currency}{data.target_price.toLocaleString()}
           </div>
-          <div className={`text-[12.5px] font-semibold ${upPositive ? 'text-green-DEFAULT' : 'text-red-DEFAULT'}`}>
-            {upPositive ? '▲' : '▼'} {Math.abs(upside).toFixed(1)}%
-          </div>
+          {upside !== null && (
+            <div className={`text-[12.5px] font-semibold ${upPositive ? 'text-green-DEFAULT' : 'text-red-DEFAULT'}`}>
+              {upPositive ? '▲' : '▼'} {Math.abs(upside).toFixed(1)}%
+            </div>
+          )}
         </div>
       </div>
 
