@@ -285,3 +285,44 @@ Every one was found by diffing applied vs proposed, running key-independent test
 - **P4.1:** Supabase magic-link auth — the next track, gates persistence/RLS/memory.
 - **P1.1:** unblock + verify the `filled → live_trade` path when the Alpaca account is reopened.
 
+---
+
+## 2026-05-28 · P2b DONE — FMP research verified end-to-end (009 applied) · active front → P4.1
+
+**Built / applied:**
+
+- **Proposal 009 applied & verified** — FMP field-mapping fixes drafted *from the live `fmp_probe.py AAPL` output* (not guessed): (a) `fcf_margin_pct` had **no** FMP field at all → derived `freeCashFlowPerShareTTM ÷ revenuePerShareTTM × 100`; (b) `ev_sales` was **silently P/S** — `ratios-ttm` has no `evToSalesTTM`, so the old `_pick` fell through to `priceToSalesRatioTTM` and the card cited the wrong multiple → now derived true `EV/Sales = enterpriseValueMultipleTTM × ebitdaMarginTTM`, with P/S kept separately as `ps_ratio`; (c) `sec_filings` returned `[]` → added `from`/`to` date params + enhanced the probe to dump the raw response — confirmed **402 premium-gated** on the current FMP tier (filings stay an optional enrichment). Probe re-run confirmed: `fcf_margin 29.0`, `ev_sales 10.23 ≠ ps_ratio 10.13`, all other fields mapped.
+- **P2b verified end-to-end (the milestone).** Tool level: all four research tools return real FMP data for AAPL (`is_mock:false`). Agent level: `analyze AAPL` → `research_card` with real BUY / target $324 / P/E 37.4 / PEG 1.29, **`current_price` $310.58 from FMP profile (008), coherent ~4% upside**, and an agent-synthesised thesis citing FMP numbers verbatim ("FCF margin 29.0%", "10.21× EV/Sales"). The whole **006 + 008 + 009** chain works against real FMP for any symbol the tier permits.
+- **`scripts/test_P2_006.py`** — expanded the user's earlier 006-era test into a full P2b regression suite (006 real-data + raw-facts, 008 numeric `current_price`, 009 `fcf_margin` non-None + `ev_sales != ps_ratio`, consensus/peers sanity, mock-first gating). Anchors paths on `__file__` and loads `backend/.env` explicitly (fixing the dotenv-resolution gotcha). Harness validated 4/4 in forced-mock mode (no FMP calls); the live section runs when `FMP_API_KEY` is set.
+- **Updated `API_CONTRACT.md` to properly reflect real Python contract** - Contract now matches Python backend information more accurately
+  - All 8 widget schemas with current fields — including `001's news_since_fill?` on `live_trade` and `008's current_price: number | null` on `research_card` (with the "render `—`, don't fabricate" note).
+  - The 7 SSE events with real payloads (`tool_result` summary format, parallel tool calls share `id`, exactly one terminal `widget` or `message` then `done`).
+  - SSE framing gotchas that actually bit this project — `\r\n\r\n` frame separation (the `sse.ts` bug) and the `: ping` keep-alive comments — written down so the brother doesn't rediscover them.
+  - Tool-level failures (`alpaca_fetch_failed` / `yfinance_fetch_failed` / `fmp_fetch_failed` / `tradingview_mcp_unreachable`) are not stream errors — they ride inside `tool_result` / the tool's error field, and the agent surfaces them honestly.
+  - healthz real shape (`ok`, `model`, `tools_registered` = 18, `alpaca_configured`, `anthropic_key_present`).
+  - Planned-not-built section so the HTTP boundary is unambiguous: auth (P4.1) and `/api/conversations` (P4.2) are flagged as coming, not present.
+
+**Decisions surfaced:**
+
+- **P2b is DONE.** Real research data flows for any FMP-tier-permitted symbol; the implementation is **symbol-agnostic**. The only limits are FMP *billing*, not code: free tier = ~87 sample US symbols (AAPL/AMZN/TSLA…); arbitrary names (CRM) need **FMP Starter (~$22/mo)**; SEC filings are premium-gated.
+- **Active front moves to P4** (auth → persistence + RLS). P4.1 Supabase magic-link auth first — it produces the real `user_id` that P4.2/P4.3 key off. P1.2's first real TradingView integration test is also unblocked (007), but not the focus. P1.1 stays parked on the Alpaca account.
+- **ev_sales mislabel is the kind of bug only verification catches** — the probe's `⚠ None` flag only caught `fcf_margin`; `ev_sales` reported "all mapped" because P/S quietly filled it. Reading the *raw* `ratios-ttm` keys (no `evToSalesTTM`) is what exposed it.
+
+**Assumptions / notes:**
+
+- `fcf_margin` and `ev_sales` are deterministic data-layer derivations from FMP-sourced fields (same class as the existing `×100`), not agent-side number invention — trust principle #3 holds.
+- The mixed-mode upside artifact (mock quote vs real FMP target) is avoided by running market + research on the same mode; with 008, real-market mode + yfinance-down still yields a coherent price from FMP profile.
+
+**Did NOT do:**
+
+- Did NOT verify a non-sample ticker (CRM) — needs FMP Starter (free tier 402s consensus for non-sample names; not a code gap).
+- Did NOT fix the minor `sources` nit — `_fmp_full_research` cites "SEC EDGAR — recent filings" even when filings are `[]` (402). Logged as candidate **Proposal 010** (drop the source entry when empty); not drafted.
+- Did NOT run `test_P2_006.py` against the live key (burns quota; P2b already manually verified this session).
+
+**Next session:**
+
+- **P4.1:** Supabase magic-link auth — backend JWT verification → real `user_id`; frontend magic-link login + token in `lib/sse.ts`. `uv sync --group auth` to install the client.
+- **P1.2:** first real TradingView integration test on a dev machine (TV Desktop + sibling clone; 007 makes the import safe).
+- **P1.1:** unblock + verify `filled → live_trade` when the Alpaca account reopens.
+- Optional: Proposal 010 (empty-filings source nit); FMP Starter → verify CRM.
+
