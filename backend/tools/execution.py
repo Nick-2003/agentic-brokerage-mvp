@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -55,6 +55,27 @@ def _alpaca_enabled() -> bool:
         and not os.getenv("ALPACA_API_KEY", "").endswith("REPLACE")
         and bool(os.getenv("ALPACA_API_SECRET"))
     )
+
+
+def _mock_fill_backdate_minutes() -> int:
+    """Minutes to back-date a *mock* fill's `filled_at` (Proposal 005).
+
+    Mock fills are synchronous — without this, `filled_at == now`, so the
+    `news_since_fill` window `[filled_at, now]` is empty and the "Since you
+    bought" section can never render in the immediate post-fill turn.
+    Back-dating makes the mock represent "placed N minutes ago", giving recent
+    mock news a window to fall into.
+
+    Default 30. Must exceed the largest "recent" `minutes_ago` in
+    `market._NEWS_TEMPLATES` (currently 28, for AMD) so the recent-tier mock
+    news qualifies; the recent→old gap (28 → 360 min) is a wide safe band, so
+    a value anywhere in [28, 360) captures exactly the recent tier. Real Alpaca
+    fills are unaffected — this only touches the mock branch.
+    """
+    try:
+        return int(os.getenv("MOCK_FILL_BACKDATE_MINUTES", "30"))
+    except ValueError:
+        return 30
 
 
 # ---------------------------------------------------------------------------
@@ -148,9 +169,15 @@ async def place_paper_order(args: dict[str, Any], user_id: str) -> dict[str, Any
         except Exception as e:
             return {"error": "alpaca_submit_failed", "message": str(e)}
 
-    # Mock path — write to local JSON, simulate fill at limit price
+    # Mock path — write to local JSON, simulate fill at limit price.
+    # Proposal 005: back-date `filled_at` (and `submitted_at`, to keep
+    # submitted ≤ filled) so the `news_since_fill` window `[filled_at, now]`
+    # is non-empty. Otherwise mock fills are synchronous (filled_at == now)
+    # and the "Since you bought" section can never render in the immediate
+    # post-fill turn. Real Alpaca fills are unaffected — this is the mock branch.
     order_id = f"mock_{uuid.uuid4().hex[:12]}"
-    submitted_at = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
+    fill_time = (now - timedelta(minutes=_mock_fill_backdate_minutes())).isoformat()
     order = {
         "order_id": order_id,
         "user_id": user_id,
@@ -163,8 +190,8 @@ async def place_paper_order(args: dict[str, Any], user_id: str) -> dict[str, Any
         "sl_price": sl_price,
         "notional": notional,
         "status": "filled",
-        "submitted_at": submitted_at,
-        "filled_at": submitted_at,
+        "submitted_at": fill_time,
+        "filled_at": fill_time,
         "is_paper": True,
         "is_mock": True,
     }
