@@ -410,6 +410,8 @@ Every one was found by diffing applied vs proposed, running key-independent test
 - Did NOT update `API_CONTRACT.md` — it's a reference doc, but it would describe unbuilt behaviour until 012 is applied (the exact problem P3 fixed). Listed in the proposal's "on-apply" checklist instead.
 - Did NOT start P4.2/P4.3 — they depend on 012 landing.
 
+**Follow-up (same session) — Tom applied 012, hit a hydration bug → Proposal 013 drafted.** 012 applied; `test_P4_012_auth.py` 18/18; magic-link login verified in-app. But the browser logged a React **hydration mismatch** in `AuthGate.tsx`: `getSupabase()` is client-only (`typeof window` branch), so the server rendered `children` (`authConfigured()` false) while the client's first paint rendered `<Splash>` (`authConfigured()` true) — server text ≠ client text. **Proposal 013** (`013-authgate-hydration-fix/`, one file) fixes it with the canonical `mounted`-flag pattern: defer the gate decision to after mount so the server and first client render emit an identical `<Splash>`, then the real gate (children/login) appears. Fixed file typechecks clean (project: 0 errors — the earlier pre-existing `ResearchCard.tsx` null-guard errors are also resolved now). Awaiting Tom's apply of 013.
+
 **Next session:**
 
 - Apply 012: `cd backend && uv sync`; set `SUPABASE_JWT_SECRET` + `REQUIRE_AUTH` (`.env`) and `NEXT_PUBLIC_SUPABASE_*` (`.env.local`); allow the redirect origin in Supabase Auth settings. Run `scripts/test_P4_012_auth.py` (18/18) + a live magic-link login via `pnpm dev`, then flip `REQUIRE_AUTH=1` and confirm the 401. Update `API_CONTRACT.md`.

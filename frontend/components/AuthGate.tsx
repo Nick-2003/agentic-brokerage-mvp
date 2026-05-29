@@ -1,9 +1,19 @@
 // AuthGate — Supabase magic-link login gate (P4.1).
 //
-// Wrap the app in <AuthGate>. Behaviour:
+// Wrap the app in <AuthGate>. Behaviour (after mount):
 //   • Supabase env unset (demo mode) → render children directly (no gate).
 //   • Configured + no session       → magic-link login screen.
 //   • Configured + session          → render children.
+//
+// SSR / hydration (why the `mounted` flag exists — proposal 013):
+//   getSupabase() is client-only (it short-circuits when `typeof window ===
+//   "undefined"`). On the server authConfigured() is therefore always false, so
+//   a naive gate renders `children`; on the client's FIRST render it's true and
+//   renders <Splash> — and React throws a hydration mismatch (server text ≠
+//   client text). To avoid it, the gate decision is deferred until after mount:
+//   server AND first client render BOTH show the same stable <Splash>, then the
+//   effect runs and the real gate (children / login) appears. There's a brief
+//   (~tens of ms, localStorage read) splash on load — intentional and stable.
 //
 // Exposes the current session via useAuth() so the rest of the app (e.g. the
 // header) can show who's signed in and offer sign-out. Always wraps children in
@@ -21,12 +31,16 @@ const AuthContext = createContext<AuthState>({ session: null, configured: false 
 export const useAuth = () => useContext(AuthContext);
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
-  const configured = authConfigured();
+  const [mounted, setMounted] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
-  const [ready, setReady] = useState(!configured); // demo mode is "ready" immediately
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (!configured) return;
+    setMounted(true);
+    if (!authConfigured()) {
+      setReady(true); // demo mode — no gate, no session lookup
+      return;
+    }
     const sb = getSupabase();
     if (!sb) {
       setReady(true);
@@ -43,13 +57,19 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       active = false;
       sub.subscription.unsubscribe();
     };
-  }, [configured]);
+  }, []);
+
+  // configured is only meaningful client-side, after mount (getSupabase() is
+  // client-only). Kept false during SSR / the pre-mount render so it never
+  // drives a server↔client divergence.
+  const configured = mounted && authConfigured();
 
   let body: React.ReactNode;
-  if (!configured || session) {
-    body = children; // demo mode, or signed in
-  } else if (!ready) {
+  if (!mounted || !ready) {
+    // Identical on the server and the first client render → no hydration mismatch.
     body = <Splash>Loading…</Splash>;
+  } else if (!configured || session) {
+    body = children; // demo mode, or signed in
   } else {
     body = <LoginScreen />;
   }
