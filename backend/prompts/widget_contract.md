@@ -154,6 +154,7 @@ Every widget has:
 ```
 
 - `news_since_fill` is **optional**. Include only if `get_company_news(since=filled_at)` returned at least one item. Cap at 3. Order by `ts` descending (newest first). Drop the `{"name":"News since fill"}` source entry when the field is omitted.
+- `order_id` and `filled_at` are **optional** (Proposal 010). They are order-level facts: include them when the card is emitted right after a fill (the `place_paper_order` → `get_open_position` flow, where `place_paper_order` returned the order id/fill time). They are legitimately **absent when monitoring an existing position** — `get_open_position` against real Alpaca returns a *position*, not its originating order, so it carries no `order_id`/`filled_at`. Omit them rather than invent values; the card renders without them.
 
 ## thesis
 
