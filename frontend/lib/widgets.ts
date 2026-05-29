@@ -58,7 +58,11 @@ export type OrderTicketData = {
 // ── live_trade ──
 export type NewsItem = { headline: string; source: string; ts: string };
 export type LiveTradeData = {
-  order_id: string;
+  // order_id + filled_at are order-level: present when the card is emitted right
+  // after a fill (place_paper_order path), but absent when monitoring an existing
+  // position via get_open_position alone (real Alpaca returns a *position*, not
+  // its originating order). Optional. (Proposal 010)
+  order_id?: string;
   ticker: string;
   side: 'long' | 'short';
   shares: number;
@@ -69,7 +73,7 @@ export type LiveTradeData = {
   unrealized_pnl_pct: number;
   tp_armed_at?: number;
   sl_armed_at?: number;
-  filled_at: string;
+  filled_at?: string;
   news_since_fill?: NewsItem[];
 };
 

@@ -326,3 +326,28 @@ Every one was found by diffing applied vs proposed, running key-independent test
 - **P1.1:** unblock + verify `filled → live_trade` when the Alpaca account reopens.
 - Optional: Proposal 010 (empty-filings source nit); FMP Starter → verify CRM.
 
+---
+
+## 2026-05-29 (later) · P1.1 UNBLOCKED — real Alpaca fill renders in-app
+
+**What happened:**
+
+- **Alpaca paper account is back** and **a real paper order filled.** The resting **2× F @ $15.85** limit from the P1.1 runbook executed; F later traded up (~$16.68).
+- **It renders in the app.** A `morning_brief` (real broker, *not* mock) shows the position: 2 F at **$15.85** avg cost, **~$33.36** value, **+$1.66** unrealized P&L, **~$99,968** cash, **~$100,002** book. Every figure is coherent and Alpaca-sourced — no fabrication (arithmetic checks: $31.70 basis; $33.36 − $31.70 = $1.66 P&L; $100k − $31.70 cash).
+
+**What this verifies for P1.1:**
+
+- ✅ Account works end-to-end; a marketable limit actually fills.
+- ✅ **Real fill price + live P&L flow through `get_portfolio`/`get_open_position`** — the exact data path the `live_trade` widget depends on.
+- ✅ The "seed a position for the portfolio demo" goal — the 2× F is kept as the live-Alpaca demo holding.
+- ✅ Bonus: the `morning_brief` flow is now proven against a **real** Alpaca book, not just the `USE_MOCK_BROKER=1` mock (TSLA/NVDA/TCEHY).
+- (Already had: the `accepted`/working branch + Bug C honesty, 2026-05-27.)
+
+**Still strictly open (a formality):** the `live_trade` **widget** itself — the synchronous `place_paper_order(filled) → get_open_position → widget(live_trade)` SSE sequence. The screenshot is the `morning_brief` (portfolio-overview) path, which reads the same Alpaca position, so the data is proven; only the specific widget emission hasn't been shown.
+
+**Next session:**
+
+- **P1.1 close-out:** ask *"show me my F trade"* (→ `get_open_position` → `live_trade`) or place a fresh marketable order during RTH → confirm the `live_trade` widget renders with the real fill + P&L. Then P1.1 is fully done.
+- **P4.1** (Supabase auth) remains the active build front.
+
+**Close-out (same day):** ✅ **P1.1 DONE.** `"show me my F position as a live trade card"` → `get_open_position` → a real **`live_trade` widget** (`long 2 F, fill $15.85, current $16.68, +$1.66 / +5.24%`, Alpaca-sourced). The "monitor → live_trade" routing needed **no** `system.md` change — the agent did it unprompted (steered by `get_open_position`'s tool description). The close-out also surfaced one contract nit: the monitoring `live_trade` omits `order_id`/`filled_at` (real `get_open_position` returns a position, not its order; both were marked required). Renderer tolerates it (`LiveTrade.tsx` doesn't read them) — drafted as **Proposal 010** (make both optional). With this, **all six SCOPE flows are real**; remaining work is the launch track (P4 auth/persistence + P5 lockdown). Also re-tagged the empty-filings SEC-EDGAR source nit as candidate **011**.
