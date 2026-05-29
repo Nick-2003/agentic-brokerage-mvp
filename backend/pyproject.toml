@@ -17,11 +17,16 @@ dependencies = [
     # client sessions against external servers (TradingView today, TrueNorth
     # tomorrow). See proposed_changes/002-tradingview-mcp/README.md §4.7.
     "mcp>=1.0",
+    # P4.1 auth — offline HS256 verification of Supabase magic-link JWTs
+    # (backend/auth.py). Pure-Python for HS256; does NOT pull `cryptography`.
+    # The heavier supabase client stays in the `auth` group (needed at P4.2).
+    "pyjwt>=2.9.0",
 ]
 
 [dependency-groups]
-# `auth` group — Supabase + PostHog. Not imported by any backend code yet
-# (auth is deferred to Phase 7). Kept out of the default sync so the backend
+# `auth` group — Supabase + PostHog. The Supabase Python client is NOT needed
+# for P4.1 (JWT verification is offline via PyJWT above); it lands with P4.2
+# persistence (backend/db.py). Kept out of the default sync so the backend
 # installs without pulling `cryptography`. Install with: uv sync --group auth
 auth = [
     "supabase>=2.10.0",
