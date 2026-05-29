@@ -328,6 +328,31 @@ Every one was found by diffing applied vs proposed, running key-independent test
 
 ---
 
+## 2026-05-29 (later) · P1.1 DONE — `live_trade` verified · Proposal 010 · all six flows real
+
+**What happened:**
+
+- **Alpaca paper account restored**; the resting **2× F @ $15.85** runbook order **filled** (F since ~$16.70).
+- **`live_trade` widget verified.** A `"show me my F position as a live trade card"` prompt routed `get_open_position` → a real **`live_trade` widget**: `long 2 F, fill $15.85, current ~$16.70, +$1.70 (+5.36%)`, Alpaca-sourced. Both rendering paths now confirmed against the **real** book: `morning_brief` (portfolio overview) *and* the `live_trade` card. **P1.1 is DONE** — and with it, **all six SCOPE flows are real.**
+- **Routing needed no `system.md` change** — the agent mapped "monitor my position" → `get_open_position` → `live_trade` on its own (steered by `get_open_position`'s tool description). The earlier "candidate 010 routing rule" was therefore *not* needed.
+
+**Proposal 010 — drafted + applied (`live_trade` `order_id`/`filled_at` optional):**
+
+- The monitoring `live_trade` (from `get_open_position`) **omits `order_id`/`filled_at`** — real Alpaca returns a *position*, not its originating order, so those order-level fields legitimately don't exist when monitoring. Both were marked **required** in `widget_contract.md` + non-optional in `widgets.ts`. `LiveTrade.tsx` never reads them, so this was **contract drift, not a crash.** Fix: mark both optional in the contract + TS type (2 files). Applied + confirmed (`order_id?`/`filled_at?` in `widgets.ts`; optional note in `widget_contract.md`).
+- **Clarification logged:** the recurring `KeyError: 'order_id'` was my **throwaway chat parser** doing `d['order_id']`, never a repo file — 010 couldn't "fix" it. The widget is correct; the parser just needed `.get()`. The `live_trade` check is now a **saved regression test in `scripts/`** (added by Tom) so verification no longer leans on the ad-hoc snippet.
+
+**Decisions / notes:**
+
+- **Candidate Proposal 011** (re-tagged from the earlier "candidate 010"): `_fmp_full_research` lists the `"SEC EDGAR — recent filings"` source even when `recent_filings` is `[]` (402 premium-gated) — drop the entry when empty. One-file (`research.py`). Not drafted.
+- Proposals **001–010 applied**; **011** candidate.
+
+**Next session:**
+
+- **P4.1** (Supabase magic-link auth) — the active build front. `uv sync --group auth`; backend JWT → real `user_id` (kills `"demo"`); frontend magic-link + token in `lib/sse.ts`. Gates P4.2 persistence/RLS + P4.3 memory.
+- Optional: Proposal 011 (empty-filings source nit); FMP Starter → verify a non-sample ticker (CRM); P1.2 first real TradingView run on a dev machine.
+
+---
+
 ## 2026-05-29 (later) · P1.1 UNBLOCKED — real Alpaca fill renders in-app
 
 **What happened:**
@@ -351,3 +376,42 @@ Every one was found by diffing applied vs proposed, running key-independent test
 - **P4.1** (Supabase auth) remains the active build front.
 
 **Close-out (same day):** ✅ **P1.1 DONE.** `"show me my F position as a live trade card"` → `get_open_position` → a real **`live_trade` widget** (`long 2 F, fill $15.85, current $16.68, +$1.66 / +5.24%`, Alpaca-sourced). The "monitor → live_trade" routing needed **no** `system.md` change — the agent did it unprompted (steered by `get_open_position`'s tool description). The close-out also surfaced one contract nit: the monitoring `live_trade` omits `order_id`/`filled_at` (real `get_open_position` returns a position, not its order; both were marked required). Renderer tolerates it (`LiveTrade.tsx` doesn't read them) — drafted as **Proposal 010** (make both optional). With this, **all six SCOPE flows are real**; remaining work is the launch track (P4 auth/persistence + P5 lockdown). Also re-tagged the empty-filings SEC-EDGAR source nit as candidate **011**.
+
+---
+
+## 2026-05-29 (later) · P4.1 drafted — Proposal 012 (Supabase magic-link auth)
+
+**Built (drafted through `proposed_changes/`, awaiting Tom's review/apply):**
+
+- **Proposal 012 — Supabase magic-link auth (P4.1).** The active-front task. Closes SECURITY_AUDIT **HIGH-2** (spoofable `"demo"`); produces the real `user_id` that P4.2 persistence/RLS and P4.3 Mem0 key off. 10 files + a regression test, mirrored under `proposed_changes/012-supabase-magic-link-auth/`.
+- **Backend:** new `backend/auth.py` — verifies the Supabase JWT **offline (HS256, PyJWT + `SUPABASE_JWT_SECRET`)** and returns the token `sub` (UUID) as the trusted `user_id`. `main.py` injects it via `Depends(resolve_user_id)`, **removes the client-supplied `ChatRequest.user_id`** (identity now comes from the signed token, never the body), and adds `require_auth`/`auth_configured` to `/healthz`. `pyproject.toml` declares `pyjwt>=2.9` in main deps (pure-Python for HS256 — does **not** pull `cryptography`; the heavier supabase client stays in the `auth` group for P4.2). `.env.example` gains `SUPABASE_JWT_SECRET` + `REQUIRE_AUTH`.
+- **Frontend:** new `lib/supabase.ts` (client singleton + `getAccessToken`/`signOut`, graceful no-op when unconfigured → demo mode), new `components/AuthGate.tsx` (magic-link login screen + `useAuth()`), `lib/sse.ts` attaches `Authorization: Bearer <jwt>` (and shows a friendly 401 message), `app/page.tsx` wraps in `<AuthGate>`, makes `handleSubmit` async to fetch the token, and adds a header sign-out.
+
+**Decisions surfaced (confirmed with Tom this session):**
+
+- **JWT verification = local HS256** (PyJWT + `SUPABASE_JWT_SECRET`), **not** `supabase.auth.get_user()`. Lighter (no supabase install for P4.1 — PyJWT already in the venv), faster (no per-turn round-trip), canonical FastAPI+Supabase pattern, offline-testable. Assumes the project's **default symmetric JWT secret**; if it ever moves to asymmetric (ES256/RS256) signing keys, swap `verify_jwt` to a JWKS fetch (flagged in the proposal).
+- **Enforcement = flag-gated `REQUIRE_AUTH`**, mirroring the `USE_MOCK_*` kill-switches — **not** a hard cutover. `REQUIRE_AUTH=0` (local): a Bearer token is still verified if sent, but a token-less request falls back to `"demo"` so the deterministic mock demo / `smoke_test.sh` / curl checks keep working. `REQUIRE_AUTH=1` (Railway): unauthenticated `POST /api/chat` → **401**. A *provided-but-invalid* token is **always** 401 (never downgraded to demo); a token with no secret configured → **500** `auth_not_configured` (surfaced, not silently passed — same honesty discipline as `alpaca_fetch_failed`).
+
+**Verified pre-apply (no Supabase account / no network):**
+
+- `py_compile` of `auth.py` + `main.py` ✓.
+- `scripts/test_P4_012_auth.py` vs the proposed `auth.py` → **18/18** (valid/expired/bad-sig/missing-aud tokens; bearer extraction incl. case + malformed; REQUIRE_AUTH on/off policy; garbage-token-never-demo; no-secret→500).
+- Frontend supabase-js API surface typechecked clean against the project `tsconfig` (throwaway file exercising `createClient`/`getSession`/`signInWithOtp`/`onAuthStateChange`/`signOut`/`Session.user.email`).
+
+**Assumptions / notes:**
+
+- `pyjwt` showed as present in the venv (2.12.1) but isn't a declared backend dep — 012 declares it so `uv sync` keeps it.
+- CORS already permits the new `Authorization` header: `allow_headers=["*"]` echoes requested headers on preflight even with `allow_credentials=True` (to confirm on the post-apply frontend run).
+- **Pre-existing, unrelated:** `pnpm typecheck` surfaces 3 `ResearchCard.tsx` "`current_price` possibly null" errors — a proposal-008 renderer-guard leftover, **not** introduced by 012 (which doesn't touch that file). Flagged for a separate fix.
+
+**Did NOT do:**
+
+- Did NOT apply 012 to the live repo (Tom applies + archives manually) or touch live `backend/`/`frontend/` files.
+- Did NOT update `API_CONTRACT.md` — it's a reference doc, but it would describe unbuilt behaviour until 012 is applied (the exact problem P3 fixed). Listed in the proposal's "on-apply" checklist instead.
+- Did NOT start P4.2/P4.3 — they depend on 012 landing.
+
+**Next session:**
+
+- Apply 012: `cd backend && uv sync`; set `SUPABASE_JWT_SECRET` + `REQUIRE_AUTH` (`.env`) and `NEXT_PUBLIC_SUPABASE_*` (`.env.local`); allow the redirect origin in Supabase Auth settings. Run `scripts/test_P4_012_auth.py` (18/18) + a live magic-link login via `pnpm dev`, then flip `REQUIRE_AUTH=1` and confirm the 401. Update `API_CONTRACT.md`.
+- Then **P4.2** (persistence + RLS) and **P4.3** (Mem0) — both keyed on the real `user_id` 012 produces.
+- Still open/parked: P1.2 first real TradingView run (dev machine); fix the pre-existing `ResearchCard.tsx` null-guard; FMP Starter → verify a non-sample ticker; candidate Proposal 011.
