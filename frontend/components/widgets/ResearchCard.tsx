@@ -12,8 +12,9 @@ export function ResearchCard({ data, sources }: { data: ResearchCardData; source
   // available (e.g. real-market mode with yfinance down and no FMP profile price).
   // Guard against it: render "—" and skip the upside calc rather than crash on
   // null.toFixed() / divide-by-null.
-  const hasPrice = typeof data.current_price === 'number' && isFinite(data.current_price);
-  const upside = hasPrice ? ((data.target_price - data.current_price) / data.current_price) * 100 : null;
+  const price =
+    typeof data.current_price === 'number' && isFinite(data.current_price) ? data.current_price : null;
+  const upside = price !== null ? ((data.target_price - price) / price) * 100 : null;
   const upPositive = upside !== null && upside >= 0;
 
   return (
@@ -36,7 +37,7 @@ export function ResearchCard({ data, sources }: { data: ResearchCardData; source
             {data.horizon_months}-mo target
           </div>
           <div className="text-[11px] text-text-3 mt-0.5">
-            vs {hasPrice ? `${data.currency}${data.current_price.toFixed(2)}` : '—'}
+            vs {price !== null ? `${data.currency}${price.toFixed(2)}` : '—'}
           </div>
         </div>
         <div className="ml-auto text-right">
