@@ -7,6 +7,9 @@ export type ChatEvent =
   | { event: 'thought'; data: { text: string } }
   | { event: 'tool_call'; data: { id: string; name: string; args: Record<string, unknown> } }
   | { event: 'tool_result'; data: { id: string; ok: boolean; summary: string } }
+  // P4.2: emitted once at the start of an authenticated turn so the client
+  // can capture the conversation id and reuse it on subsequent turns.
+  | { event: 'conversation'; data: { id: string; title?: string | null } }
   | { event: 'widget'; data: Widget }
   | { event: 'message'; data: { text: string } }
   | { event: 'error'; data: { message: string } }
@@ -16,6 +19,10 @@ export type ChatEventHandler = (event: ChatEvent) => void;
 
 export type ChatRequest = {
   message: string;
+  // P4.2: optional — when omitted, the backend creates a new conversation and
+  // announces its id via the `conversation` SSE event. The frontend echoes the
+  // id back on subsequent turns to continue the same thread.
+  conversation_id?: string;
   // No user_id — the backend derives identity from the JWT (P4.1).
 };
 
