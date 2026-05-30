@@ -4,10 +4,10 @@ import { AuthGate, useAuth } from '@/components/AuthGate';
 import { ChatBar } from '@/components/ChatBar';
 import { ThinkingCard, type Thought } from '@/components/ThinkingCard';
 import { WidgetRenderer } from '@/components/widgets/WidgetRenderer';
-import { streamChat, type ChatEvent } from '@/lib/sse';
+import { streamChat, type ChatEvent, type ChatRequest } from '@/lib/sse';
 import { getAccessToken, signOut } from '@/lib/supabase';
 import type { Widget } from '@/lib/widgets';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 // One agent run: user turn + chain of thoughts + zero or more widgets + final text
 type Turn = {
@@ -22,11 +22,30 @@ type Turn = {
 };
 
 export default function Home() {
+  return (
+    <AuthGate>
+      <ChatScreen />
+    </AuthGate>
+  );
+}
+
+function ChatScreen() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [pinnedWidgets, setPinnedWidgets] = useState<Widget[]>([]);
+  // P4.2: the active conversation. null = the next turn starts a new one;
+  // the backend echoes the id back via a `conversation` SSE event.
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const ctrlRef = useRef<AbortController | null>(null);
   const screenRef = useRef<HTMLDivElement>(null);
+
+  // Clear any active conversation when the signed-in user changes (incl.
+  // sign-out → null). Prevents one user's id from being echoed under another.
+  const userKey = useAuth().session?.user?.id ?? null;
+  useEffect(() => {
+    setConversationId(null);
+    setTurns([]);
+  }, [userKey]);
 
   async function handleSubmit(text: string) {
     if (streaming) return;
@@ -43,7 +62,17 @@ export default function Home() {
     // Attach the Supabase JWT (null in demo mode → backend uses the "demo" user)
     const token = await getAccessToken();
 
-    ctrlRef.current = streamChat({ message: text }, (ev: ChatEvent) => {
+    const body: ChatRequest = conversationId
+      ? { message: text, conversation_id: conversationId }
+      : { message: text };
+
+    ctrlRef.current = streamChat(body, (ev: ChatEvent) => {
+      // P4.2: capture the conversation id as soon as the backend announces it.
+      if (ev.event === 'conversation') {
+        setConversationId(ev.data.id);
+        return;
+      }
+
       setTurns((prev) =>
         prev.map((t) => {
           if (t.id !== turnId) return t;
@@ -97,109 +126,107 @@ export default function Home() {
   }
 
   return (
-    <AuthGate>
-      <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#2c2c2a] to-[#444441] p-6">
-        <div className="w-[390px] h-[844px] bg-bg rounded-[48px] shadow-2xl ring-[14px] ring-[#1a1a1a] relative overflow-hidden flex flex-col">
-          {/* Notch */}
-          <div className="absolute top-3 left-1/2 -translate-x-1/2 w-28 h-7 bg-[#1a1a1a] rounded-3xl z-50" />
+    <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#2c2c2a] to-[#444441] p-6">
+      <div className="w-[390px] h-[844px] bg-bg rounded-[48px] shadow-2xl ring-[14px] ring-[#1a1a1a] relative overflow-hidden flex flex-col">
+        {/* Notch */}
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 w-28 h-7 bg-[#1a1a1a] rounded-3xl z-50" />
 
-          {/* Status bar */}
-          <div className="px-7 pt-4 pb-2 flex justify-between text-sm font-medium text-text shrink-0">
-            <span>9:41</span>
-            <span>●●●● 5G</span>
-          </div>
-
-          {/* Scrollable screen */}
-          <div ref={screenRef} className="flex-1 overflow-y-auto overflow-x-hidden no-scrollbar pb-[120px]">
-            <Header />
-            <Hero pinnedCount={pinnedWidgets.length} />
-
-            {/* Pinned widgets (dashboard) */}
-            {pinnedWidgets.length > 0 && (
-              <div className="px-4 mt-1 space-y-2.5">
-                <SectionTitle>Pinned on home</SectionTitle>
-                {pinnedWidgets.map((w, i) => (
-                  <WidgetRenderer key={i} widget={w} />
-                ))}
-              </div>
-            )}
-
-            {/* Conversation turns */}
-            {turns.length === 0 && (
-              <div className="px-6 mt-4 text-[13px] text-text-3 leading-relaxed">
-                Tap one to begin — or type your own below:
-                <div className="mt-3 space-y-1.5">
-                  {[
-                    'give me a tldr on my portfolio',
-                    'research on Tencent',
-                    'how risky is my book?',
-                    'buy 10 shares of TSLA at limit 246, TP 290, SL 225',
-                  ].map((ex) => (
-                    <button
-                      key={ex}
-                      onClick={() => handleSubmit(ex)}
-                      disabled={streaming}
-                      className="block w-full text-left px-3 py-2 bg-surface rounded-lg active:scale-[0.98] transition-transform disabled:opacity-50"
-                    >
-                      {ex}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {turns.map((t) => (
-              <div key={t.id} className="px-4 mt-3">
-                {/* User bubble */}
-                <div className="flex justify-end">
-                  <div className="bg-accent text-white text-sm px-3.5 py-2 rounded-2xl rounded-br-md max-w-[85%]">
-                    {t.userText}
-                  </div>
-                </div>
-
-                {/* Thinking */}
-                {t.thoughts.length > 0 && (
-                  <ThinkingCard thoughts={t.thoughts} done={t.done} elapsedMs={t.elapsedMs} />
-                )}
-
-                {/* Widgets — pin button beneath each */}
-                {t.widgets.map((w, i) => (
-                  <div key={i} className="mt-3">
-                    <WidgetRenderer widget={w} />
-                    <button
-                      onClick={() => pinWidget(w)}
-                      className="mt-2 w-full py-2 rounded-full text-[12.5px] font-semibold bg-accent-bg text-accent border border-accent/20 active:scale-95 transition-transform"
-                    >
-                      Pin to home
-                    </button>
-                  </div>
-                ))}
-
-                {/* Plain text messages */}
-                {t.messages.map((m, i) => (
-                  <div key={i} className="mt-3 bg-surface border border-border text-sm px-3.5 py-2.5 rounded-2xl rounded-bl-md max-w-[85%]">
-                    {m}
-                  </div>
-                ))}
-
-                {/* Error */}
-                {t.error && (
-                  <div className="mt-3 bg-red-bg text-red-DEFAULT text-sm px-3.5 py-2.5 rounded-2xl">
-                    {t.error}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-
-          {/* Chat bar */}
-          <ChatBar onSubmit={handleSubmit} onMicTap={handleMicTap} disabled={streaming} />
+        {/* Status bar */}
+        <div className="px-7 pt-4 pb-2 flex justify-between text-sm font-medium text-text shrink-0">
+          <span>9:41</span>
+          <span>●●●● 5G</span>
         </div>
 
-        {/* Side panel — info / demo script */}
-        <SidePanel pinnedCount={pinnedWidgets.length} streaming={streaming} onPick={handleSubmit} />
-      </main>
-    </AuthGate>
+        {/* Scrollable screen */}
+        <div ref={screenRef} className="flex-1 overflow-y-auto overflow-x-hidden no-scrollbar pb-[120px]">
+          <Header />
+          <Hero pinnedCount={pinnedWidgets.length} />
+
+          {/* Pinned widgets (dashboard) */}
+          {pinnedWidgets.length > 0 && (
+            <div className="px-4 mt-1 space-y-2.5">
+              <SectionTitle>Pinned on home</SectionTitle>
+              {pinnedWidgets.map((w, i) => (
+                <WidgetRenderer key={i} widget={w} />
+              ))}
+            </div>
+          )}
+
+          {/* Conversation turns */}
+          {turns.length === 0 && (
+            <div className="px-6 mt-4 text-[13px] text-text-3 leading-relaxed">
+              Tap one to begin — or type your own below:
+              <div className="mt-3 space-y-1.5">
+                {[
+                  'give me a tldr on my portfolio',
+                  'research on Tencent',
+                  'how risky is my book?',
+                  'buy 10 shares of TSLA at limit 246, TP 290, SL 225',
+                ].map((ex) => (
+                  <button
+                    key={ex}
+                    onClick={() => handleSubmit(ex)}
+                    disabled={streaming}
+                    className="block w-full text-left px-3 py-2 bg-surface rounded-lg active:scale-[0.98] transition-transform disabled:opacity-50"
+                  >
+                    {ex}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {turns.map((t) => (
+            <div key={t.id} className="px-4 mt-3">
+              {/* User bubble */}
+              <div className="flex justify-end">
+                <div className="bg-accent text-white text-sm px-3.5 py-2 rounded-2xl rounded-br-md max-w-[85%]">
+                  {t.userText}
+                </div>
+              </div>
+
+              {/* Thinking */}
+              {t.thoughts.length > 0 && (
+                <ThinkingCard thoughts={t.thoughts} done={t.done} elapsedMs={t.elapsedMs} />
+              )}
+
+              {/* Widgets — pin button beneath each */}
+              {t.widgets.map((w, i) => (
+                <div key={i} className="mt-3">
+                  <WidgetRenderer widget={w} />
+                  <button
+                    onClick={() => pinWidget(w)}
+                    className="mt-2 w-full py-2 rounded-full text-[12.5px] font-semibold bg-accent-bg text-accent border border-accent/20 active:scale-95 transition-transform"
+                  >
+                    Pin to home
+                  </button>
+                </div>
+              ))}
+
+              {/* Plain text messages */}
+              {t.messages.map((m, i) => (
+                <div key={i} className="mt-3 bg-surface border border-border text-sm px-3.5 py-2.5 rounded-2xl rounded-bl-md max-w-[85%]">
+                  {m}
+                </div>
+              ))}
+
+              {/* Error */}
+              {t.error && (
+                <div className="mt-3 bg-red-bg text-red-DEFAULT text-sm px-3.5 py-2.5 rounded-2xl">
+                  {t.error}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Chat bar */}
+        <ChatBar onSubmit={handleSubmit} onMicTap={handleMicTap} disabled={streaming} />
+      </div>
+
+      {/* Side panel — info / demo script */}
+      <SidePanel pinnedCount={pinnedWidgets.length} streaming={streaming} onPick={handleSubmit} />
+    </main>
   );
 }
 
