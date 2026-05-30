@@ -26,7 +26,7 @@ Two env knobs (mirroring the codebase's USE_MOCK_* kill-switches):
     SUPABASE_URL          project URL — used to build the JWKS endpoint (asym).
     SUPABASE_JWT_SECRET   HS256 secret — only for legacy symmetric projects.
 
-Policy (resolve_user_id):
+Policy (resolve_user_id / resolve_auth):
     token present                       → verify; valid → sub (UUID); invalid → 401
     no token + REQUIRE_AUTH truthy      → 401
     no token + REQUIRE_AUTH falsy       → "demo"
@@ -34,11 +34,19 @@ Policy (resolve_user_id):
 Identity is ALWAYS derived from the token, never from the request body. A
 provided-but-invalid token is a 401 regardless of REQUIRE_AUTH (we never
 silently downgrade a bad token to demo).
+
+P4.2 additions (proposal 016):
+  • `AuthCtx(user_id, token)` + `resolve_auth` — same policy as resolve_user_id
+    but also exposes the raw token, so the request handler can forward it to
+    Supabase (`postgrest.auth(token)`) and let RLS enforce per-user isolation.
+  • `resolve_user_id` is kept for back-compat (and so the 012/015 tests
+    continue to pass unchanged).
 """
 
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 
 import jwt  # PyJWT (with the `crypto` extra → ES256/RS256 supported)
 from fastapi import Header, HTTPException
@@ -164,6 +172,7 @@ def resolve_user_id(authorization: str | None = Header(default=None)) -> str:
     """FastAPI dependency → the trusted user_id for this request.
 
     Inject into a route: `user_id: str = Depends(resolve_user_id)`.
+    Kept for back-compat (012/015 callers); P4.2 routes prefer `resolve_auth`.
     """
     token = _extract_bearer(authorization)
     if token:
@@ -171,3 +180,37 @@ def resolve_user_id(authorization: str | None = Header(default=None)) -> str:
     if require_auth():
         raise HTTPException(status_code=401, detail="authentication_required")
     return DEMO_USER_ID  # demo fallback (REQUIRE_AUTH off) — keeps mock demos working
+
+
+# ---------------------------------------------------------------------------
+# P4.2 — AuthCtx + resolve_auth
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class AuthCtx:
+    """Resolved auth — derived ONCE per request at the route boundary.
+
+    user_id : trusted UUID from the verified JWT, or "demo" when REQUIRE_AUTH=0
+              and no token was sent.
+    token   : the raw Bearer JWT (forwarded to Supabase via
+              `client.postgrest.auth(token)` so RLS sees the right `auth.uid()`)
+              or None in demo mode.
+    """
+
+    user_id: str
+    token: str | None
+
+
+def resolve_auth(authorization: str | None = Header(default=None)) -> AuthCtx:
+    """FastAPI dependency → AuthCtx{user_id, token}.
+
+    Same policy as `resolve_user_id`, but exposes the raw token so the route
+    can forward it to Supabase for per-user RLS-scoped queries (P4.2).
+    """
+    token = _extract_bearer(authorization)
+    if token:
+        return AuthCtx(user_id=verify_jwt(token), token=token)
+    if require_auth():
+        raise HTTPException(status_code=401, detail="authentication_required")
+    return AuthCtx(user_id=DEMO_USER_ID, token=None)
