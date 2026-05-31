@@ -1,6 +1,6 @@
 # API_CONTRACT.md — Agentic Brokerage MVP
 
-**Last changed:** 2026-05-29 · **Status:** v1.0 — matches the live Python backend
+**Last changed:** 2026-06-01 · **Status:** v1.1 — matches the live Python backend (P4.1 auth + P4.2 persistence applied)
 
 This is the **single source of truth for the HTTP boundary** between:
 
@@ -20,13 +20,35 @@ This is the **single source of truth for the HTTP boundary** between:
 - Backend runs as `uvicorn main:app` (dev: `cd backend && uv run uvicorn main:app --reload --port 8000`; prod: Railway, see `backend/railway.json`). `backend/` is on `sys.path` — there is no `backend.` package prefix.
 - Frontend reaches the backend either via Next.js rewrites (`/api/* → <backend>/api/*`, see `frontend/next.config.js`) or directly via `NEXT_PUBLIC_API_URL`. **Never hardcoded.**
 - Local dev: backend `http://localhost:8000`, frontend `http://localhost:3000`.
-- Only two endpoints exist today: `GET /healthz` and `POST /api/chat` (§5, §6). Everything else is **planned, not built** (§9).
+- Endpoints today: `GET /healthz` (§5), `POST /api/chat` (§6), `GET /api/conversations` + `GET /api/conversations/{id}` (§6b). Remaining additions (Mem0 / Langfuse / pinned-widget persistence) are **planned, not built** (§9).
 
-## 2. Authentication — NONE yet ⚠️
+## 2. Authentication — Supabase magic-link JWT (P4.1 ✅ applied 012 + 015)
 
-- **There is currently no auth.** `POST /api/chat` takes a `user_id` **in the request body**, defaulting to the string `"demo"`. It is client-supplied and therefore spoofable (SECURITY_AUDIT **HIGH-2**).
-- **Do not ship to separate real users in this state.** Real auth is **P4.1** (Supabase magic-link): the frontend will send `Authorization: Bearer <supabase_jwt>`, the backend will verify it and derive `user_id` server-side, and `user_id` will be **removed from the request body**. When P4.1 lands, update §5 + this section together.
-- No endpoint returns `401` today (nothing is gated).
+- The frontend signs in via **Supabase magic link** (`signInWithOtp`), then attaches the access token as `Authorization: Bearer <supabase_jwt>` on every request. The body **no longer carries `user_id`** — any client-supplied `user_id` field is silently dropped by Pydantic, and identity is derived **server-side** from the verified token's `sub` claim (a Supabase UUID). This closes SECURITY_AUDIT **HIGH-2** (the old spoofable-`"demo"` issue).
+- The backend's `verify_jwt` (in `backend/auth.py`) **dispatches on the token's header `alg`**:
+  - **`ES256` / `RS256` / `EdDSA`** — Supabase's "JWT Signing Keys" (current default). Verified against the project's published **JWKS public key** at `<SUPABASE_URL>/auth/v1/.well-known/jwks.json` for the token's `kid`. PyJWT's `PyJWKClient` caches keys after first fetch; the fetch runs in FastAPI's threadpool (the dependency is sync) so it never blocks the event loop. The anon key is sent as the `apikey` header.
+  - **`HS256`** — legacy symmetric secret, verified offline with `SUPABASE_JWT_SECRET`.
+  - **`none` / any other alg** — rejected as `unsupported_alg`.
+  - No alg-confusion risk: HS256 uses the secret, ES256 uses the JWKS public key — different key material, each pinned to its own `algorithms=[…]` allowlist at decode time.
+- The audience must be `"authenticated"` (Supabase's standard claim); 10-second clock-skew leeway.
+- **`REQUIRE_AUTH` env flag** (mirrors the codebase's `USE_MOCK_*` kill-switches):
+  - `REQUIRE_AUTH=1` (production posture, set in Railway) → unauthenticated requests are rejected with **401** `authentication_required`.
+  - `REQUIRE_AUTH=0` (local default) → a token-less request falls back to the `"demo"` user, so the deterministic mock demo, `scripts/smoke_test.sh`, and curl checks keep working. A token *if present* is always verified — a provided-but-invalid token is **never** silently downgraded to demo.
+- **401 error details** the backend may return (in the response body `{"detail":"…"}`):
+
+  | `detail` | Meaning |
+  |---|---|
+  | `authentication_required` | No token sent, but `REQUIRE_AUTH=1`. |
+  | `token_expired` | Signed token, but `exp` is in the past. |
+  | `invalid_token` | Bad signature / wrong audience / malformed / `kid` not in JWKS. |
+  | `token_missing_sub` | Token verified but had no `sub` claim. |
+  | `unsupported_alg` | Header `alg` is none / not in our allowlist. |
+- **5xx details related to auth/persistence:**
+
+  | Status | `detail` | Meaning |
+  |---|---|---|
+  | 500 | `auth_not_configured` | HS256 token arrived but no `SUPABASE_JWT_SECRET` is set. |
+  | 503 | `jwks_unavailable` | JWKS public-key fetch failed (network blip / wrong `SUPABASE_URL`). |
 
 ## 3. CORS
 
@@ -57,13 +79,19 @@ No auth, no body. Returns `200` with:
   "model": "claude-opus-4-5",
   "tools_registered": ["get_portfolio", "get_quote", "...", "chart_apply_indicator"],
   "alpaca_configured": true,
-  "anthropic_key_present": true
+  "anthropic_key_present": true,
+  "require_auth": false,
+  "auth_configured": true,
+  "persistence_configured": true
 }
 ```
 
 - `model` — the `ANTHROPIC_MODEL` in use.
-- `tools_registered` — the agent's tool names (18 as of 2026-05-29). Diagnostic only; not part of the chat contract.
+- `tools_registered` — the agent's tool names (18 as of 2026-06-01). Diagnostic only; not part of the chat contract.
 - `alpaca_configured` / `anthropic_key_present` — booleans derived from key presence/prefix. Used to spot mis-configured deploys.
+- `require_auth` (P4.1) — value of the `REQUIRE_AUTH` env var as a bool. **Must be `true` in production.**
+- `auth_configured` (P4.1) — `true` when **either** `SUPABASE_URL` (asymmetric path: JWKS) **or** `SUPABASE_JWT_SECRET` (HS256 path) is set to a non-placeholder value. A deploy with `require_auth: true` but `auth_configured: false` is mis-configured (every authed request would 401 / 500).
+- `persistence_configured` (P4.2) — `true` when `SUPABASE_URL` + `SUPABASE_ANON_KEY` are both real (non-placeholder). When `false`, the persistence layer (§6b) silently no-ops — chat still streams, but turns aren't saved.
 
 ---
 
@@ -73,19 +101,20 @@ The one endpoint that matters. The frontend sends a single user message; the bac
 
 ### Request
 
-Headers: `Content-Type: application/json` (and `Accept: text/event-stream`). No `Authorization` yet (§2).
+Headers: `Content-Type: application/json` (and `Accept: text/event-stream`). **`Authorization: Bearer <supabase_jwt>`** when signed in (P4.1, §2). Demo / `REQUIRE_AUTH=0` requests may omit it.
 
 Body (`ChatRequest` in `main.py`):
 
 ```json
 {
   "message": "what's NVDA doing today?",
-  "user_id": "demo"
+  "conversation_id": "eb98059d-ae39-4cbb-9f37-1616349c821b"
 }
 ```
 
-- `message` — **required**, string, length 1–4096. The single new user turn. *(There is no server-side history today — each call is one turn. Multi-turn / `conversation_id` arrives with P4.2, §9.)*
-- `user_id` — optional, string, length 1–128, default `"demo"`. **Client-supplied today** (§2); will move to the JWT at P4.1.
+- `message` — **required**, string, length 1–4096. The single new user turn.
+- `conversation_id` — **optional** (P4.2), string ≤ 64 chars. When omitted, the backend creates a new conversation and announces its id via the `conversation` SSE event (see below). When provided, that conversation is continued — RLS guarantees it must be owned by the authenticated user, otherwise the backend silently creates a fresh row rather than disclose its existence.
+- `user_id` is **no longer accepted** (it was the spoofable client field; identity now derives from the JWT). Any stray `user_id` in the body is silently dropped (Pydantic ignores extra fields), so old callers don't break.
 
 ### Response — Server-Sent Events
 
@@ -102,24 +131,92 @@ data: <single-line JSON>\r\n
 > - `sse-starlette` injects periodic keep-alive **comment** lines (`: ping - <timestamp>`). They are not events; ignore any line starting with `:`.
 > - Emission is incremental but the contract only promises a *stream of events* in order — a consumer must not assume timing.
 
-Event types (`agent.py`), in typical emission order:
+Event types (`agent.py` + `main.py`), in typical emission order:
 
-| `event`       | `data` payload                                              | meaning |
-|---------------|-------------------------------------------------------------|---------|
-| `thought`     | `{ "text": "Reading your portfolio…" }`                     | one human-readable breadcrumb. 0..N. |
-| `tool_call`   | `{ "id": "toolu_…", "name": "get_quote", "args": { … } }`   | a tool was invoked. diagnostic. |
-| `tool_result` | `{ "id": "toolu_…", "ok": true, "summary": "get_quote → 1 quotes" }` | result of the matching `tool_call` (same `id`). diagnostic. |
-| `widget`      | a Widget object — `{ "type", "data", "sources" }` (§7)      | the generative UI card. Typically exactly one, terminal. |
-| `message`     | `{ "text": "markdown…" }`                                   | plain markdown reply (loose chat, not pinnable). Terminal alternative to `widget`. |
-| `error`       | `{ "message": "…" }`                                         | failure. terminal. |
-| `done`        | `{ "elapsed_ms": 8421, "iterations": 3 }`                   | stream complete. always the final event on success. |
+| `event`        | `data` payload                                              | meaning |
+|----------------|-------------------------------------------------------------|---------|
+| `conversation` | `{ "id": "uuid", "title": "…" \| null }`                    | **(P4.2)** Emitted at most once, *before* the agent stream starts, when the request is authenticated AND persistence is configured. The frontend captures this id and echoes it as `conversation_id` on subsequent turns. Absent in demo mode. |
+| `thought`      | `{ "text": "Reading your portfolio…" }`                     | one human-readable breadcrumb. 0..N. |
+| `tool_call`    | `{ "id": "toolu_…", "name": "get_quote", "args": { … } }`   | a tool was invoked. diagnostic. |
+| `tool_result`  | `{ "id": "toolu_…", "ok": true, "summary": "get_quote → 1 quotes" }` | result of the matching `tool_call` (same `id`). diagnostic. |
+| `widget`       | a Widget object — `{ "type", "data", "sources" }` (§7)      | the generative UI card. Typically exactly one, terminal. |
+| `message`      | `{ "text": "markdown…" }`                                   | plain markdown reply (loose chat, not pinnable). Terminal alternative to `widget`. |
+| `error`        | `{ "message": "…" }`                                         | failure. terminal. |
+| `done`         | `{ "elapsed_ms": 8421, "iterations": 3 }`                   | stream complete. always the final event on success. |
 
 Rules:
 
 - A successful turn ends with **exactly one** terminal payload — a `widget` **or** a `message` — followed by `done`.
 - `tool_call` and its `tool_result` share the same `id`. Tool calls may run in parallel; results may arrive in any order.
 - On failure, an `error` event is emitted; `done` may or may not follow. (Pre-stream failures surface as a normal HTTP error instead.)
-- Frontend rendering: `thought` → breadcrumbs; `widget` → card; `message` → chat bubble; `tool_call` / `tool_result` → **dev mode only**.
+- Persistence failures (DB unreachable, write rejected) are **swallowed** — the user-facing stream is never broken by a persistence hiccup; the turn just doesn't get saved. Surfaced operationally via `/healthz.persistence_configured` and via missing rows the user can spot in `GET /api/conversations`.
+- Frontend rendering: `conversation` → captured as the current id (not displayed); `thought` → breadcrumbs; `widget` → card; `message` → chat bubble; `tool_call` / `tool_result` → **dev mode only**.
+
+---
+
+---
+
+## 6b. Conversation routes (P4.2 ✅ applied 016)
+
+These read user-scoped chat history. **Both are RLS-protected** — the backend forwards the user's JWT to Supabase via `client.postgrest.auth(user_jwt)`, so PostgreSQL's `auth.uid() = user_id` policy physically prevents any user from reading another's rows. The Supabase **service key is NOT used** in `db.py`; it would bypass RLS and is reserved for admin tasks.
+
+### `GET /api/conversations`
+
+Lists the authenticated user's conversations, most-recently-updated first (limit 50).
+
+Headers: `Authorization: Bearer <supabase_jwt>`.
+
+Response `200`:
+
+```json
+{
+  "conversations": [
+    {
+      "id": "eb98059d-ae39-4cbb-9f37-1616349c821b",
+      "title": "give me a tldr on my portfolio",
+      "created_at": "2026-06-01T10:42:11.123456Z",
+      "updated_at": "2026-06-01T10:43:02.987654Z"
+    }
+  ]
+}
+```
+
+- **Demo mode** (no token, `REQUIRE_AUTH=0`) → returns `{"conversations": []}`. Same shape when `persistence_configured` is `false`.
+- **A user with no conversations** → returns `{"conversations": []}`.
+- 401 with the usual `detail` (§2) when `REQUIRE_AUTH=1` and no/bad token.
+
+### `GET /api/conversations/{conversation_id}`
+
+Returns the ordered messages of one conversation owned by the authenticated user.
+
+Headers: `Authorization: Bearer <supabase_jwt>`. Path: `{conversation_id}` is a UUID.
+
+Response `200`:
+
+```json
+{
+  "conversation_id": "eb98059d-ae39-4cbb-9f37-1616349c821b",
+  "messages": [
+    { "id": "…", "role": "user",      "content": "…", "widgets": null,    "created_at": "…" },
+    { "id": "…", "role": "assistant", "content": "…", "widgets": [ … ],   "created_at": "…" }
+  ]
+}
+```
+
+- `role` ∈ `"user"` | `"assistant"`.
+- `widgets` — array of full widget envelopes (§7) the assistant emitted that turn, or `null` for user rows / pure-text replies.
+- **Returns `404 not_found`** for a missing conversation **or** a conversation owned by a different user — those cases are indistinguishable by design (RLS returns the empty set; the backend doesn't disclose existence). Demo mode also returns 404.
+
+### Schema (where it lives)
+
+`backend/db/schema.sql` (run once in the Supabase SQL Editor). Four `public` tables, all with RLS on and the policy `for all to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id)`:
+
+| Table | Purpose | Wired to an endpoint? |
+|---|---|---|
+| `conversations` | One row per chat session: `id, user_id, title, created_at, updated_at`. `set_updated_at` trigger bumps `updated_at` on UPDATE. | Yes — §6 + this section. |
+| `messages` | One row per turn: `id, conversation_id, user_id, role, content, widgets (jsonb), created_at`. | Yes — written by `/api/chat`, read by §6b above. |
+| `pinned_widgets` | One row per pinned widget. RLS on, but **frontend wiring deferred** to a follow-up — pins still live in client state today. | Not yet. |
+| `user_profiles` | Per-user metadata (`user_id PK`, `display_name`, …). | Not yet. |
 
 ---
 
@@ -198,8 +295,11 @@ Notes on fields that recently changed:
 
 These do **not** exist on the backend today. Listed so the boundary is unambiguous — add them here (with real shapes) when they land.
 
-- **Auth headers** (`Authorization: Bearer`) — **P4.1** (Supabase magic-link). Replaces body `user_id`.
-- **`GET /api/conversations`** + optional `conversation_id` on `ChatRequest` — **P4.2** (Supabase persistence). Reuse the `Finance_Chatbot` schema shape; RLS-scoped to the authenticated `user_id`.
+- **Pinned-widget persistence routes** — `GET /api/pinned_widgets`, `POST /api/pinned_widgets`, `DELETE /api/pinned_widgets/{id}`. The `pinned_widgets` table is in §6b's schema with RLS already on; only the routes + frontend wiring are missing.
+- **Conversation-history UI** — backend reads exist (§6b); a sidebar/picker in the frontend that calls them is a follow-up.
+- **P4.3 — Mem0 memory.** Per-user fact recall injected into the system prompt before the LLM call and stored after. Scoped to the authenticated `user_id` UUID — never a client-supplied value (cross-user-leak hazard). No new public route; lives inside the existing `/api/chat` flow.
+- **P4.4 — Langfuse observability.** Wraps the agent loop with traces tagged by the authenticated `user_id`. Read-only side-effect; no public route.
+- **Service-key admin routes** — none planned; the service key bypasses RLS and is reserved for one-off ops.
 - No `/api/trades`, `/api/config`, `PATCH`/`DELETE` routes are planned — those were artefacts of the old Node design and are removed.
 
 ## 10. Versioning
