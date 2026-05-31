@@ -430,6 +430,48 @@ Every one was found by diffing applied vs proposed, running key-independent test
 
 **Next session:** Apply 016 (`uv sync`, paste schema, set the runbook in motion). Then P4.3 (Mem0) and P4.4 (Langfuse) can fan out — both consume the same authenticated `user_id` 015/016 establish. Pin-widget persistence + conversation-history UI are post-P4.3/4 polish.
 
+---
+
+## 2026-06-01 · 016 applied — **P4.2 VERIFIED ✅ — SECURITY_AUDIT HIGH-2 cleared**
+
+**What landed:** Tom applied proposal 016 — `backend/auth.py` (AuthCtx + resolve_auth), new `backend/db.py` (async user-scoped persistence), new `backend/db/schema.sql` (4 RLS-protected tables + policies + trigger), `backend/main.py` (persistence wiring + `conversation` SSE event + 2 new GET routes + `/healthz.persistence_configured`), `backend/pyproject.toml` (`supabase>=2.10.0,<2.28.0` moved to main deps), `frontend/{lib/sse.ts, app/page.tsx}` (conversation_id round-trip). `scripts/test_P4_016_persistence.py` moved to repo scripts/.
+
+**Two operational gotchas surfaced during apply and resolved:**
+
+1. **First `uv sync` ripped supabase out of the venv.** Tom had applied 016's code files but not yet `pyproject.toml`, so `uv sync` reconciled against the *old* pyproject (supabase only in the `auth` group, not main deps) and uninstalled the supabase 2.10 stack (gotrue, postgrest, storage3, realtime, supafunc, deprecation, h2*, hyperframe) that had been transiently installed during my pre-apply verification. Backend then failed to boot on `import supabase`. **Fix:** apply pyproject *first*, then `uv sync` installs the supabase deps as declared. *Lesson:* on any proposal carrying a pyproject delta, apply ordering matters — fold a note into `proposed_changes/README.md` on the next workflow pass.
+2. **`db/schema.sql` failed with `ERROR: 42703: column "user_id" does not exist`.** Tom initially ran it in the **wrong Supabase project** — the brother's `Finance_Chatbot` Node project on the same workspace, which had pre-existing tables `conversations`/`messages`/etc. with different column conventions. `create table if not exists` was a no-op against the existing rows, then the `create index … on conversations(user_id, …)` (or the policy `auth.uid() = user_id`) errored because that column doesn't exist on the brother's tables. **Fix:** ran in the correct (agentic-brokerage) project — schema deployed clean. No cross-project rename needed.
+
+**P4.2 verification — the actual HIGH-2 gate, ran end-to-end:**
+
+Two real Supabase accounts on the project — User A `e09942bf-7d65-4134-9a9a-d26f4ac30cd8`, User B `a10c7d99-6894-47d3-b722-a2b55448e989`. Each signed in via magic link in a separate browser context (incognito for B → independent `localStorage`). Each drove their own chat turn so each had a real row in `conversations` + `messages`.
+
+- **Step 4 — restart-survival.** Captured `/api/conversations` + `/api/conversations/$CID` baselines under TOKEN_A, `Ctrl-C`-ed uvicorn, relaunched, recaptured. **A's conversation + messages are byte-identical pre and post-restart** — proves data lives in Postgres, not process memory.
+- **Step 5 — two-account RLS isolation.** Three orthogonal assertions, all green:
+  1. B's `GET /api/conversations` returns **only B's** id (`["02899b72-…"]`) — A's CID absent.
+  2. B's `GET /api/conversations/$CID` (A's id) → **HTTP 404** (RLS hides A's row from a foreign reader; backend reports `not_found`).
+  3. A's own list still contains A's CID (no collateral damage from B's request).
+
+Final assertion: **`P4.2 verified ✅`**. The per-user data isolation the SECURITY_AUDIT pinned as HIGH-2 is now load-tested under real RLS, against two real authed users, via two real JWTs verified through the JWKS path that 015 established.
+
+**Tooling lesson — silent ✗ masquerading as ✓.** During an early pass of step 4, both `_before.json` and `_after.json` contained `{"detail":"token_expired"}` because TOKEN_A had aged out (Supabase default 1h TTL) mid-debug. The naïve pattern `diff <(cmd_a | jq '.x[]') <(cmd_b | jq '.x[]') && echo ✓` *passed* — because both jq invocations errored on null-deref and emitted nothing to stdout; `diff` of empty vs empty exit-0; the `&&` happily printed ✓. **Fix in the runbook going forward: `jq -e`** (treats empty/false/null as exit 1) so a broken pipe honestly fails the `&&`; and/or print the raw body before jq when a check fails. Folded into the user-facing verification scripts.
+
+**State after this session:**
+
+- ✅ **P4.1 — Supabase magic-link auth** (proposals 012 + 015 applied + verified — ES256 JWKS verification; signed-in `/api/chat` returns 200; `REQUIRE_AUTH` flag-gated demo path preserved).
+- ✅ **P4.2 — persistence + RLS** (proposal 016 applied + verified — two-account isolation gate green; restart-survival green).
+- ▶ **Next:** **P4.3 (Mem0 memory)** and **P4.4 (Langfuse observability)** — both consume the same authenticated `user_id` 012/015/016 establish; per PRIORITIES_EXPLAINED, they fan out in parallel post-P4.1/4.2, with P4.4 ranked higher leverage (unblocks debugging + the P7-LLM eval gate). Both brother-owned.
+
+**Carry-forward (small, tracked):**
+
+- `API_CONTRACT.md` — needs the 016 additions (new SSE event `conversation`, new routes `GET /api/conversations` + `GET /api/conversations/{id}`, optional `conversation_id` on `POST /api/chat`, `/healthz.persistence_configured`) and the 015 additions (`401 unsupported_alg`, `503 jwks_unavailable` details). Scoped — ~15 min.
+- `CLAUDE.md` tech-stack table — Mem0 / Langfuse rows defer until P4.3 / P4.4 land.
+- `proposed_changes/README.md` workflow doc — note "apply `pyproject.toml` before `uv sync`" gotcha.
+- `proposed_changes/016-supabase-persistence-rls/` — Tom's manual archive to `applied/`.
+
+**Did NOT do:**
+- Did NOT start P4.3 / P4.4 — awaiting Tom's direction on which to begin.
+- Did NOT update `API_CONTRACT.md` — flagged for next session, scoped change.
+
 **Next session:**
 
 - Apply 012: `cd backend && uv sync`; set `SUPABASE_JWT_SECRET` + `REQUIRE_AUTH` (`.env`) and `NEXT_PUBLIC_SUPABASE_*` (`.env.local`); allow the redirect origin in Supabase Auth settings. Run `scripts/test_P4_012_auth.py` (18/18) + a live magic-link login via `pnpm dev`, then flip `REQUIRE_AUTH=1` and confirm the 401. Update `API_CONTRACT.md`.

@@ -24,14 +24,18 @@ dependencies = [
     # harmless. (The 012 "avoid cryptography" rationale no longer applies —
     # asymmetric verification needs it.)
     "pyjwt[crypto]>=2.9.0",
+    # P4.2 persistence — Supabase async Postgres client (backend/db.py).
+    # Pinned <2.28.0: storage3 2.28+ pulls `pyiceberg` (Apache Iceberg + Arrow
+    # stack), which currently fails to build on macOS/py3.14 and is heavy
+    # baggage for our use-case. Bump the cap when storage3 decouples the
+    # iceberg extra (track supabase-community/storage-py).
+    "supabase>=2.10.0,<2.28.0",
 ]
 
 [dependency-groups]
-# `auth` group — Supabase + PostHog. The Supabase Python client is NOT needed
-# for P4.1 (JWT verification is done with PyJWT + JWKS above); it lands with
-# P4.2 persistence (backend/db.py). Install with: uv sync --group auth
+# Optional analytics. Was the `auth` group before P4.1/P4.2 made `supabase`
+# a core dep — now just posthog (backend-side event tracking, used at P5).
 auth = [
-    "supabase>=2.10.0",
     "posthog>=3.7.0",
 ]
 dev = [
