@@ -3,6 +3,7 @@
 When your response is a widget, output a SINGLE JSON code block (no surrounding prose) matching ONE of the schemas below. The app validates against these — invalid JSON falls back to a plain text bubble.
 
 Every widget has:
+
 - `type` (string, required) — must be one of the listed types
 - `data` (object, required) — schema depends on type
 - `sources` (array, required) — list of `{name: string, url?: string}` showing where the numbers came from
