@@ -32,6 +32,9 @@ Env vars (backend/.env / .env.example):
     USE_MOCK_TA              = "1" forces mock path even when MCP is configured
     TRADINGVIEW_MCP_COMMAND  = "node"
     TRADINGVIEW_MCP_ARGS     = "/abs/path/to/tradingview-mcp/src/server.js"
+                               (single absolute path — passed verbatim, NOT
+                                split on whitespace, so paths with spaces /
+                                en-dashes / quotes work without escaping)
     TRADINGVIEW_MCP_CDP_PORT = "9222"  (passed to the server via env)
 """
 
@@ -111,12 +114,19 @@ def _tradingview_config() -> _ServerConfig | None:
     if not command or not args:
         return None
     cdp_port = os.getenv("TRADINGVIEW_MCP_CDP_PORT", "9222")
-    # Args is a single string in env; split by whitespace. For paths with spaces
-    # set the env var via a script that handles quoting properly.
+    # Pass TRADINGVIEW_MCP_ARGS as a SINGLE argument — do NOT split on whitespace.
+    # The previous implementation did `args.split()`, which broke any path with
+    # spaces (e.g. macOS "Documents – SNG058/Work/…"): Node would receive only
+    # the first whitespace-delimited fragment and crash with
+    # `MODULE_NOT_FOUND: Cannot find module '/Users/.../Documents'`. Proposal 021.
+    #
+    # If a multi-arg invocation is ever needed, introduce a separate
+    # `TRADINGVIEW_MCP_EXTRA_ARGS` (parsed with `shlex.split` so quoting works)
+    # rather than overloading this var.
     return _ServerConfig(
         name="tradingview",
         command=command,
-        args=args.split(),
+        args=[args],
         env={"TV_CDP_PORT": cdp_port},
         err_unreachable=MCPUnreachable,
     )
