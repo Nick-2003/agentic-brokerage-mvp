@@ -30,6 +30,12 @@ dependencies = [
     # baggage for our use-case. Bump the cap when storage3 decouples the
     # iceberg extra (track supabase-community/storage-py).
     "supabase>=2.10.0,<2.28.0",
+    # P4.4 observability — Langfuse traces around the agent loop
+    # (backend/observability.py). v4.x is the current line; OTel-based API
+    # (`start_as_current_observation`, `propagate_attributes`). Pure-Python.
+    # No-ops gracefully when LANGFUSE_PUBLIC_KEY/SECRET aren't set, so the
+    # backend boots and serves /api/chat without Langfuse credentials too.
+    "langfuse>=4.7.0,<5.0.0",
 ]
 
 [dependency-groups]

@@ -13,8 +13,11 @@ Exposes:
     GET  /api/conversations/{id}        — fetch the messages in a conversation
 
 P4.1 (012/015): identity comes from the verified JWT, never the request body.
-P4.2 (016): when authenticated, each turn is persisted to Supabase under the
-user's JWT (so RLS enforces). Demo mode persists nothing — ephemeral.
+P4.2 (016):     when authenticated, each turn is persisted to Supabase under the
+                user's JWT (so RLS enforces). Demo mode persists nothing.
+P4.4 (017):     each turn is wrapped in a Langfuse trace (`observability.trace_chat`)
+                so the agent loop, tool calls, token usage, and latencies show up
+                per-user in the Langfuse dashboard. No-op when unconfigured.
 """
 
 from __future__ import annotations
@@ -34,6 +37,7 @@ load_dotenv()
 
 # Import agent AFTER load_dotenv so module-level env reads work
 import db  # noqa: E402
+import observability  # noqa: E402
 from agent import MODEL, run_agent  # noqa: E402
 from auth import AuthCtx, auth_configured, require_auth, resolve_auth  # noqa: E402
 from tools import TOOL_REGISTRY  # noqa: E402
@@ -82,6 +86,8 @@ async def healthz() -> dict[str, Any]:
         "auth_configured": auth_configured(),
         # P4.2 persistence diagnostics.
         "persistence_configured": db.persistence_configured(),
+        # P4.4 observability diagnostics.
+        "langfuse_configured": observability.langfuse_configured(),
     }
 
 
@@ -110,16 +116,13 @@ async def chat(
     req: ChatRequest,
     auth: AuthCtx = Depends(resolve_auth),
 ) -> EventSourceResponse:
-    """Stream agent output as SSE; persist authenticated turns to Supabase.
+    """Stream agent output as SSE; persist authenticated turns to Supabase;
+    record one Langfuse trace per turn.
 
     SSE events: thought, tool_call, tool_result, widget, message, error, done.
-    P4.2 adds: `conversation` (emitted once at the start with {id, title?}) so
-    the frontend can capture the id and reuse it on subsequent turns.
-
-    Persistence (auth.token is set):
-      • pre-stream:  get-or-create conversation, write the user message
-      • post-stream: write the assistant message (accumulated widgets + text)
-    Demo mode (auth.token is None): persistence skipped entirely.
+    P4.2 adds: `conversation` (emitted once at the start with {id, title?}).
+    Persistence and observability are both best-effort — a Supabase or Langfuse
+    hiccup never breaks the user-facing stream.
     """
 
     # ---- pre-stream: ensure a conversation, write the user message ----
@@ -148,49 +151,56 @@ async def chat(
             conversation_id = None
 
     async def event_stream():
-        # Surface the conversation id ASAP so the frontend can capture it
-        # before any agent error/timeout.
-        if conversation_id:
-            yield {
-                "event": "conversation",
-                "data": json.dumps(
-                    {"id": conversation_id, "title": conversation_title},
-                    ensure_ascii=False,
-                ),
-            }
-
-        text_acc: list[str] = []
-        widget_acc: list[dict[str, Any]] = []
-
-        try:
-            async for ev in run_agent(req.message, auth.user_id):
-                if ev["event"] == "widget":
-                    widget_acc.append(ev["data"])
-                elif ev["event"] == "message":
-                    text_acc.append(ev["data"].get("text", ""))
+        # Open the Langfuse trace for this turn. When unconfigured this yields
+        # a no-op tracer and is a zero-cost passthrough.
+        async with observability.trace_chat(
+            user_id=auth.user_id,
+            conversation_id=conversation_id,
+            message=req.message,
+        ) as tracer:
+            # Surface the conversation id ASAP so the frontend can capture it
+            # before any agent error/timeout.
+            if conversation_id:
                 yield {
-                    "event": ev["event"],
-                    "data": json.dumps(ev["data"], ensure_ascii=False),
+                    "event": "conversation",
+                    "data": json.dumps(
+                        {"id": conversation_id, "title": conversation_title},
+                        ensure_ascii=False,
+                    ),
                 }
-        except Exception as e:
-            yield {
-                "event": "error",
-                "data": json.dumps({"message": f"stream failed: {e}"}),
-            }
 
-        # ---- post-stream: persist the assistant turn (best effort) ----
-        if conversation_id and auth.token and (text_acc or widget_acc):
+            text_acc: list[str] = []
+            widget_acc: list[dict[str, Any]] = []
+
             try:
-                await db.add_message(
-                    auth.token,
-                    conversation_id,
-                    auth.user_id,
-                    role="assistant",
-                    content="\n\n".join(t for t in text_acc if t) or None,
-                    widgets=widget_acc or None,
-                )
-            except Exception:
-                pass  # don't fail the stream on a DB hiccup
+                async for ev in run_agent(req.message, auth.user_id, tracer=tracer):
+                    if ev["event"] == "widget":
+                        widget_acc.append(ev["data"])
+                    elif ev["event"] == "message":
+                        text_acc.append(ev["data"].get("text", ""))
+                    yield {
+                        "event": ev["event"],
+                        "data": json.dumps(ev["data"], ensure_ascii=False),
+                    }
+            except Exception as e:
+                yield {
+                    "event": "error",
+                    "data": json.dumps({"message": f"stream failed: {e}"}),
+                }
+
+            # ---- post-stream: persist the assistant turn (best effort) ----
+            if conversation_id and auth.token and (text_acc or widget_acc):
+                try:
+                    await db.add_message(
+                        auth.token,
+                        conversation_id,
+                        auth.user_id,
+                        role="assistant",
+                        content="\n\n".join(t for t in text_acc if t) or None,
+                        widgets=widget_acc or None,
+                    )
+                except Exception:
+                    pass  # don't fail the stream on a DB hiccup
 
     return EventSourceResponse(event_stream())
 
