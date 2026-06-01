@@ -608,3 +608,34 @@ Nicholas chose the following sequence: reference-doc catchup first, then **P4.4 
 - **Apply order:** 022 first, then 023. 022 is the smaller surgical fix (audible failures + trust-#3 R/S); 023 is the structural rewrite that makes the parser correct against real shapes. Sequential apply preserves a clean audit trail of "each proposal does one thing." (Skipping 022 and going straight to 023 also works — 023's `_real_technical_levels` was built on top of 022's restructuring — but the audit gets murkier.)
 - **Pattern continues:** 023 is the **seventh proposal touching applied 002's footprint** (004 / 007 / 019 / 021 / 022 / 023 / + 002 itself). The cluster is now large enough to be a documented lesson — flagged for a CLAUDE.md note in the next housekeeping pass: any "big-bang integration" proposal that can't real-mode-integration-test at apply time should expect ~5-7 small follow-ups during the first weeks of real use.
 - **Renumber:** Mem0 → **proposal 024** (third bump this session). After 023 applies, P1.2 is genuinely complete and Mem0 becomes the unambiguous next track.
+
+---
+
+## ✱ Naming correction (this session)
+
+The user is **Nicholas** (Tsun Li Nicholas Tam, per the Supabase email in the JWT decoded earlier this session). Past entries in this log refer to him as "Tom" — that was claude's mistake, pulled forward from an old assumption in `CLAUDE.md` / `CONTEXT_TRANSFER.md` and never corrected. **All references to "Tom" elsewhere in this log refer to Nicholas.** Going forward, claude addresses the user as Nicholas in all new entries, all proposal READMEs, and all reference docs. Folded into the 2026-06-01 `CONTEXT_TRANSFER.md` refresh.
+
+---
+
+## 2026-06-01 (later) · 023 applied surfaced the 200K-token cap → Proposal 024 drafted + reference docs refreshed
+
+Nicholas applied 023. The chart card now uses real shapes from the MCP server — but the very next real-mode chart prompt hit Claude's context window:
+
+```
+agent error: Error code: 400 — 'prompt is too long: 239600 tokens > 200000 maximum'
+```
+
+**Root cause** (predictable in hindsight): 023 made `capture_screenshot` actually work end-to-end — `screenshot_url` is now ~hundreds of KB of base64 PNG. `agent.py` echoes the full tool result back to Claude on every iteration via the `tool_result` message content. Two parallel `chart_apply_indicator` calls (one per SMA) attached two screenshots to the message history; with system prompt (~30K) + widget contract (~10K) + other accumulated tool results, the next iteration's input crossed 239K tokens. The screenshot was needed for the *widget* render (frontend), not for re-feeding the LLM, but the agent loop didn't distinguish.
+
+- **Proposal 024** (`024-llm-context-screenshot-strip/`, one file `backend/agent.py` + new offline test):
+  - New `_compact_for_llm(result)` — replaces any `screenshot_url` `data:` URL larger than 1 KB with `""` (the canonical "no real screenshot" sentinel from 019/023) before serialisation into the LLM-bound `tool_result` message content. Idempotent, non-mutating, defensive against non-dicts.
+  - New `_restore_screenshot_in_widget(widget, urls)` — before yielding the terminal `widget` SSE event, substitutes the most-recently-produced real URL back into `widget.data.screenshot_url` (the LLM emitted `""` because that's all it ever saw in its context).
+  - `run_agent` wiring: per-turn `screenshot_urls_by_tool: dict[str, str]` map tracks the originals; the compaction happens at the point of `json.dumps()` into the LLM payload; the Langfuse `tool:*` span (017 contract) still receives the full unstripped result for debugging.
+- **Verified pre-apply:** `py_compile` ✓; new `scripts/test_P1_024_screenshot_context.py` → **16/16** including the byte-savings sanity check (real-mode tool result with a 200 KB screenshot: **205,263 bytes raw → 441 bytes compacted, >99% reduction**). 11 cases on `_compact_for_llm` (large/small/empty/non-dict/None/list/idempotent), 5 on `_restore_screenshot_in_widget` (single tool, multiple tools picking most-recent, no-op-on-empty, widgets without `screenshot_url`, defensive against missing `.data`).
+- **Pattern continues, in a useful way:** 024 is the **eighth proposal touching applied 002's footprint** but it's also a *new* kind — 023's success (real screenshots flowing) unlocked this one. Not a pre-existing latent bug; an emergent consequence of the system actually working. Different category from the 004/007/019/021/022/023 chain.
+- **Renumber:** Mem0 → **proposal 025** (fourth bump this session). After 024 the chart card finally works end-to-end in real mode and Mem0 is the unambiguous next track.
+
+**Reference docs refreshed in the same turn (per the workflow's "reference docs edited directly" rule):**
+
+- **`CONTEXT_TRANSFER.md`** updated to reflect the full state since 2026-05-29 — applied proposals 010–024, P4.1+P4.2+P4.4 all done, P4.3 (Mem0) as the active next track, the 002-cluster pattern note for future big-bang integration proposals, the source-fidelity rule (020), the 014 demo-mode escape hatch, the JWKS verification path (015), and the Nicholas naming correction throughout. Last-updated date bumped from 2026-05-29 → 2026-06-01.
+- **Naming correction** — see the ✱ block above. All past "Tom" references in this log refer to Nicholas; going forward claude uses Nicholas in new entries / proposal READMEs / reference docs.
