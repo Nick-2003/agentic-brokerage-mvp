@@ -7,7 +7,7 @@
 We're optimising for *evidence of product-market fit*, not feature completion. PMF lives in three signals:
 
 | Signal | What it tells us |
-|---|---|
+| --- | --- |
 | **Retention** | Are users coming back without prompting? |
 | **Activation** | Do users get to a "magic moment" in their first session? |
 | **Referral** | Do users tell others about it without being asked? |
@@ -19,7 +19,7 @@ The Sean Ellis test (40%+ "very disappointed") is the gold standard once we have
 ### Retention
 
 | Cohort | Target | Stretch |
-|---|---|---|
+| --- | --- | --- |
 | **D1 retention** | ≥50% | ≥65% |
 | **D7 retention** | ≥30% | ≥45% |
 | **D30 retention** | ≥20% | ≥35% (Sean Ellis zone) |
@@ -31,7 +31,7 @@ Defined as: a user who created an account on day N and returned (any prompt subm
 **Activation event:** first prompt submitted → at least one widget pinned to home within the same session.
 
 | Metric | Target |
-|---|---|
+| --- | --- |
 | Activation rate (within first session) | ≥80% |
 | Median time from signup to activation | <10 min |
 
@@ -40,7 +40,7 @@ If a user signs up and never pins anything, they're not activated. That's our cl
 ### Engagement depth
 
 | Metric | Target |
-|---|---|
+| --- | --- |
 | Prompts per session by D7 | ≥5 |
 | Sessions per active user per week | ≥3 by D7 |
 | Median widget pins per user | ≥4 by D14 |
@@ -52,7 +52,7 @@ If users come back but each session is one prompt and they leave, that's curiosi
 Specific to this product — does the agent actually drive trade intent?
 
 | Metric | Target |
-|---|---|
+| --- | --- |
 | % of active users who place ≥1 paper trade | ≥60% by D14 |
 | Trades placed per active user per week | ≥1.5 by D7 |
 
@@ -79,7 +79,7 @@ Below 40%: we don't have PMF yet — iterate on positioning or scope.
 Before celebrating any number, ask: *what would a skeptic say about this?*
 
 | Number that looks good | Skeptic's question | How we test |
-|---|---|---|
+| --- | --- | --- |
 | High D1 retention | Were they founder's friends? | Look at signups by source; exclude `referrer:tom` |
 | High activation | Did we DM them through it? | Pull manual outreach log |
 | "Very disappointed" >40% | Asked too early before genuine usage? | Require ≥5 sessions before the survey counts |
@@ -130,6 +130,7 @@ Every Monday, run the PostHog dashboard plus this synthesis questions:
 5. Median session length trend — going up, flat, or down?
 
 Skeptic's audit:
+
 - Of the active users, how many are founder's friends?
 - Of the trades placed, what % are from a single user?
 - Are we still hand-prompting users to come back? If so, retention isn't organic yet.
@@ -139,6 +140,7 @@ Skeptic's audit:
 This is a judgement call combining the numbers with the lived signal. The MVP guide's "effort test" applies: *if the product is pulling users back without effort, that's PMF.* If we're still pushing — DMs, scheduled emails, manual outreach — we don't have it yet.
 
 We don't call PMF before:
+
 - 3+ iteration cycles
 - ≥30 active weekly users
 - Sean Ellis ≥40% on a non-DM-pressured sample

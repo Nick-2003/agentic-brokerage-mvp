@@ -8,6 +8,7 @@ This is the **single source of truth for the HTTP boundary** between:
 - **Backend** — **Python · FastAPI + uvicorn**, deployed on **Railway**. Owns `backend/`. Runs a Claude agent loop (Anthropic SDK directly) and streams Server-Sent Events. (The earlier Node-on-Vercel design in this doc was wrong and never built — Plan A / Python is LOCKED, see `CLAUDE.md`.)
 
 **Rules:**
+
 1. Neither side ships a field that isn't in this document.
 2. Field names are **`snake_case`** (Python convention) — on the wire, in widgets, everywhere.
 3. The widget `data` schemas are owned by **`backend/prompts/widget_contract.md`** and mirrored in **`frontend/lib/widgets.ts`** — change those two together; this doc summarises them.
@@ -37,16 +38,17 @@ This is the **single source of truth for the HTTP boundary** between:
 - **401 error details** the backend may return (in the response body `{"detail":"…"}`):
 
   | `detail` | Meaning |
-  |---|---|
+  | --- | --- |
   | `authentication_required` | No token sent, but `REQUIRE_AUTH=1`. |
   | `token_expired` | Signed token, but `exp` is in the past. |
   | `invalid_token` | Bad signature / wrong audience / malformed / `kid` not in JWKS. |
   | `token_missing_sub` | Token verified but had no `sub` claim. |
   | `unsupported_alg` | Header `alg` is none / not in our allowlist. |
+
 - **5xx details related to auth/persistence:**
 
   | Status | `detail` | Meaning |
-  |---|---|---|
+  | --- | --- | --- |
   | 500 | `auth_not_configured` | HS256 token arrived but no `SUPABASE_JWT_SECRET` is set. |
   | 503 | `jwks_unavailable` | JWKS public-key fetch failed (network blip / wrong `SUPABASE_URL`). |
 
@@ -212,7 +214,7 @@ Response `200`:
 `backend/db/schema.sql` (run once in the Supabase SQL Editor). Four `public` tables, all with RLS on and the policy `for all to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id)`:
 
 | Table | Purpose | Wired to an endpoint? |
-|---|---|---|
+| --- | --- | --- |
 | `conversations` | One row per chat session: `id, user_id, title, created_at, updated_at`. `set_updated_at` trigger bumps `updated_at` on UPDATE. | Yes — §6 + this section. |
 | `messages` | One row per turn: `id, conversation_id, user_id, role, content, widgets (jsonb), created_at`. | Yes — written by `/api/chat`, read by §6b above. |
 | `pinned_widgets` | One row per pinned widget. RLS on, but **frontend wiring deferred** to a follow-up — pins still live in client state today. | Not yet. |
@@ -244,7 +246,7 @@ Every `widget` event's `data` is one object with this envelope:
 Canonical JSON lives in `backend/prompts/widget_contract.md`; TS types in `frontend/lib/widgets.ts`. Summary:
 
 | `type` | `data` fields |
-|---|---|
+| --- | --- |
 | `morning_brief` | `headline: string`, `paragraphs: string[]` |
 | `research_card` | `ticker`, `company_name`, `current_price: number \| null`, `currency`, `rating: "BUY"\|"HOLD"\|"SELL"`, `target_price: number`, `horizon_months: number`, `thesis_html`, `catalysts: string[]`, `risks: string[]` |
 | `ta_chart` | `ticker`, `timeframe`, `current_price: number`, `screenshot_url?: string` (a `data:image/png;base64,…` URL when real, else empty/mock SVG path), `indicators_applied: string[]`, `key_levels: { resistance: number[], support: number[] }`, `trend_summary_html` |
@@ -255,6 +257,7 @@ Canonical JSON lives in `backend/prompts/widget_contract.md`; TS types in `front
 | `portfolio_risk` | `risk_score`, `risk_label`, `risk_summary`, `sector_exposure: [{ label, pct, severity: "normal"\|"warn"\|"danger" }]`, `flags: [{ severity: "low"\|"med"\|"high", title, detail_html }]`, `suggestions: string[]` |
 
 Notes on fields that recently changed:
+
 - `research_card.current_price` is `number | null` — `null` when no live price source is available (yfinance down + no FMP profile price). The frontend renders `—` and omits the upside; the agent must not fabricate a price (Proposal 008).
 - `live_trade.news_since_fill` is optional — present only when post-fill news exists (Proposal 001).
 
