@@ -134,13 +134,30 @@ async def _real_technical_levels(
       2. chart_set_symbol         — load the ticker
       3. chart_set_timeframe      — switch timeframe
       4. chart_manage_indicator   — add each requested indicator
-      5. data_get_study_values    — read indicator values back
-      6. data_get_pine_lines      — pull drawn S/R levels (or compute later)
-      7. capture_screenshot       — PNG → base64-encoded data URL
+      5. quote_get                — read the live current price (needed early
+                                    so the S/R fallback below uses the REAL
+                                    price, not MOCK_QUOTES — proposal 022)
+      6. data_get_study_values    — read indicator values back
+      7. data_get_pine_lines      — pull drawn S/R levels (or compute later
+                                    from the real `current_price`)
+      8. capture_screenshot       — PNG → base64-encoded data URL
 
     Returns the same shape as `_mock_technical_levels` so the frontend treats
     both identically. The only differences are `is_mock: False` and
     `source: "tradingview_mcp"`.
+
+    P1.2 first-real-run fixes (proposal 022):
+      - `quote_get` is now step 5 (was last) so the S/R fallback at step 7
+        uses the REAL current price, not the mock cache. Pre-022 a real NVDA
+        turn produced `current_price=211.14` alongside `resistance=[959.47, …]`
+        / `support=[881.24, …]` — those latter were the mock $942.50 baseline
+        × 1.018/1.06/0.935/0.88, i.e. a trust-#3 violation about where the
+        numbers came from.
+      - `log.info(...)` calls added at each MCP-response-shape mismatch
+        (was silent — produced empty `indicator_values` and empty
+        `screenshot_url` with no diagnostic). Once Langfuse traces show what
+        shapes the MCP server actually returns, a follow-up proposal can
+        teach the parser those shapes.
     """
     from mcp_client import MCPClientError, tv_call
 
@@ -167,7 +184,27 @@ async def _real_technical_levels(
                           {"action": "add", "name": full_name, **params})
             applied.append(short)
 
-        # 5. Read indicator values back
+        # 5. Pull the live price NOW (was step 7 pre-022). Needed for both the
+        # response AND for the S/R fallback below — without it the fallback
+        # called _extract_price(ticker) → MOCK_QUOTES and produced wildly-off
+        # levels alongside a real `current_price`.
+        try:
+            quote = await tv_call("quote_get", {"symbol": ticker})
+            current_price = float(quote.get("price") or quote.get("last") or 0)
+            if not current_price:
+                log.info(
+                    "quote_get(%s) returned no price; falling back to mock cache. raw: %r",
+                    ticker, quote,
+                )
+                current_price = _extract_price(ticker)
+        except MCPClientError as e:
+            log.warning(
+                "quote_get(%s) failed: %s — falling back to mock cache for current_price",
+                ticker, e,
+            )
+            current_price = _extract_price(ticker)
+
+        # 6. Read indicator values back
         indicator_values: dict[str, float] = {}
         for short in applied:
             full_name, params = _translate_indicator(short)
@@ -181,20 +218,41 @@ async def _real_technical_levels(
                     indicator_values[short] = round(float(v), 2)
                 elif isinstance(v, list) and v and isinstance(v[-1], (int, float)):
                     indicator_values[short] = round(float(v[-1]), 2)
+                else:
+                    # Previously silent; surfaces in uvicorn log + Langfuse trace
+                    # so we can teach the parser whatever shape the MCP server
+                    # actually returns. Proposal 022.
+                    log.info(
+                        "data_get_study_values(%s) returned unexpected shape; "
+                        "indicator_values[%s] omitted. raw response: %r",
+                        study_id, short, study,
+                    )
             except MCPClientError as e:
                 log.warning("data_get_study_values(%s) failed: %s", study_id, e)
 
-        # 6. S/R levels — try MCP-drawn Pine lines first; fall back to computed
-        # swing-derived levels (see open question #5 in proposal; S/R from
-        # OHLC is a *derived* number per trust principle #3, tagged explicitly).
-        key_levels: dict[str, list[float]]
+        # 7. S/R levels — try MCP-drawn Pine lines first; fall back to
+        # swing-derived levels computed from the REAL `current_price` (pre-022
+        # this called _extract_price(ticker) which read from MOCK_QUOTES).
+        # The levels remain a derivation (per trust principle #3) but they're
+        # at least derived from honest inputs now.
         try:
             pine_lines = await tv_call("data_get_pine_lines", {})
-            key_levels = _parse_pine_lines(pine_lines) or _key_levels(_extract_price(ticker))
-        except MCPClientError:
-            key_levels = _key_levels(_extract_price(ticker))
+            parsed = _parse_pine_lines(pine_lines)
+            if parsed is None:
+                log.info(
+                    "data_get_pine_lines returned no usable lines; "
+                    "computing swing-derived S/R from real price %.2f. raw: %r",
+                    current_price, pine_lines,
+                )
+            key_levels = parsed or _key_levels(current_price)
+        except MCPClientError as e:
+            log.warning(
+                "data_get_pine_lines failed: %s — computing swing-derived S/R from "
+                "real price %.2f", e, current_price,
+            )
+            key_levels = _key_levels(current_price)
 
-        # 7. Screenshot — base64-encoded data URL inlined into widget JSON.
+        # 8. Screenshot — base64-encoded data URL inlined into widget JSON.
         # Switch to a /api/screenshots/<hash>.png static route only if SSE
         # bandwidth becomes a real problem (proposal §8 Q4).
         screenshot_url = ""
@@ -203,17 +261,20 @@ async def _real_technical_levels(
             png_b64 = shot.get("data") or shot.get("base64") or ""
             if png_b64:
                 screenshot_url = _encode_screenshot(png_b64)
+            else:
+                # Previously silent — log so we can diagnose what shape the MCP
+                # server actually returns for screenshots. Proposal 022.
+                shape_hint = (
+                    f"keys={list(shot.keys())}" if isinstance(shot, dict)
+                    else f"type={type(shot).__name__}"
+                )
+                log.info(
+                    "capture_screenshot returned no `data`/`base64` field; "
+                    "screenshot omitted. %s. raw: %r",
+                    shape_hint, shot,
+                )
         except MCPClientError as e:
             log.warning("capture_screenshot failed: %s", e)
-
-        # Pull the current price from quote — most accurate is `quote_get` MCP
-        # call; fall back to mock for a deterministic baseline (only used to
-        # *compose* the response — never returned to the user).
-        try:
-            quote = await tv_call("quote_get", {"symbol": ticker})
-            current_price = float(quote.get("price") or quote.get("last") or 0)
-        except MCPClientError:
-            current_price = _extract_price(ticker)
 
         return {
             "ticker": ticker,
@@ -283,8 +344,10 @@ def _parse_pine_lines(pine_lines: dict[str, Any]) -> dict[str, list[float]] | No
 
 
 def _extract_price(ticker: str) -> float:
-    """Best-effort current price from local mock cache. Used only for fallback
-    S/R derivation in the real path when quote_get / pine_lines failed."""
+    """Best-effort current price from local mock cache. Used only as the LAST
+    fallback when `quote_get` (the live MCP price call) itself fails — never
+    for the S/R fallback alongside a successful `quote_get` (that was the
+    pre-022 bug). Returns 100.0 for unknown tickers."""
     q = MOCK_QUOTES.get(ticker.upper())
     return float(q["price"]) if q else 100.0
 
