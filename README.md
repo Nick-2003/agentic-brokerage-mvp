@@ -78,24 +78,30 @@ P1.2's wedge: the user says "add RSI to NVDA" or "draw support at 220" and the c
 
 1. **TradingView Desktop** — download from [tradingview.com/desktop](https://www.tradingview.com/desktop/). Free account is fine. Sign in.
 2. **TV Desktop launched with CDP enabled** — `--remote-debugging-port=9222`. On macOS:
+
    ```bash
    open -a "TradingView" --args --remote-debugging-port=9222
    ```
+
    (Alternative: let the MCP server auto-spawn via its `tv_launch` tool — set `USE_MOCK_TA=0` and just call any chart tool; the server will try to start TV Desktop itself.)
 3. **The MCP server** — clone the [tradesdontlie/tradingview-mcp](https://github.com/tradesdontlie/tradingview-mcp) repo as a **sibling** of this one (not inside it):
+
    ```bash
    cd ..   # one level above agentic-brokerage-mvp/
    git clone https://github.com/tradesdontlie/tradingview-mcp.git
    cd tradingview-mcp
    npm install   # Node 22+
    ```
+
 4. **Set env vars** in `backend/.env`:
+
    ```env
    USE_MOCK_TA=0
    TRADINGVIEW_MCP_COMMAND=node
    TRADINGVIEW_MCP_ARGS=/absolute/path/to/tradingview-mcp/src/server.js
    TRADINGVIEW_MCP_CDP_PORT=9222
    ```
+
 5. **Restart the backend.** First chart-related prompt will spawn the MCP server as a subprocess and connect.
 
 ### Production posture (read this before deploying)
@@ -115,6 +121,7 @@ See [CLAUDE.md § Repo layout](./CLAUDE.md#repo-layout).
 ## How to contribute (to yourself)
 
 End every coding session by appending to [docs/SESSION_LOG.md](./docs/SESSION_LOG.md):
+
 - What was built
 - What decisions surfaced
 - What assumptions you introduced
@@ -124,7 +131,7 @@ Don't skip. Five minutes per session. This is the practice that prevents archite
 ## Deployment
 
 | Component | Where | How |
-|---|---|---|
+| --- | --- | --- |
 | Frontend | Vercel | `vercel --prod` from `frontend/` |
 | Backend | Railway (or Fly.io) | Connect repo, set env vars (set `USE_MOCK_TA=1`), deploy on push |
 | Postgres | Supabase Cloud | Already hosted |

@@ -41,7 +41,7 @@ These are non-negotiable. They're what distinguishes us from a chat-with-PDF wra
 ## Tech stack
 
 | Layer | Choice | Why |
-|---|---|---|
+| --- | --- | --- |
 | LLM | Claude Opus 4.7 (`claude-opus-4-7`) | Best at structured, cited finance synthesis |
 | Agent runtime | `claude-agent-sdk` (Python) | First-party tool/MCP loop, streaming primitives |
 | Backend | FastAPI + uvicorn | SSE-first, fast cold start |
@@ -59,6 +59,7 @@ These are non-negotiable. They're what distinguishes us from a chat-with-PDF wra
 Every agent response that includes a widget conforms to one of N strict schemas defined in `backend/prompts/widget_contract.md`. The LLM is told via system prompt: "Your final response is a JSON object matching one of the schemas below. Numeric values come from tool results — do not invent."
 
 Schemas planned for MVP:
+
 - `morning_brief` — portfolio P&L, market context, 1–2 names to watch
 - `research_card` — rating, target, thesis, catalysts, risks
 - `ta_chart` — TradingView screenshot URL, indicator values, S/R levels
@@ -110,6 +111,7 @@ agentic-brokerage-mvp/
 ## What gets written down at end of every session
 
 Append to `docs/SESSION_LOG.md`:
+
 - What was built
 - What decisions surfaced (e.g. "chose yfinance over Polygon because rate limits")
 - What assumptions were introduced (e.g. "assumed Alpaca OCO bracket supports stop-limit")
