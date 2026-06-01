@@ -1,7 +1,7 @@
 """Claude agent loop.
 
-One async generator: `run_agent(user_message, user_id)`. It calls Claude in a
-streaming tool-use loop and yields SSE event dicts.
+One async generator: `run_agent(user_message, user_id, tracer=…)`. It calls
+Claude in a streaming tool-use loop and yields SSE event dicts.
 
 Event types yielded:
     {"event": "thought",     "data": {"text": "..."}}
@@ -11,6 +11,11 @@ Event types yielded:
     {"event": "message",     "data": {"text": "markdown response"}}
     {"event": "error",       "data": {"message": "..."}}
     {"event": "done",        "data": {"elapsed_ms": N, "iterations": N}}
+
+P4.4 (proposal 017): an optional `tracer` parameter receives a Langfuse-backed
+``Tracer`` (or the silent ``NOOP_TRACER``). The loop records one *generation*
+per Anthropic call and one *tool* span per executed tool. Read-only; never
+alters behaviour. Default = NOOP_TRACER, so existing callers keep working.
 """
 
 from __future__ import annotations
@@ -27,6 +32,7 @@ from typing import Any
 from anthropic import AsyncAnthropic
 from anthropic.types import MessageParam, ToolUseBlock
 
+from observability import NOOP_TRACER, Tracer
 from tools import TOOL_REGISTRY, anthropic_tool_specs, render_thought  # noqa: F401
 
 _PROMPT_DIR = Path(__file__).parent / "prompts"
@@ -120,6 +126,29 @@ def _summarize_tool_result(name: str, ok: bool, result: Any) -> str:
     mock = " (mock)" if isinstance(result, dict) and result.get("is_mock") else ""
     return f"{name} → ok{mock}"
 
+# Added for Langfuse tracking; we want to record the full content blocks for each generation, but they can contain unserialisable objects, so we convert them to simple dicts with best-effort extraction of key info.
+def _serialise_blocks(content: list[Any]) -> list[dict[str, Any]]:
+    """Render Anthropic content blocks into Langfuse-friendly JSON dicts."""
+    out: list[dict[str, Any]] = []
+    for b in content:
+        try:
+            if b.type == "text":
+                out.append({"type": "text", "text": b.text})
+            elif b.type == "tool_use":
+                out.append(
+                    {
+                        "type": "tool_use",
+                        "id": getattr(b, "id", None),
+                        "name": getattr(b, "name", None),
+                        "input": getattr(b, "input", None),
+                    }
+                )
+            else:
+                out.append({"type": getattr(b, "type", "unknown")})
+        except Exception:  # noqa: BLE001  — observability is best-effort
+            out.append({"type": "unserialisable"})
+    return out
+
 
 # ---------------------------------------------------------------------------
 # Main agent loop
@@ -129,10 +158,12 @@ def _summarize_tool_result(name: str, ok: bool, result: Any) -> str:
 async def run_agent(
     user_message: str,
     user_id: str = "demo",
+    tracer: Tracer = NOOP_TRACER,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Run one user turn through the Claude tool-use loop.
 
-    Yields SSE event dicts.
+    Yields SSE event dicts. ``tracer`` (P4.4) receives generations + tool spans;
+    pass ``NOOP_TRACER`` (the default) when observability isn't wanted.
     """
     start_time = time.monotonic()
     client = _get_client()
@@ -146,6 +177,8 @@ async def run_agent(
             # Stream the next assistant turn. We don't yield content_block deltas
             # to the client — we only emit thoughts on tool calls and the final
             # parsed widget/message. Lower noise; less to render.
+            iter_started = time.monotonic()
+            messages_snapshot = list(messages)
             async with client.messages.stream(
                 model=MODEL,
                 max_tokens=4096,
@@ -154,6 +187,27 @@ async def run_agent(
                 messages=messages,
             ) as stream:
                 final_msg = await stream.get_final_message()
+
+            # Record the generation for this iteration (no-op when tracer is NOOP).
+            usage = getattr(final_msg, "usage", None)
+            tracer.record_generation(
+                name=f"anthropic.iter_{iterations}",
+                model=MODEL,
+                input=messages_snapshot,
+                output=_serialise_blocks(final_msg.content),
+                usage_details=(
+                    {
+                        "input": getattr(usage, "input_tokens", 0) or 0,
+                        "output": getattr(usage, "output_tokens", 0) or 0,
+                    }
+                    if usage is not None
+                    else None
+                ),
+                metadata={
+                    "iteration": iterations,
+                    "latency_ms": int((time.monotonic() - iter_started) * 1000),
+                },
+            )
 
             # Separate text and tool_use blocks from the response
             text_parts: list[str] = []
@@ -172,8 +226,10 @@ async def run_agent(
                 full_text = "".join(text_parts).strip()
                 widget = _extract_widget_json(full_text)
                 if widget is not None:
+                    tracer.set_output({"kind": "widget", "widget": widget})
                     yield {"event": "widget", "data": widget}
                 elif full_text:
+                    tracer.set_output({"kind": "message", "text": full_text})
                     yield {"event": "message", "data": {"text": full_text}}
                 break
 
@@ -191,11 +247,22 @@ async def run_agent(
                 }
                 tool_tasks.append(_call_tool(tu.name, tu.input or {}, user_id))
 
+            tools_started = time.monotonic()
             results = await asyncio.gather(*tool_tasks)
+            tools_elapsed_ms = int((time.monotonic() - tools_started) * 1000)
 
             # Emit results + build tool_result message for next turn
             tool_results_payload = []
             for tu, (ok, result) in zip(tool_uses, results, strict=True):
+                # Record one tool span per call.
+                tracer.record_tool(
+                    name=tu.name,
+                    args=tu.input or {},
+                    result=result,
+                    ok=ok,
+                    latency_ms=tools_elapsed_ms,  # batch total; per-call timing isn't tracked yet
+                    metadata={"tool_use_id": tu.id},
+                )
                 yield {
                     "event": "tool_result",
                     "data": {
@@ -215,12 +282,14 @@ async def run_agent(
 
         else:
             # Hit max iterations without a terminal response
+            tracer.set_output({"kind": "error", "message": f"max iterations ({MAX_ITERATIONS})"})
             yield {
                 "event": "error",
                 "data": {"message": f"agent stopped after {MAX_ITERATIONS} iterations"},
             }
 
     except Exception as e:
+        tracer.set_output({"kind": "error", "message": str(e)})
         yield {"event": "error", "data": {"message": f"agent error: {e}"}}
 
     elapsed_ms = int((time.monotonic() - start_time) * 1000)
