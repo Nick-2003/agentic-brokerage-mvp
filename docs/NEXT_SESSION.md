@@ -9,7 +9,7 @@
 ## Where things stand (verified 2026-05-20)
 
 | Layer | State |
-|---|---|
+| --- | --- |
 | Backend — FastAPI, agent loop, 15 tools, SSE | ✅ Running, real Claude verified |
 | Anthropic API | ✅ Live — key in `backend/.env`, real call streamed end-to-end |
 | Alpaca paper trading | ✅ Live — `get_portfolio` + `place_paper_order` (simple, bracket, cap) all verified against the real $100k paper account |
@@ -59,11 +59,14 @@ Model is `claude-opus-4-5` (set in `backend/.env` as `ANTHROPIC_MODEL`). Change 
 `place_paper_order` is verified against real Alpaca, but only the `accepted` (unfilled) branch — the market was closed last session, so no real order ever reached `status: filled`. The `system.md` rule for the `filled` case (call `get_open_position` → emit a `live_trade` widget with the real fill) is written but **unverified end-to-end**.
 
 **Test (during US market hours, 09:30–16:00 ET):**
+
 1. Place a *marketable* limit so it actually fills, e.g. confirm an order to buy 1–2 shares of a liquid name at a limit at/above the ask.
-   ```
+
+   ```bash
    curl -s -N -X POST localhost:8000/api/chat -H 'Content-Type: application/json' \
      -d '{"message":"I reviewed the ticket and confirm — place a paper buy of 2 NVDA at limit <ask+1>"}'
    ```
+
 2. Expect: `thought → tool_call(place_paper_order) → tool_result → thought → tool_call(get_open_position) → tool_result → widget(live_trade) → done`.
 3. Verify the `live_trade` widget's `fill_price` is the **real** Alpaca fill (not the limit), and `current_price`/`unrealized_pnl` are populated.
 4. Clean up: cancel/close the position afterward (or keep one to seed the portfolio demo — see below).
@@ -95,7 +98,7 @@ Prerequisite: confirm TrueNorth MCP access (hosted endpoint, or self-host from a
 ## Key files map
 
 | Need to touch | File |
-|---|---|
+| --- | --- |
 | Agent prompt / behaviour rules | `backend/prompts/system.md`, `backend/prompts/widget_contract.md` |
 | Agent loop / intent detection | `backend/agent.py` |
 | Trade execution | `backend/tools/execution.py` |

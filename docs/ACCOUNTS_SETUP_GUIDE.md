@@ -46,7 +46,8 @@ Keep the SECRET-named ones (`ALPACA_API_SECRET`, `SUPABASE_SERVICE_KEY`) **out**
 The brain. Without this, no Claude calls.
 
 **Steps:**
-1. Go to **https://console.anthropic.com**
+
+1. Go to **<https://console.anthropic.com>**
 2. Sign in (or sign up — they'll need a phone number for verification)
 3. Top-right → **Settings** → **API Keys**
 4. Click **Create Key**
@@ -60,6 +61,7 @@ The brain. Without this, no Claude calls.
 9. Set **Alert Threshold** to **$50** (you'll get an email when you hit this)
 
 You should now have one value:
+
 ```
 ANTHROPIC_API_KEY=sk-ant-api03-xxxx...xxxx
 ```
@@ -71,7 +73,8 @@ ANTHROPIC_API_KEY=sk-ant-api03-xxxx...xxxx
 Real broker API. $100k of fake money. No real money risk.
 
 **Steps:**
-1. Go to **https://alpaca.markets**
+
+1. Go to **<https://alpaca.markets>**
 2. Click **Sign Up** → use your email
 3. Fill in the signup form (you'll need to provide a name, country, but **NOT** SSN or bank account — that's only for live trading)
 4. Verify your email
@@ -82,6 +85,7 @@ Real broker API. $100k of fake money. No real money risk.
    - ⚠ Same as Anthropic — you can't see the secret again. Save it now or regenerate later.
 
 You should now have:
+
 ```
 ALPACA_API_KEY=PKxxxxxxxxxxxxx
 ALPACA_API_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
@@ -100,7 +104,8 @@ Go to **Account** → **Reset Paper Account** to refresh the $100k balance any t
 This handles user signup (magic links) and stores your data.
 
 **Steps:**
-1. Go to **https://supabase.com**
+
+1. Go to **<https://supabase.com>**
 2. Sign in with GitHub (recommended — it's how Railway/Vercel auth works too)
 3. **New Project**
    - Name: `agentic-brokerage-mvp`
@@ -115,6 +120,7 @@ This handles user signup (magic links) and stores your data.
    - **service_role / secret** key → save as `SUPABASE_SERVICE_KEY` ⚠ this one is highly sensitive, never put it in frontend code
 
 You should now have:
+
 ```
 SUPABASE_URL=https://xxxxxxxxxxxx.supabase.co
 SUPABASE_ANON_KEY=eyJhbGciOiJ...                  # safe in frontend
@@ -133,9 +139,10 @@ SUPABASE_SERVICE_KEY=eyJhbGciOiJ...               # backend ONLY
 We need this for Phase 4 — talking to your charts.
 
 **Steps:**
-1. Go to **https://www.tradingview.com/**
+
+1. Go to **<https://www.tradingview.com/>**
 2. Sign Up → free plan is enough for our MVP indicators (SMA, S/R)
-3. Download **TradingView Desktop**: https://www.tradingview.com/desktop/
+3. Download **TradingView Desktop**: <https://www.tradingview.com/desktop/>
 4. Install it and sign in with your account
 5. Open it once to verify it works — load any chart (e.g., NVDA)
 6. Leave it installed; we don't need an API key from TradingView itself — the MCP integration uses your logged-in desktop session.
@@ -149,7 +156,8 @@ You don't need to paste anything back for this one yet. We'll wire it up in Phas
 For source control + auto-deploy to Railway and Vercel.
 
 **Steps:**
-1. Go to **https://github.com/new**
+
+1. Go to **<https://github.com/new>**
 2. Repository name: `agentic-brokerage-mvp`
 3. **Private** repo
 4. **Do NOT** add a README, .gitignore, or license — we already have these
@@ -165,7 +173,8 @@ Nothing to paste back. Just note the URL: `git@github.com:YOUR_USERNAME/agentic-
 Hosts the Python FastAPI backend.
 
 **Steps:**
-1. Go to **https://railway.app**
+
+1. Go to **<https://railway.app>**
 2. Sign in with **GitHub** (same account as step 5)
 3. You'll see a $5/month free credit on the dashboard — that's enough for a small backend
 4. We'll deploy in Phase 9 (build session). For now just confirm you can log in.
@@ -179,7 +188,8 @@ Nothing to paste back.
 Hosts the Next.js frontend.
 
 **Steps:**
-1. Go to **https://vercel.com**
+
+1. Go to **<https://vercel.com>**
 2. Sign in with **GitHub** (same account)
 3. Free hobby tier is plenty
 4. Confirm you can log in.
@@ -193,7 +203,8 @@ Nothing to paste back.
 You already have a PostHog project (PWA Prod, project ID 148926).
 
 **Option A — reuse existing project:**
-1. Log in to https://app.posthog.com
+
+1. Log in to <https://app.posthog.com>
 2. Switch to **PWA Prod** project
 3. Project Settings → **Project API Key** → copy it. It starts with `phc_`.
 4. Note the Project Host: usually `https://us.i.posthog.com`
@@ -204,6 +215,7 @@ POSTHOG_HOST=https://us.i.posthog.com
 ```
 
 **Option B — create a new project (cleaner separation):**
+
 1. Top-left project dropdown → **New project**
 2. Name: `agentic-brokerage-mvp`
 3. Project Settings → Project API Key → copy
@@ -232,6 +244,7 @@ GITHUB_REPO_URL=git@github.com:YOUR_USERNAME/agentic-brokerage-mvp.git
 ```
 
 The build session will:
+
 1. Validate that each key looks right (no leading whitespace, correct prefixes)
 2. Write them to `~/Code/agentic-brokerage-mvp/backend/.env`
 3. Verify `.env` is gitignored
@@ -245,18 +258,23 @@ The build session will:
 ## Troubleshooting
 
 **Alpaca says "account suspended" / KYC requested:**
+
 - Some regions require additional verification. Pick a different country in signup if you're getting blocked (paper trading should be available globally — but try US if HK is restricted).
 
 **Supabase: "Project provisioning takes more than 5 minutes":**
+
 - Refresh the page. Usually it's just the UI not updating.
 
 **Anthropic console says "card required":**
+
 - Yes — Anthropic API requires a credit card. The first $5 of usage is free; with the $100 spend cap above you're not at risk of a runaway bill.
 
 **TradingView Desktop won't install on Mac (Gatekeeper warning):**
+
 - Right-click the .dmg → Open → Open Anyway in the warning dialog. macOS sometimes flags non-App-Store downloads.
 
 **"I want to use my real account, not paper":**
+
 - No. The MVP doesn't ship real-money execution. See SCOPE.md non-goals. Paper only.
 
 ---

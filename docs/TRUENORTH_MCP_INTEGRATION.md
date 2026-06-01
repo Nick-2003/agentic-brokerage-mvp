@@ -16,6 +16,7 @@ So "analyze NVDA" demos perfectly and "analyze CRM" returns nothing. The product
 **TrueNorth's MCP server closes this gap.** It is a live server (verified 2026-05-21) exposing a real US-equities toolkit — analyst consensus, price targets, financial metrics, statements, SEC filings, technicals — for *any* liquid US ticker, with data provenance attached. It is free (same company) and already built.
 
 Verified live:
+
 ```
 analyst_estimates("NVDA")    → consensus "Buy" (58 buy / 16 hold / 3 sell),
                                 target mean $276.75 (range $140–$360), EPS/rev consensus to 2031
@@ -35,11 +36,13 @@ Tools getting a real path: `get_company_fundamentals`, `get_consensus_targets`, 
 The backend (FastAPI + Anthropic SDK) calls TrueNorth's MCP server as an **MCP client**. This does **not** require switching to `claude-agent-sdk` — we run a client inside the existing backend; the agent loop is untouched.
 
 Add `backend/mcp_client.py`:
+
 - One long-lived MCP `ClientSession` to the TrueNorth server, lazily created (mirrors `agent.py::_get_client`).
 - A typed helper `async def tn_call(tool: str, args: dict) -> dict` that calls the tool, parses the JSON result, and raises a clear error on failure.
 - Connection retry + a clear `error: "truenorth_mcp_unreachable"` surfaced on failure (no silent fall-through to mock — same discipline as `alpaca_fetch_failed`).
 
 **Transport — pick one (Tom to confirm access):**
+
 - **(a) Hosted endpoint** — TrueNorth team provides a URL + auth. MCP `streamable-http` / SSE client transport. Cleanest for prod.
 - **(b) Self-host** — run TrueNorth's MCP server from a *pulled* copy of `discovery-agents` (`python start_mcp_server.py`, `app/mcp_server/`). Local dev: stdio transport. Prod: deploy it as a separate Railway service, connect over HTTP. Pull-only — never push to the TrueNorth repo.
 
@@ -50,7 +53,7 @@ Env vars (add to `backend/.env.example`): `TRUENORTH_MCP_URL`, `TRUENORTH_MCP_AU
 ## 4. Tool-by-tool mapping
 
 | Our tool | TrueNorth MCP tool(s) | Notes |
-|---|---|---|
+| --- | --- | --- |
 | `get_consensus_targets` | `analyst_estimates` | Direct map. `price_targets.{target_high,target_low,target_mean,target_median}` → high/median/low; `recommendation_distribution.consensus_label` → `consensus_rating`; `num_analysts_*` → `n_analysts`. Upgrades/downgrades: drop or leave 0 (not in the API). |
 | `get_company_fundamentals` | `financial_metrics` + `company_facts` | Valuation multiples + margins + growth from `financial_metrics`; `sector` from `company_facts`. `rating`/`target_price` from `analyst_estimates` (reuse the call). |
 | `get_full_research` | `analyst_estimates` + `financial_metrics` + `financial_statements` + `company_facts` + `sec_filings` + `get_company_news` | **See §7** — the real path returns *structured facts + filing highlights + news*, and the agent synthesises the thesis/catalysts/risks narrative. The mock returns a finished thesis; the real path returns the inputs. |
@@ -72,6 +75,7 @@ Env vars (add to `backend/.env.example`): `TRUENORTH_MCP_URL`, `TRUENORTH_MCP_AU
 9. Update `CLAUDE.md` tech-stack table; add a `SESSION_LOG.md` entry (§Process).
 
 Each tool keeps its mock path intact. Pattern, per tool:
+
 ```python
 async def get_consensus_targets(args, user_id):
     ticker = (args.get("ticker") or "").upper()
@@ -86,10 +90,12 @@ async def get_consensus_targets(args, user_id):
 ## 6. Trust / citations
 
 The widget schema has a `sources` field and citation chips depend on it. Every **real-path** return must include a `sources` array, e.g.:
+
 ```python
 "sources": [{"name": "FMP — analyst estimates", "url": None},
             {"name": "SEC EDGAR — latest 10-Q", "url": "<filing url>"}]
 ```
+
 TrueNorth tool results already carry provenance strings ("Backed by FMP", "FMP profile + SEC EDGAR") — map those into `sources`. Also set `is_mock: false` on real-path returns (currently every research return hardcodes `is_mock: true`).
 
 ## 7. The `get_full_research` nuance + the one `system.md` change
