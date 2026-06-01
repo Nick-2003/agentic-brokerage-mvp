@@ -62,6 +62,7 @@ These were considered and deliberately excluded. Adding them requires an amendme
 > Three or more users have told us *in interviews* that they cannot get genuine value from the product without it.
 
 Not when:
+
 - Tom feels enthusiastic about it mid-session
 - A friend says "you should add X"
 - It would be easy to ship
@@ -69,6 +70,7 @@ Not when:
 - It would make the demo more impressive
 
 The amendment process:
+
 1. Write the proposed addition in `docs/AMENDMENTS_PROPOSED.md` with the user evidence
 2. Wait at least 3 days (cool-off)
 3. If the evidence still holds, edit this file to move the feature from "NOT in MVP" to "In MVP" with the date and the evidence link

@@ -12,7 +12,7 @@
 ## Summary
 
 | Severity | Count | Status |
-|---|---|---|
+| --- | --- | --- |
 | HIGH | 2 | 1 fixed now · 1 known/deferred |
 | MEDIUM | 4 | documented, deferred to pre-launch |
 | LOW | 3 | documented |
@@ -47,6 +47,7 @@
 **Status:** Known and documented. Phase 7 of the plan includes Supabase magic-link auth — it's the unfinished half of Phase 7. SECURITY.md threat 8 + the lockdown checklist already track this.
 
 **Required before any real user:**
+
 - Supabase JWT verification middleware on every `/api/*` route
 - `user_id` derived from the verified JWT (`auth.uid()`), NEVER from the request body
 - Until then: do not share the URL with anyone outside your own machine.

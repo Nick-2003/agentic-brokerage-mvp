@@ -13,7 +13,7 @@ Last night I went through phases 1 → 7 of the plan with mocks anywhere a real 
 Fully scaffolded Python FastAPI service with a streaming agent loop. Imports cleanly; **15 tools registered**:
 
 | Module | Tools |
-|---|---|
+| --- | --- |
 | `tools/portfolio.py` | `get_portfolio` (mock → Alpaca on key) |
 | `tools/market.py` | `get_quote`, `get_company_news`, `get_macro_snapshot` |
 | `tools/research.py` | `get_company_fundamentals`, `get_consensus_targets`, `get_full_research`, `get_peer_set` |
@@ -47,7 +47,7 @@ Side panel lists the demo prompts. Pin button on every widget → adds it to the
 ## What's mocked (and how to flip to real)
 
 | Mock | Lives at | Flip path |
-|---|---|---|
+| --- | --- | --- |
 | **Portfolio data** | `tools/portfolio.py` `MOCK_PORTFOLIO` | Just set `ALPACA_API_KEY` + `ALPACA_API_SECRET` — code auto-detects. |
 | **Quotes** | `tools/market.py` `MOCK_QUOTES` | Already tries yfinance first if installed; falls back to mock. `USE_MOCK_MARKET=0` (default) prefers real. |
 | **News** | `tools/market.py` `MOCK_NEWS` | Future: swap to Anthropic web search inside Claude. The data shape stays the same. |
@@ -75,6 +75,7 @@ POSTHOG_API_KEY=phc_...
 ```
 
 Once pasted, the agent does this in one step:
+
 1. Writes them to `backend/.env`
 2. Writes the public ones to `frontend/.env.local`
 3. Runs `curl http://localhost:8000/healthz` — confirms all keys are recognised
@@ -88,13 +89,16 @@ Once pasted, the agent does this in one step:
 Backend won't run without `ANTHROPIC_API_KEY` because that's the only key the agent needs to do *anything*. So manual tests today:
 
 ### Test 1 — Tool registry imports clean (already ran ✓)
+
 ```bash
 cd /Users/tom/Code/agentic-brokerage-mvp/backend
 .venv/bin/python -c "import sys, os; os.chdir('.'); sys.path.insert(0, '.'); from tools import TOOL_REGISTRY; print(f'{len(TOOL_REGISTRY)} tools registered:'); [print(f'  - {n}') for n in TOOL_REGISTRY]"
 ```
+
 Expected output: 15 tool names listed.
 
 ### Test 2 — FastAPI app boots
+
 ```bash
 cd /Users/tom/Code/agentic-brokerage-mvp/backend
 ANTHROPIC_API_KEY=sk-ant-placeholder .venv/bin/python -c "
@@ -105,6 +109,7 @@ print('App boots with', len(app.routes), 'routes')
 ```
 
 ### Test 3 — Frontend builds
+
 ```bash
 cd /Users/tom/Code/agentic-brokerage-mvp/frontend
 pnpm install
@@ -113,6 +118,7 @@ pnpm build       # production build
 ```
 
 ### Test 4 — Frontend dev server runs (UI works, no real Claude)
+
 ```bash
 cd /Users/tom/Code/agentic-brokerage-mvp/frontend
 pnpm dev
