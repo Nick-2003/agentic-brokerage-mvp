@@ -17,7 +17,7 @@
 
 **Decisions surfaced:**
 
-- TradingView MCP is **in MVP** (initially almost punted to v2 — Tom corrected; this is the defensible wedge so it must be in)
+- TradingView MCP is **in MVP** (initially almost punted to v2 — Nicholas corrected; this is the defensible wedge so it must be in)
 - Each user gets their own Alpaca paper account (created server-side on first trade) — avoids cross-user trade routing risk
 - Numeric validator on widget outputs: every numeric field in a widget must trace back to a tool call ID (hallucination defence)
 - Magic link expiry at 1h; sensitive-op re-auth deferred to v2 (acceptable risk for paper-only)
@@ -86,7 +86,7 @@
 
 **Hermes Agent framework — evaluated, decided NOT to adopt as backend.**
 
-- Tom asked about building on Nous Research's Hermes Agent (hermes-agent.nousresearch.com).
+- Nicholas asked about building on Nous Research's Hermes Agent (hermes-agent.nousresearch.com).
 - Findings: it's a single-user personal agent (MIT licensed), CLI + messaging-platform-first, no HTTP API/SDK, not multi-tenant. Self-improving loop + autonomous skill creation + `execute_code` + 70 tools.
 - Decision: do NOT put Hermes in the backend. Single-user architecture, no embeddable API, and the autonomy (self-rewriting agent with code execution) is a security liability when wired to trade execution. Fails the SCOPE.md amendment rule too — no user has asked.
 - DO adopt the *vision*: "pinned widgets ARE standing skills/agents." This is an extension of our existing pin-to-home. Cheap path: add `skill_id` + `refresh_policy` to the pinned-widget data model; add a `user_profile` table the agent reads+updates (lightweight Honcho-style user modelling). Logged as a near-term enhancement, not an MVP scope change.
@@ -101,7 +101,7 @@
 
 **Assumption introduced:** none new. Audit was review-only except the one XSS fix.
 
-**Note:** `uv sync` still failing to complete on a very slow network (40+ min). Not a blocker — MORNING_BRIEFING.md tells Tom to re-run `UV_HTTP_TIMEOUT=300 uv sync` if the venv is empty.
+**Note:** `uv sync` still failing to complete on a very slow network (40+ min). Not a blocker — MORNING_BRIEFING.md tells Nicholas to re-run `UV_HTTP_TIMEOUT=300 uv sync` if the venv is empty.
 
 ---
 
@@ -110,7 +110,7 @@
 **Done:**
 
 - `uv sync` finally succeeded after moving `supabase` + `posthog` into an optional `auth` dependency group. They pulled in `cryptography` (7.6 MB wheel) which kept timing out on the slow network, and neither is imported by backend code yet (auth deferred). Install later with `uv sync --group auth`.
-- Anthropic API key received from Tom, written to `backend/.env` (gitignored — verified with `git check-ignore`).
+- Anthropic API key received from Nicholas, written to `backend/.env` (gitignored — verified with `git check-ignore`).
 - Backend booted: `/healthz` returns ok, 15 tools registered, `anthropic_key_present: true`.
 - **First real end-to-end Claude smoke test PASSED.** `POST /api/chat` with "give me a tldr on my portfolio" → streamed `thought → tool_call → tool_result` (4 tools: get_portfolio, get_quote, get_company_news, get_macro_snapshot) → terminal response → `done` in ~19s, 3 iterations. SSE pipeline, agent loop, tool execution all work with the real API.
 
@@ -119,7 +119,7 @@
 1. **Agent emitted a plain markdown `message`, not a `morning_brief` widget.** For "tldr on my portfolio" Claude answered with a markdown table instead of the widget JSON. Fix: strengthen the system prompt / add a few-shot example so portfolio/research/brief intents reliably produce widget JSON. Consider: detect intent server-side and inject "respond with a {widget_type} widget" into the turn.
 2. **Data quality — wrong "current" prices in the output.** The agent showed NVDA current price as $220.61 (mock quote is $942.50); other tickers similarly off. The agent mis-transcribed / mis-computed numbers from tool results despite trust principle #3. Fix: tighten the system prompt's "no number without source" rule; possibly have the widget schema reference tool-call IDs so a validator can catch number drift (the validator described in CLAUDE.md isn't built yet).
 
-**Model note:** running `claude-opus-4-5` (the `.env` default). Worked fine. Tom can bump to a newer Opus alias if desired.
+**Model note:** running `claude-opus-4-5` (the `.env` default). Worked fine. Nicholas can bump to a newer Opus alias if desired.
 
 **Next session:**
 
@@ -159,7 +159,7 @@
 **Decisions surfaced:**
 
 - **No widget validator this session** — see Bug B above. Documented so it isn't re-litigated.
-- The hand-tuned mock market data (`USE_MOCK_MARKET=1`) is the better choice for a deterministic demo that matches the validated demo HTML ($942.50 etc.). Real yfinance returns messy pre-market quotes with wide spreads (NVDA ask 235.79 / bid 208.56). Recommendation to Tom — his call.
+- The hand-tuned mock market data (`USE_MOCK_MARKET=1`) is the better choice for a deterministic demo that matches the validated demo HTML ($942.50 etc.). Real yfinance returns messy pre-market quotes with wide spreads (NVDA ask 235.79 / bid 208.56). Recommendation to Nicholas — his call.
 
 **Assumptions / not done:**
 
@@ -180,13 +180,13 @@
 
 - `pnpm install` + `pnpm dev` — frontend live at `localhost:3000`, proxying `/api/chat` to the backend.
 - **Frontend "no response" bug — FIXED.** `lib/sse.ts` split SSE frames on `\n\n`, but the backend (sse-starlette) terminates lines with `\r\n`, so frames are separated by `\r\n\r\n` — which contains no `\n\n` substring. Result: zero events ever parsed, the chat showed the user bubble and nothing else, and `streaming` never reset. Fix: split frames on `/\r?\n\r?\n/` and parse lines on `/\r?\n/`. Confirmed via `od -c` on the raw stream.
-- **Demo portfolio is now TSLA + NVDA + TCEHY** (Tom's request — these three "always in the portfolio"). Rewrote `MOCK_PORTFOLIO` (equity $51,000.00, all three positions green). Added `TCEHY` (Tencent ADR) to `MOCK_QUOTES` + `MOCK_NEWS` (market.py) and full research coverage to `RESEARCH` (research.py) — so quote / chart / research / news / risk all work for Tencent. Updated the frontend Hero header to match ($51,000.00 / +$964.10).
+- **Demo portfolio is now TSLA + NVDA + TCEHY** (Nicholas' request — these three "always in the portfolio"). Rewrote `MOCK_PORTFOLIO` (equity $51,000.00, all three positions green). Added `TCEHY` (Tencent ADR) to `MOCK_QUOTES` + `MOCK_NEWS` (market.py) and full research coverage to `RESEARCH` (research.py) — so quote / chart / research / news / risk all work for Tencent. Updated the frontend Hero header to match ($51,000.00 / +$964.10).
 - **New `USE_MOCK_BROKER` env toggle** — sibling of `USE_MOCK_MARKET`. When `=1`, `get_portfolio` and all execution tools use their mock paths even though Alpaca keys are configured. Needed because Tencent is not tradeable on Alpaca (US-equities only) — a coherent TCEHY-holding demo must run on the mock broker. Demo run command is now `USE_MOCK_MARKET=1 USE_MOCK_BROKER=1 uvicorn ...`.
 
 **Decisions surfaced:**
 
-- **Tencent ticker = `TCEHY`** (US ADR), not `0700.HK` — the app is US-equity framed ("holds US equities" in the system prompt) and ADR keeps quotes/yfinance consistent. Easy to switch if Tom wants the HK line.
-- The frontend "Portfolio value" header (`app/page.tsx` Hero) is still a **hardcoded** number — now consistent with the mock portfolio, but not live. Wiring it to a real `get_portfolio` call needs a small REST endpoint or an on-mount fetch — deferred, offered to Tom.
+- **Tencent ticker = `TCEHY`** (US ADR), not `0700.HK` — the app is US-equity framed ("holds US equities" in the system prompt) and ADR keeps quotes/yfinance consistent. Easy to switch if Nicholas wants the HK line.
+- The frontend "Portfolio value" header (`app/page.tsx` Hero) is still a **hardcoded** number — now consistent with the mock portfolio, but not live. Wiring it to a real `get_portfolio` call needs a small REST endpoint or an on-mount fetch — deferred, offered to Nicholas.
 - Real-Alpaca paper trading still works (verified earlier this session) — `USE_MOCK_BROKER` is just a demo toggle; drop the flag to go back to the real broker.
 
 **Next session:** unchanged from above — filled-order path during market hours; consider making the Hero portfolio value live.
@@ -251,27 +251,27 @@
 
 ## 2026-05-28 · Proposals 003–008 applied · P2b FMP research live · P1.1 blocked · active front → P2b
 
-**Built / applied (proposals 003–008 — all drafted by claude through `proposed_changes/`, applied by Tom):**
+**Built / applied (proposals 003–008 — all drafted by claude through `proposed_changes/`, applied by Nicholas):**
 
 - **003 + 004 applied** — the two `market.py` mock-data fixes (`get_quote` surfaces `yfinance_fetch_failed` instead of silently masking yfinance exceptions; `MOCK_NEWS` → `_NEWS_TEMPLATES` with per-call timestamps so `since=filled_at` can match) and the `technicals.py` `_branch` coroutine-leak fix (delete the helper, inline `if _use_mock_ta()`). 003 verified **12/12** via a deterministic test now saved at `scripts/test_P1_003.py`. Both applied with inert user-added commented-out stubs at EOF (`get_news_by_sector`, `get_sector_exposure`) — not part of the proposals.
 - **005 drafted + applied** — `execution.py` mock path back-dates `filled_at` by `MOCK_FILL_BACKDATE_MINUTES` (default 30) so the `news_since_fill` window `[filled_at, now]` is non-empty in the immediate post-fill turn. Completes the SCOPE-flow-5 "since you bought" mock demo end-to-end (**001 + 003 + 005** chain). Real Alpaca path untouched.
-- **006 drafted + applied + VERIFIED — P2b: real research data via Financial Modeling Prep.** New `backend/fmp_client.py` (httpx REST on FMP's `/stable/` API; `USE_MOCK_RESEARCH` + `FMP_API_KEY` gating; `fmp_fetch_failed` on error — no silent mock; defensive `_pick(...)` field mapping). Real paths added to all four research tools (`get_company_fundamentals`, `get_consensus_targets`, `get_full_research`, `get_peer_set`); the hand-tuned 7-ticker mock preserved. **`get_full_research` real path returns raw facts** (`needs_synthesis:true`, no thesis/catalysts/risks strings) and the agent synthesises the narrative — new `system.md` section "Research cards — synthesise the narrative when the data is real". `.env.example` + `scripts/fmp_probe.py` (field-name confirmation helper). No pyproject/widget/frontend change. **Verified:** claude ran the key-independent layers (imports/18 tools, mock-first preserved, gating, `fmp_fetch_failed` on all 4 tools); Tom ran Layers 1–3 — a live `analyze AAPL` fired `get_full_research` → real FMP data (BUY, target $324, P/E 37.31x, PEG 1.29, margins 47.86%/32.64%, 70 buy / 7 sell / 110 analysts) → `research_card` with an agent-synthesised, fully-cited thesis. P2b's core works.
+- **006 drafted + applied + VERIFIED — P2b: real research data via Financial Modeling Prep.** New `backend/fmp_client.py` (httpx REST on FMP's `/stable/` API; `USE_MOCK_RESEARCH` + `FMP_API_KEY` gating; `fmp_fetch_failed` on error — no silent mock; defensive `_pick(...)` field mapping). Real paths added to all four research tools (`get_company_fundamentals`, `get_consensus_targets`, `get_full_research`, `get_peer_set`); the hand-tuned 7-ticker mock preserved. **`get_full_research` real path returns raw facts** (`needs_synthesis:true`, no thesis/catalysts/risks strings) and the agent synthesises the narrative — new `system.md` section "Research cards — synthesise the narrative when the data is real". `.env.example` + `scripts/fmp_probe.py` (field-name confirmation helper). No pyproject/widget/frontend change. **Verified:** claude ran the key-independent layers (imports/18 tools, mock-first preserved, gating, `fmp_fetch_failed` on all 4 tools); Nicholas ran Layers 1–3 — a live `analyze AAPL` fired `get_full_research` → real FMP data (BUY, target $324, P/E 37.31x, PEG 1.29, margins 47.86%/32.64%, 70 buy / 7 sell / 110 analysts) → `research_card` with an agent-synthesised, fully-cited thesis. P2b's core works.
 - **007 applied** — latent import bug in the applied 002 `technicals.py`: `from backend.mcp_client` (×4) but `backend/` is **not** a package → `ModuleNotFoundError: No module named 'backend'`. Invisible in mock mode (lazy imports), but would crash the real TradingView path (`USE_MOCK_TA=0`). Fixed to `from mcp_client`. Found while determining 006's import path.
 - **008 applied** — `research_card` price fix, found in 006's Layer-3 run: `analyze AAPL` returned `current_price: null` (yfinance crumb-401 → 003 surfaced the error → agent honestly nulled the price), which **crashes `ResearchCard.tsx`** (`null.toFixed()` / divide-by-null) in the browser. Fix: expose FMP `profile.price` as `current_price` in `get_full_research`/`get_company_fundamentals` real paths (a price source independent of the broken yfinance) + null-guard the renderer + `current_price: number | null` in `widgets.ts` and a note in `widget_contract.md`.
 
 **P1.1 — `filled → live_trade`:**
 
 - The **`accepted` (unfilled) branch is verified against real Alpaca** — a confirmation-style prompt placed a real order (real Alpaca UUID, not `mock_…`) and the agent emitted the honest markdown "working/queued" reply per the system-prompt rule. (An earlier run had hit the mock broker because `USE_MOCK_BROKER=1` was set in the shell env — confirmed via `/healthz` `alpaca_configured:true`.)
-- The **`filled → live_trade` branch is now BLOCKED** — Tom's Alpaca paper account is closed; no fill is possible until it's reopened. Parked (not just pending) in `PRIORITIES.md`.
+- The **`filled → live_trade` branch is now BLOCKED** — Nicholas' Alpaca paper account is closed; no fill is possible until it's reopened. Parked (not just pending) in `PRIORITIES.md`.
 
 **Decisions surfaced:**
 
 - **Active front pivoted P4 → P2b.** With P1.1 blocked on the Alpaca account, the build focus moved to P2b (real research data). P4 (auth → persistence + RLS) remains the next track, P4.1 Supabase magic-link auth first (it gates persistence/RLS/memory).
 - **The earlier "how was Supabase initially implemented" scoping exercise is cancelled** — superseded by the decision to implement P4 directly when its turn comes.
-- **Research provider = FMP** (US MVP default). Tom expanded the P2b decision matrix in `PRIORITIES.md` (12 candidates; `DECISION_p2_data_sources.md`) — FMP is the only contender exposing analyst consensus on a free tier; Twelve Data / EODHD are the HK-capable alternatives parked for P7-HK.
+- **Research provider = FMP** (US MVP default). Nicholas expanded the P2b decision matrix in `PRIORITIES.md` (12 candidates; `DECISION_p2_data_sources.md`) — FMP is the only contender exposing analyst consensus on a free tier; Twelve Data / EODHD are the HK-capable alternatives parked for P7-HK.
 - **`get_full_research` real path returns raw facts; the agent writes the thesis.** FMP has no pre-written thesis. Keeps trust principle #3 intact — agent composes *prose*, never *numbers*. (Pattern from `docs/TRUENORTH_MCP_INTEGRATION.md` §7.)
 - **Import convention locked (codebase-wide):** `backend/` is not a package; the app runs `uvicorn main:app` with `backend/` on `sys.path` (dev *and* Docker/Railway). Sibling modules import top-level — `from mcp_client import`, `from fmp_client import` — **never** `from backend.X` (verified: that raises `ModuleNotFoundError`). 007 fixed the one violation.
-- **`proposed_changes/applied/` archival convention** — on apply, the proposal's `README.md` is renamed `README-<slug>.md`, moved to `applied/`, and the rest of the folder deleted (the code is live). **Tom keeps this manual.**
+- **`proposed_changes/applied/` archival convention** — on apply, the proposal's `README.md` is renamed `README-<slug>.md`, moved to `applied/`, and the rest of the folder deleted (the code is live). **Nicholas keeps this manual.**
 
 **Assumptions introduced:**
 
@@ -357,7 +357,7 @@ Every one was found by diffing applied vs proposed, running key-independent test
 **Proposal 010 — drafted + applied (`live_trade` `order_id`/`filled_at` optional):**
 
 - The monitoring `live_trade` (from `get_open_position`) **omits `order_id`/`filled_at`** — real Alpaca returns a *position*, not its originating order, so those order-level fields legitimately don't exist when monitoring. Both were marked **required** in `widget_contract.md` + non-optional in `widgets.ts`. `LiveTrade.tsx` never reads them, so this was **contract drift, not a crash.** Fix: mark both optional in the contract + TS type (2 files). Applied + confirmed (`order_id?`/`filled_at?` in `widgets.ts`; optional note in `widget_contract.md`).
-- **Clarification logged:** the recurring `KeyError: 'order_id'` was my **throwaway chat parser** doing `d['order_id']`, never a repo file — 010 couldn't "fix" it. The widget is correct; the parser just needed `.get()`. The `live_trade` check is now a **saved regression test in `scripts/`** (added by Tom) so verification no longer leans on the ad-hoc snippet.
+- **Clarification logged:** the recurring `KeyError: 'order_id'` was my **throwaway chat parser** doing `d['order_id']`, never a repo file — 010 couldn't "fix" it. The widget is correct; the parser just needed `.get()`. The `live_trade` check is now a **saved regression test in `scripts/`** (added by Nicholas) so verification no longer leans on the ad-hoc snippet.
 
 **Decisions / notes:**
 
@@ -399,13 +399,13 @@ Every one was found by diffing applied vs proposed, running key-independent test
 
 ## 2026-05-29 (later) · P4.1 drafted — Proposal 012 (Supabase magic-link auth)
 
-**Built (drafted through `proposed_changes/`, awaiting Tom's review/apply):**
+**Built (drafted through `proposed_changes/`, awaiting Nicholas' review/apply):**
 
 - **Proposal 012 — Supabase magic-link auth (P4.1).** The active-front task. Closes SECURITY_AUDIT **HIGH-2** (spoofable `"demo"`); produces the real `user_id` that P4.2 persistence/RLS and P4.3 Mem0 key off. 10 files + a regression test, mirrored under `proposed_changes/012-supabase-magic-link-auth/`.
 - **Backend:** new `backend/auth.py` — verifies the Supabase JWT **offline (HS256, PyJWT + `SUPABASE_JWT_SECRET`)** and returns the token `sub` (UUID) as the trusted `user_id`. `main.py` injects it via `Depends(resolve_user_id)`, **removes the client-supplied `ChatRequest.user_id`** (identity now comes from the signed token, never the body), and adds `require_auth`/`auth_configured` to `/healthz`. `pyproject.toml` declares `pyjwt>=2.9` in main deps (pure-Python for HS256 — does **not** pull `cryptography`; the heavier supabase client stays in the `auth` group for P4.2). `.env.example` gains `SUPABASE_JWT_SECRET` + `REQUIRE_AUTH`.
 - **Frontend:** new `lib/supabase.ts` (client singleton + `getAccessToken`/`signOut`, graceful no-op when unconfigured → demo mode), new `components/AuthGate.tsx` (magic-link login screen + `useAuth()`), `lib/sse.ts` attaches `Authorization: Bearer <jwt>` (and shows a friendly 401 message), `app/page.tsx` wraps in `<AuthGate>`, makes `handleSubmit` async to fetch the token, and adds a header sign-out.
 
-**Decisions surfaced (confirmed with Tom this session):**
+**Decisions surfaced (confirmed with Nicholas this session):**
 
 - **JWT verification = local HS256** (PyJWT + `SUPABASE_JWT_SECRET`), **not** `supabase.auth.get_user()`. Lighter (no supabase install for P4.1 — PyJWT already in the venv), faster (no per-turn round-trip), canonical FastAPI+Supabase pattern, offline-testable. Assumes the project's **default symmetric JWT secret**; if it ever moves to asymmetric (ES256/RS256) signing keys, swap `verify_jwt` to a JWKS fetch (flagged in the proposal).
 - **Enforcement = flag-gated `REQUIRE_AUTH`**, mirroring the `USE_MOCK_*` kill-switches — **not** a hard cutover. `REQUIRE_AUTH=0` (local): a Bearer token is still verified if sent, but a token-less request falls back to `"demo"` so the deterministic mock demo / `smoke_test.sh` / curl checks keep working. `REQUIRE_AUTH=1` (Railway): unauthenticated `POST /api/chat` → **401**. A *provided-but-invalid* token is **always** 401 (never downgraded to demo); a token with no secret configured → **500** `auth_not_configured` (surfaced, not silently passed — same honesty discipline as `alpaca_fetch_failed`).
@@ -424,22 +424,22 @@ Every one was found by diffing applied vs proposed, running key-independent test
 
 **Did NOT do:**
 
-- Did NOT apply 012 to the live repo (Tom applies + archives manually) or touch live `backend/`/`frontend/` files.
+- Did NOT apply 012 to the live repo (Nicholas applies + archives manually) or touch live `backend/`/`frontend/` files.
 - Did NOT update `API_CONTRACT.md` — it's a reference doc, but it would describe unbuilt behaviour until 012 is applied (the exact problem P3 fixed). Listed in the proposal's "on-apply" checklist instead.
 - Did NOT start P4.2/P4.3 — they depend on 012 landing.
 
-**Follow-up (same session) — Tom applied 012, hit a hydration bug → Proposal 013 drafted.** 012 applied; `test_P4_012_auth.py` 18/18; magic-link login verified in-app. But the browser logged a React **hydration mismatch** in `AuthGate.tsx`: `getSupabase()` is client-only (`typeof window` branch), so the server rendered `children` (`authConfigured()` false) while the client's first paint rendered `<Splash>` (`authConfigured()` true) — server text ≠ client text. **Proposal 013** (`013-authgate-hydration-fix/`, one file) fixes it with the canonical `mounted`-flag pattern: defer the gate decision to after mount so the server and first client render emit an identical `<Splash>`, then the real gate (children/login) appears. Fixed file typechecks clean (project: 0 errors — the earlier pre-existing `ResearchCard.tsx` null-guard errors are also resolved now). Awaiting Tom's apply of 013.
+**Follow-up (same session) — Nicholas applied 012, hit a hydration bug → Proposal 013 drafted.** 012 applied; `test_P4_012_auth.py` 18/18; magic-link login verified in-app. But the browser logged a React **hydration mismatch** in `AuthGate.tsx`: `getSupabase()` is client-only (`typeof window` branch), so the server rendered `children` (`authConfigured()` false) while the client's first paint rendered `<Splash>` (`authConfigured()` true) — server text ≠ client text. **Proposal 013** (`013-authgate-hydration-fix/`, one file) fixes it with the canonical `mounted`-flag pattern: defer the gate decision to after mount so the server and first client render emit an identical `<Splash>`, then the real gate (children/login) appears. Fixed file typechecks clean (project: 0 errors — the earlier pre-existing `ResearchCard.tsx` null-guard errors are also resolved now). Awaiting Nicholas' apply of 013.
 
-**Follow-up 2 — 013 applied (hydration gone), then the email rate limit locked Tom out → Proposal 014 drafted.** After applying 013 the hydration warning was gone, but testing login repeatedly tripped Supabase's built-in email cap (429 / "email rate limit exceeded", ~a few magic links/hour). Because the login gate is frontend-only and no session ever got stored, every restart dropped Tom back on the login page with no way through (can't "sign out" of a session you never had). Diagnosis also surfaced a still-open backend question: when signed in, an authed `/api/chat` call may 401 — confirmed `auth.verify_jwt` returns `401 invalid_token` for *both* an asymmetric (ES256) token **and** a wrong-secret HS256 token, i.e. "login works but every authed call fails" ⇒ either the project signs JWTs with asymmetric **JWT Signing Keys** (→ needs JWKS verification, the 012 follow-up) or `SUPABASE_JWT_SECRET` is wrong. Left for Tom to confirm via the token `alg` + the 401 `detail` (demo mode sends no token, so it sidesteps this for now).
+**Follow-up 2 — 013 applied (hydration gone), then the email rate limit locked Nicholas out → Proposal 014 drafted.** After applying 013 the hydration warning was gone, but testing login repeatedly tripped Supabase's built-in email cap (429 / "email rate limit exceeded", ~a few magic links/hour). Because the login gate is frontend-only and no session ever got stored, every restart dropped Nicholas back on the login page with no way through (can't "sign out" of a session you never had). Diagnosis also surfaced a still-open backend question: when signed in, an authed `/api/chat` call may 401 — confirmed `auth.verify_jwt` returns `401 invalid_token` for *both* an asymmetric (ES256) token **and** a wrong-secret HS256 token, i.e. "login works but every authed call fails" ⇒ either the project signs JWTs with asymmetric **JWT Signing Keys** (→ needs JWKS verification, the 012 follow-up) or `SUPABASE_JWT_SECRET` is wrong. Left for Nicholas to confirm via the token `alg` + the 401 `detail` (demo mode sends no token, so it sidesteps this for now).
 
-- **Proposal 014** (`014-login-demo-mode/`, one file, supersedes 013's `AuthGate.tsx`): a **dev-only** ("Continue in demo mode") escape hatch on the login screen so a developer isn't locked out when email is rate-limited. `NODE_ENV==='development'`-gated (compiled out of prod builds), **persisted in localStorage** (survives restarts), with a fixed "Demo mode · exit" pill to return to login. Frontend-gate only — the backend still enforces `REQUIRE_AUTH` independently (prod: demo sends no token → every `/api/chat` 401s), so it's a convenience, not a bypass. Typechecks clean (project: 0 errors). Awaiting Tom's apply.
+- **Proposal 014** (`014-login-demo-mode/`, one file, supersedes 013's `AuthGate.tsx`): a **dev-only** ("Continue in demo mode") escape hatch on the login screen so a developer isn't locked out when email is rate-limited. `NODE_ENV==='development'`-gated (compiled out of prod builds), **persisted in localStorage** (survives restarts), with a fixed "Demo mode · exit" pill to return to login. Frontend-gate only — the backend still enforces `REQUIRE_AUTH` independently (prod: demo sends no token → every `/api/chat` 401s), so it's a convenience, not a bypass. Typechecks clean (project: 0 errors). Awaiting Nicholas' apply.
 
 **Follow-up 3 — 014 applied; root-caused the authed-401 to ES256 signing keys → Proposal 015 drafted.** With demo mode unblocking the dev loop, ran the sign-in-free JWKS check: `GET <SUPABASE_URL>/auth/v1/.well-known/jwks.json` returned a key with `"kty":"EC","crv":"P-256","alg":"ES256"` — the project signs JWTs with **asymmetric "JWT Signing Keys"**, so 012's HS256-only `verify_jwt` rejected every token (`invalid_token` → 401: "login works, every authed call fails"). Exactly the 012 follow-up.
 
-- **Proposal 015** (`015-jwks-asymmetric-jwt/`, supersedes 012's `auth.py`/`pyproject.toml`/`.env.example` + new `scripts/test_P4_015_jwks.py`): `verify_jwt` now **dispatches on the token's header `alg`** — `ES256/RS256/EdDSA` → verified against the project's published **JWKS public key** for the token's `kid` (`PyJWKClient`, cached after first fetch, runs in FastAPI's threadpool since the dep is sync; sends the anon key as the `apikey` header); `HS256` → the legacy secret (kept); `none`/other → `401 unsupported_alg` (blocks alg-none). No alg-confusion (different key material + per-alg allowlist). `auth_configured()` now also true via `SUPABASE_URL`. New details `503 jwks_unavailable` / `401 unsupported_alg`. **`pyjwt`→`pyjwt[crypto]`** (needs `cryptography` for ES256 — the 012 "avoid cryptography" rationale no longer applies; `cryptography 48.0.0` already in the venv). Verified: 015 ES256 round-trip test **10/10** (real EC P-256 key, JWKS client stubbed → no network), and the applied 012 HS256 test still **18/18** against the new `auth.py`. Awaiting Tom's apply (`uv sync` to pull `pyjwt[crypto]`; then a signed-in portfolio call should 200, not 401). This unblocks P4.1 → P4.2.
-- Also clarified for Tom: "localhost:3000 goes straight into the app even with `REQUIRE_AUTH=1`" is **not a bug** — `REQUIRE_AUTH` is backend-only (the frontend can't see it); the app loads via the 014 demo override (persisted `ab-demo-mode` flag → click the "Demo mode · exit" pill to clear) or because `NEXT_PUBLIC_SUPABASE_*` is still commented out in `.env.local` (→ demo-by-no-env; un-comment + restart). With `REQUIRE_AUTH=1` the app loads but authed calls 401 until 015 lands + a real sign-in.
+- **Proposal 015** (`015-jwks-asymmetric-jwt/`, supersedes 012's `auth.py`/`pyproject.toml`/`.env.example` + new `scripts/test_P4_015_jwks.py`): `verify_jwt` now **dispatches on the token's header `alg`** — `ES256/RS256/EdDSA` → verified against the project's published **JWKS public key** for the token's `kid` (`PyJWKClient`, cached after first fetch, runs in FastAPI's threadpool since the dep is sync; sends the anon key as the `apikey` header); `HS256` → the legacy secret (kept); `none`/other → `401 unsupported_alg` (blocks alg-none). No alg-confusion (different key material + per-alg allowlist). `auth_configured()` now also true via `SUPABASE_URL`. New details `503 jwks_unavailable` / `401 unsupported_alg`. **`pyjwt`→`pyjwt[crypto]`** (needs `cryptography` for ES256 — the 012 "avoid cryptography" rationale no longer applies; `cryptography 48.0.0` already in the venv). Verified: 015 ES256 round-trip test **10/10** (real EC P-256 key, JWKS client stubbed → no network), and the applied 012 HS256 test still **18/18** against the new `auth.py`. Awaiting Nicholas' apply (`uv sync` to pull `pyjwt[crypto]`; then a signed-in portfolio call should 200, not 401). This unblocks P4.1 → P4.2.
+- Also clarified for Nicholas: "localhost:3000 goes straight into the app even with `REQUIRE_AUTH=1`" is **not a bug** — `REQUIRE_AUTH` is backend-only (the frontend can't see it); the app loads via the 014 demo override (persisted `ab-demo-mode` flag → click the "Demo mode · exit" pill to clear) or because `NEXT_PUBLIC_SUPABASE_*` is still commented out in `.env.local` (→ demo-by-no-env; un-comment + restart). With `REQUIRE_AUTH=1` the app loads but authed calls 401 until 015 lands + a real sign-in.
 
-**Follow-up 4 — 015 applied, signed-in portfolio 200, P4.1 ✅ → Proposal 016 drafted for P4.2.** Tom applied 015, signed in, the authenticated `/api/chat` portfolio call returns 200, both saved tests (012 HS256 18/18, 015 ES256 10/10) clean. **P4.1 is closed**; moving to **P4.2 — Supabase persistence + RLS** on the same Supabase project.
+**Follow-up 4 — 015 applied, signed-in portfolio 200, P4.1 ✅ → Proposal 016 drafted for P4.2.** Nicholas applied 015, signed in, the authenticated `/api/chat` portfolio call returns 200, both saved tests (012 HS256 18/18, 015 ES256 10/10) clean. **P4.1 is closed**; moving to **P4.2 — Supabase persistence + RLS** on the same Supabase project.
 
 - **Proposal 016** (`016-supabase-persistence-rls/`): 7 files + a unit test.
   - **Backend:** `auth.py` (additive: `AuthCtx(user_id, token)` + `resolve_auth`; `resolve_user_id` kept for back-compat). New `db.py` — **async**, **user-scoped**: `acreate_client(URL, ANON_KEY)` then `client.postgrest.auth(user_jwt)` so every PostgREST request rides on the user's JWT and RLS (`auth.uid() = user_id`) physically isolates rows. The **Supabase service key is never used** in `db.py` (RLS-bypassing; reserved for admin tasks). New `db/schema.sql` — 4 tables (`conversations`, `messages`, `pinned_widgets`, `user_profiles`), all RLS-on with `for all to authenticated using/with check (auth.uid() = user_id)`, plus a `set_updated_at` trigger. `main.py` wires persistence into `/api/chat` (pre-stream: get-or-create conversation + persist user message; post-stream: persist assistant accumulated widgets+text), emits a new `conversation` SSE event with `{id, title}` so the frontend can capture and echo the id, adds `GET /api/conversations` (RLS-filtered list) + `GET /api/conversations/{id}` (messages), and `/healthz.persistence_configured`. Demo mode (`auth.token is None`) **skips persistence entirely** — no DB writes, no DB reads.
@@ -455,12 +455,12 @@ Every one was found by diffing applied vs proposed, running key-independent test
 
 ## 2026-06-01 · 016 applied — **P4.2 VERIFIED ✅ — SECURITY_AUDIT HIGH-2 cleared**
 
-**What landed:** Tom applied proposal 016 — `backend/auth.py` (AuthCtx + resolve_auth), new `backend/db.py` (async user-scoped persistence), new `backend/db/schema.sql` (4 RLS-protected tables + policies + trigger), `backend/main.py` (persistence wiring + `conversation` SSE event + 2 new GET routes + `/healthz.persistence_configured`), `backend/pyproject.toml` (`supabase>=2.10.0,<2.28.0` moved to main deps), `frontend/{lib/sse.ts, app/page.tsx}` (conversation_id round-trip). `scripts/test_P4_016_persistence.py` moved to repo scripts/.
+**What landed:** Nicholas applied proposal 016 — `backend/auth.py` (AuthCtx + resolve_auth), new `backend/db.py` (async user-scoped persistence), new `backend/db/schema.sql` (4 RLS-protected tables + policies + trigger), `backend/main.py` (persistence wiring + `conversation` SSE event + 2 new GET routes + `/healthz.persistence_configured`), `backend/pyproject.toml` (`supabase>=2.10.0,<2.28.0` moved to main deps), `frontend/{lib/sse.ts, app/page.tsx}` (conversation_id round-trip). `scripts/test_P4_016_persistence.py` moved to repo scripts/.
 
 **Two operational gotchas surfaced during apply and resolved:**
 
-1. **First `uv sync` ripped supabase out of the venv.** Tom had applied 016's code files but not yet `pyproject.toml`, so `uv sync` reconciled against the *old* pyproject (supabase only in the `auth` group, not main deps) and uninstalled the supabase 2.10 stack (gotrue, postgrest, storage3, realtime, supafunc, deprecation, h2*, hyperframe) that had been transiently installed during my pre-apply verification. Backend then failed to boot on `import supabase`. **Fix:** apply pyproject *first*, then `uv sync` installs the supabase deps as declared. *Lesson:* on any proposal carrying a pyproject delta, apply ordering matters — fold a note into `proposed_changes/README.md` on the next workflow pass.
-2. **`db/schema.sql` failed with `ERROR: 42703: column "user_id" does not exist`.** Tom initially ran it in the **wrong Supabase project** — the brother's `Finance_Chatbot` Node project on the same workspace, which had pre-existing tables `conversations`/`messages`/etc. with different column conventions. `create table if not exists` was a no-op against the existing rows, then the `create index … on conversations(user_id, …)` (or the policy `auth.uid() = user_id`) errored because that column doesn't exist on the brother's tables. **Fix:** ran in the correct (agentic-brokerage) project — schema deployed clean. No cross-project rename needed.
+1. **First `uv sync` ripped supabase out of the venv.** Nicholas had applied 016's code files but not yet `pyproject.toml`, so `uv sync` reconciled against the *old* pyproject (supabase only in the `auth` group, not main deps) and uninstalled the supabase 2.10 stack (gotrue, postgrest, storage3, realtime, supafunc, deprecation, h2*, hyperframe) that had been transiently installed during my pre-apply verification. Backend then failed to boot on `import supabase`. **Fix:** apply pyproject *first*, then `uv sync` installs the supabase deps as declared. *Lesson:* on any proposal carrying a pyproject delta, apply ordering matters — fold a note into `proposed_changes/README.md` on the next workflow pass.
+2. **`db/schema.sql` failed with `ERROR: 42703: column "user_id" does not exist`.** Nicholas initially ran it in the **wrong Supabase project** — the brother's `Finance_Chatbot` Node project on the same workspace, which had pre-existing tables `conversations`/`messages`/etc. with different column conventions. `create table if not exists` was a no-op against the existing rows, then the `create index … on conversations(user_id, …)` (or the policy `auth.uid() = user_id`) errored because that column doesn't exist on the brother's tables. **Fix:** ran in the correct (agentic-brokerage) project — schema deployed clean. No cross-project rename needed.
 
 **P4.2 verification — the actual HIGH-2 gate, ran end-to-end:**
 
@@ -487,11 +487,11 @@ Final assertion: **`P4.2 verified ✅`**. The per-user data isolation the SECURI
 - `API_CONTRACT.md` — needs the 016 additions (new SSE event `conversation`, new routes `GET /api/conversations` + `GET /api/conversations/{id}`, optional `conversation_id` on `POST /api/chat`, `/healthz.persistence_configured`) and the 015 additions (`401 unsupported_alg`, `503 jwks_unavailable` details). Scoped — ~15 min.
 - `CLAUDE.md` tech-stack table — Mem0 / Langfuse rows defer until P4.3 / P4.4 land.
 - `proposed_changes/README.md` workflow doc — note "apply `pyproject.toml` before `uv sync`" gotcha.
-- `proposed_changes/016-supabase-persistence-rls/` — Tom's manual archive to `applied/`.
+- `proposed_changes/016-supabase-persistence-rls/` — Nicholas' manual archive to `applied/`.
 
 **Did NOT do:**
 
-- Did NOT start P4.3 / P4.4 — awaiting Tom's direction on which to begin.
+- Did NOT start P4.3 / P4.4 — awaiting Nicholas' direction on which to begin.
 - Did NOT update `API_CONTRACT.md` — flagged for next session, scoped change.
 
 **Next session:**
@@ -499,3 +499,46 @@ Final assertion: **`P4.2 verified ✅`**. The per-user data isolation the SECURI
 - Apply 012: `cd backend && uv sync`; set `SUPABASE_JWT_SECRET` + `REQUIRE_AUTH` (`.env`) and `NEXT_PUBLIC_SUPABASE_*` (`.env.local`); allow the redirect origin in Supabase Auth settings. Run `scripts/test_P4_012_auth.py` (18/18) + a live magic-link login via `pnpm dev`, then flip `REQUIRE_AUTH=1` and confirm the 401. Update `API_CONTRACT.md`.
 - Then **P4.2** (persistence + RLS) and **P4.3** (Mem0) — both keyed on the real `user_id` 012 produces.
 - Still open/parked: P1.2 first real TradingView run (dev machine); fix the pre-existing `ResearchCard.tsx` null-guard; FMP Starter → verify a non-sample ticker; candidate Proposal 011.
+
+---
+
+## 2026-06-01 (later) · Reference-doc catchup + Proposal 017 drafted (P4.4 Langfuse)
+
+Nicholas chose the following sequence: reference-doc catchup first, then **P4.4 (Langfuse) as 017**, then **P4.3 (Mem0) as 018**.
+
+**(A) — reference docs updated directly (per the workflow; not via proposal):**
+
+- **`API_CONTRACT.md` → v1.1 (2026-06-01).** §2 fully rewritten — Bearer JWT, ES256/HS256 alg-dispatch + JWKS, `REQUIRE_AUTH` flag-gated, full 401/500/503 `detail` tables (`authentication_required`, `token_expired`, `invalid_token`, `token_missing_sub`, `unsupported_alg`, `auth_not_configured`, `jwks_unavailable`). §5 `/healthz` gains `require_auth`, `auth_configured`, `persistence_configured`. §6 `POST /api/chat` — `Authorization` now required when signed in, `conversation_id` optional, `user_id` removed from body, new `conversation` SSE event documented + the "persistence failures are swallowed" rule. New **§6b** — `GET /api/conversations` + `GET /api/conversations/{id}` (RLS posture + 4-table schema sketch + which tables are wired vs not). §9 cleaned up — P4.1/P4.2 line items removed (done); P4.3/P4.4 + pinned-widget routes + history UI listed as remaining planned work.
+- **`proposed_changes/README.md`** — added the **"Apply-order gotcha: `pyproject.toml` before `uv sync`"** section recording the 016-apply lesson (transient deps getting uninstalled when the pyproject delta isn't applied first), with the canonical 3-step apply order.
+
+**(B) — Proposal 017 (P4.4 Langfuse observability) drafted.** 7 files + a unit test, in `proposed_changes/017-langfuse-observability/`.
+
+- **Backend:** new `observability.py` — `Tracer` protocol, `_NoopTracer` singleton, `_LangfuseTracer` (Langfuse-backed), `trace_chat` async context manager (yields a tracer; in unconfigured / setup-failure modes yields `NOOP_TRACER` so the agent code path is identical), lazy import of `langfuse`. Built on Langfuse 4.7.1's OTel surface: `start_as_current_observation` for the root span, `propagate_attributes(user_id=, session_id=, tags=)` for trace-level attribution, `start_observation(...).end()` for child generations + tool spans. Found `propagate_attributes` by probing — it's the documented way to set `user.id`/`session.id` in Langfuse v3+/v4 (the `LangfuseOtelSpanAttributes.TRACE_USER_ID` constant is `'user.id'`).
+- **Agent integration:** `agent.py` gains `tracer: Tracer = NOOP_TRACER` kwarg; per-iteration `tracer.record_generation(name='anthropic.iter_N', model=, input=messages_snapshot, output=_serialise_blocks(final_msg.content), usage_details={input, output}, metadata={iteration, latency_ms})`; per-tool `tracer.record_tool(name=, args=, result=, ok=, latency_ms=, metadata={tool_use_id})`; terminal `tracer.set_output({kind, ...})` so the root span carries the final widget/message.
+- **`main.py`:** wraps `event_stream` in `async with observability.trace_chat(user_id=auth.user_id, conversation_id=conversation_id, message=req.message) as tracer:` and passes the tracer to `run_agent`. Adds `langfuse_configured` to `/healthz`. **016's persistence behaviour is preserved verbatim** — the `conversation` SSE event still emits first, the pre/post-stream persistence calls still run, demo mode still skips persistence.
+- **`pyproject.toml`:** adds `langfuse>=4.7.0,<5.0.0` to main deps (pure-Python, no heavy transitives like the supabase/pyiceberg trap).
+- **`.env.example`:** adds `LANGFUSE_PUBLIC_KEY`/`SECRET_KEY`/`HOST` with the US/EU/HK regional URLs spelled out (PRIORITIES_EXPLAINED's "mind the Japan-region endpoint" hint applies — `hk.cloud.langfuse.com` is the APAC endpoint).
+
+**Verified pre-apply** (no Langfuse account / no network):
+
+- `py_compile` of all three backend files ✓.
+- `scripts/test_P4_017_observability.py` → **13/13** (langfuse_configured truth table including the REPLACE-placeholder edge case; `NOOP_TRACER` satisfies the `Tracer` protocol surface; `trace_chat` unconfigured returns the NOOP singleton cleanly; a synthetic agent loop driving a `_RecordingTracer` captures the expected 2 generations + 1 tool span + terminal output; the lazy-client "unavailable sticky" bit also falls back to NOOP).
+- The Langfuse 4.7.1 API surface is verified live in the venv (the methods + kwargs used in `observability.py` all match the installed signatures).
+- 017 doesn't touch `auth.py`/`db.py`/`schema.sql` → the applied 012 HS256 test (18/18), 015 ES256/JWKS test (10/10), and 016 persistence unit test (17/17) trivially still pass.
+
+**Apply order matters** (per the (A) README addendum): `pyproject.toml` → `uv sync` → other files. Then sign up at `cloud.langfuse.com`, paste the keys into `.env`, restart. Drive one chat turn → a trace named `chat` appears in the Langfuse dashboard, tagged with `user.id` + `session.id`, containing `anthropic.iter_*` generations and `tool:<name>` spans.
+
+**Design notes worth keeping:**
+
+- Observability is read-only — never raises into the user stream. Every Langfuse call is wrapped; failures log at debug only.
+- Soft dependency on auth: anonymous demo turns are still traced (with `user_id="anonymous"`), per PRIORITIES_EXPLAINED §P4.4.
+- Per-tool latency is currently the *batch* `asyncio.gather` total — per-call timing is a clean follow-up (`_call_tool` wrapper, ~5 lines). Noted in the README "Risks" section.
+- The lazy `langfuse` import means a backend without the package installed still boots (the no-op path kicks in).
+
+**Did NOT do this turn:**
+
+- Did NOT start (C) — Proposal 018 (P4.3 Mem0 memory) — that's the next track per Nicholas' sequence; awaiting his go-ahead.
+- Did NOT apply 017 (Nicholas applies + archives manually; pyproject-first order documented).
+- Did NOT update `CLAUDE.md` tech-stack table — defer to when 018 also lands so Mem0 + Langfuse both move from `// planned` to live in one pass.
+
+**Next:** draft Proposal 018 (P4.3 Mem0 memory) — the per-user fact recall layer. Key correctness target: **every `memory.search` + `memory.store` MUST scope by `AuthCtx.user_id` (the trusted Supabase UUID), never a client-supplied value** — wrong scope = cross-user leak via injected context (PRIORITIES_EXPLAINED §"Mem0 ↔ auth — a privacy-critical, hard dependency"). Doing it under 017's traces means a wrong-scope bug would show up immediately in the Langfuse dashboard.
