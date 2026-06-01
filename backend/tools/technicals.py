@@ -102,7 +102,12 @@ async def _mock_technical_levels(
         "trend": "bullish",
         "golden_cross_recent": True,
         "is_mock": True,
-        "screenshot_url": f"/api/mock-chart/{ticker}.svg",
+        # Empty string is the canonical "no real screenshot — frontend shows the
+        # inline <MockChartSvg/> fallback" value (matches the real path's default
+        # on line ~195). Previously this was f"/api/mock-chart/{ticker}.svg",
+        # but no such backend route was ever registered, so the frontend <img>
+        # 404'd into a broken-image icon. Proposal 019.
+        "screenshot_url": "",
         "source": "tradingview_mcp_mocked",
         "sources": [{"name": "TradingView (mocked)"}],
     }
