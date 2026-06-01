@@ -1,4 +1,4 @@
-"""Langfuse observability (P4.4 — proposal 017).
+"""Langfuse observability (P4.4 — proposal 017, fix in 018).
 
 Wraps each ``/api/chat`` turn in a Langfuse trace so the agent loop is debuggable
 turn-by-turn: which tools fired, the prompts/outputs of each Anthropic call,
@@ -20,10 +20,12 @@ Design:
   turns traced too. Per PRIORITIES_EXPLAINED §P4.4, Langfuse "consumes the
   user_id but doesn't require it — traces still work anonymously."
 * **OTel-based.** Built on Langfuse v4's OpenTelemetry surface
-  (``start_as_current_observation`` / ``start_observation`` /
-  ``propagate_attributes``). The client is constructed lazily, once.
-* **Lazy import.** ``langfuse`` is imported only inside ``_get_client``, so a
-  backend without it installed still boots (the no-op path kicks in).
+  (``start_as_current_observation`` / ``start_observation`` for spans, and the
+  **module-level** ``langfuse.propagate_attributes`` for trace-level ``user.id``
+  / ``session.id``). The client is constructed lazily, once.
+* **Lazy import.** ``langfuse`` is imported only inside ``_get_client`` /
+  ``trace_chat``, so a backend without it installed still boots (the no-op
+  path kicks in).
 
 Surface (used by ``main.py`` + ``agent.py``):
 
@@ -272,6 +274,11 @@ async def trace_chat(
     root_span: Any = None
     started_at = time.monotonic()
     try:
+        # `propagate_attributes` is a **module-level** helper (NOT an instance
+        # method on the client) — calling it via `client.propagate_attributes`
+        # raises AttributeError. Fix landed in proposal 018.
+        import langfuse  # type: ignore[import-not-found]
+
         obs_ctx = client.start_as_current_observation(
             name="chat",
             as_type="span",
@@ -280,7 +287,7 @@ async def trace_chat(
         root_span = obs_ctx.__enter__()
         # Trace-level attributes — user.id + session.id show up as filterable
         # dimensions in the Langfuse dashboard (per-user latency/cost, etc.).
-        attrs_ctx = client.propagate_attributes(
+        attrs_ctx = langfuse.propagate_attributes(
             user_id=(user_id or "anonymous"),
             session_id=conversation_id,
             tags=(["demo"] if (not user_id or user_id == "demo") else None),
