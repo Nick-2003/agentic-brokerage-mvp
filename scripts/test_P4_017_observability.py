@@ -31,7 +31,7 @@ os.environ.pop("LANGFUSE_PUBLIC_KEY", None)
 os.environ.pop("LANGFUSE_SECRET_KEY", None)
 os.environ.pop("LANGFUSE_HOST", None)
 
-import observability  # noqa: E402
+import observability  # noqa: E402 # Diagnostic noise; still functional
 
 _passed = 0
 _failed = 0
