@@ -16,6 +16,13 @@ P4.4 (proposal 017): an optional `tracer` parameter receives a Langfuse-backed
 ``Tracer`` (or the silent ``NOOP_TRACER``). The loop records one *generation*
 per Anthropic call and one *tool* span per executed tool. Read-only; never
 alters behaviour. Default = NOOP_TRACER, so existing callers keep working.
+
+Proposal 024: large `screenshot_url` data-URL fields are stripped from tool
+results BEFORE re-injecting them into the LLM message history (they balloon
+the context to 200K+ tokens after two real-mode chart calls). The full URLs
+are restored on the terminal widget emission so the frontend still gets the
+rendered image. See `_compact_for_llm()` and the screenshot-restore block
+inside `run_agent`.
 """
 
 from __future__ import annotations
@@ -151,6 +158,70 @@ def _serialise_blocks(content: list[Any]) -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# Proposal 024 — context compaction for the LLM message history.
+#
+# Tool results can contain very large fields (TradingView chart screenshots
+# come back as `data:image/png;base64,…` URLs, ~30K-300K tokens each). When
+# these are echoed back to the LLM in subsequent iterations via the
+# `tool_result` message content, two parallel chart calls easily exceed the
+# 200K context cap. We strip such fields BEFORE serialising into the message
+# history, and restore the originals on the terminal widget emission so the
+# frontend still gets the rendered image.
+# ---------------------------------------------------------------------------
+
+
+# Threshold below which a `data:` URL is small enough to be irrelevant
+# (placeholder / 1×1 transparent / empty). Above this we treat it as a real
+# screenshot and strip from LLM context.
+_SCREENSHOT_STRIP_THRESHOLD = 1024
+
+
+def _compact_for_llm(result: Any) -> Any:
+    """Return a copy of ``result`` with heavy opaque fields replaced by short
+    placeholders so the LLM context doesn't blow past 200K tokens.
+
+    Today only ``screenshot_url`` is large enough to need stripping; we
+    replace it with an empty string ("" — the canonical "no real screenshot,
+    frontend renders MockChartSvg" sentinel from proposals 019/023). The full
+    data URL is held in ``screenshot_urls_by_tool`` inside ``run_agent`` and
+    re-attached when the terminal widget is emitted.
+
+    Idempotent: returns the input unchanged when nothing needs stripping.
+    """
+    if not isinstance(result, dict):
+        return result
+    su = result.get("screenshot_url")
+    if isinstance(su, str) and su.startswith("data:") and len(su) > _SCREENSHOT_STRIP_THRESHOLD:
+        return {**result, "screenshot_url": ""}
+    return result
+
+
+def _restore_screenshot_in_widget(
+    widget: dict[str, Any], urls_by_tool_id: dict[str, str]
+) -> dict[str, Any]:
+    """If the terminal widget has a `screenshot_url` field (only `ta_chart`
+    does today) and we stripped one in this turn, restore the most recent
+    real data URL we saw — overriding whatever the LLM emitted (it can only
+    have emitted the empty-string sentinel since it never saw the real URL).
+
+    "Most recent" = last-inserted in `urls_by_tool_id`. Dict insertion order
+    is preserved (Python 3.7+), so this naturally tracks the order tools
+    completed in. Mutates `widget` in-place AND returns it for chainability.
+    """
+    if not urls_by_tool_id:
+        return widget
+    data = widget.get("data")
+    if not isinstance(data, dict):
+        return widget
+    if "screenshot_url" not in data:
+        return widget
+    # Use the most recent screenshot from this turn — that's the chart state
+    # the user is looking at right now.
+    data["screenshot_url"] = next(reversed(urls_by_tool_id.values()))
+    return widget
+
+
+# ---------------------------------------------------------------------------
 # Main agent loop
 # ---------------------------------------------------------------------------
 
@@ -169,6 +240,10 @@ async def run_agent(
     client = _get_client()
     messages: list[MessageParam] = [{"role": "user", "content": user_message}]
     iterations = 0
+    # Per-turn screenshot accounting (proposal 024). Maps `tool_use_id` → real
+    # `data:image/png;base64,…` URL we stripped from the LLM-bound payload.
+    # Restored into the terminal widget below.
+    screenshot_urls_by_tool: dict[str, str] = {}
 
     try:
         while iterations < MAX_ITERATIONS:
@@ -226,6 +301,10 @@ async def run_agent(
                 full_text = "".join(text_parts).strip()
                 widget = _extract_widget_json(full_text)
                 if widget is not None:
+                    # Proposal 024: substitute the real screenshot data URL back
+                    # in (the LLM emitted the empty sentinel because we stripped
+                    # the real URL from its context to avoid the 200K cap).
+                    _restore_screenshot_in_widget(widget, screenshot_urls_by_tool)
                     tracer.set_output({"kind": "widget", "widget": widget})
                     yield {"event": "widget", "data": widget}
                 elif full_text:
@@ -271,10 +350,25 @@ async def run_agent(
                         "summary": _summarize_tool_result(tu.name, ok, result),
                     },
                 }
+
+                # Proposal 024: compact heavy fields out of the LLM-bound payload
+                # (today: large `screenshot_url` data URLs) and remember the
+                # original for restoration on widget emission. The yielded
+                # `tool_result` event above only carries a short summary so the
+                # frontend SSE consumer is unaffected.
+                if (
+                    isinstance(result, dict)
+                    and isinstance(result.get("screenshot_url"), str)
+                    and result["screenshot_url"].startswith("data:")
+                    and len(result["screenshot_url"]) > _SCREENSHOT_STRIP_THRESHOLD
+                ):
+                    screenshot_urls_by_tool[tu.id] = result["screenshot_url"]
+                compact_result = _compact_for_llm(result)
+
                 tool_results_payload.append({
                     "type": "tool_result",
                     "tool_use_id": tu.id,
-                    "content": json.dumps(result),
+                    "content": json.dumps(compact_result),
                     "is_error": not ok,
                 })
 
