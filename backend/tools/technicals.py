@@ -20,9 +20,11 @@ New tools added for the "talk to your chart" wedge:
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import os
+from pathlib import Path
 from typing import Any
 
 from . import ToolDef, register
@@ -122,42 +124,169 @@ def _use_mock_ta() -> bool:
     return os.getenv("USE_MOCK_TA", "0") == "1"
 
 
+# ----- Parsers for the actual `tradesdontlie/tradingview-mcp` response shapes
+# (sourced from src/core/data.js + src/core/capture.js in the sibling repo,
+# verified pre-apply against the JS source; proposal 023). -----
+
+
+def _first_numeric_value(values: dict[str, Any]) -> float | None:
+    """Return the first parseable numeric value from a TradingView data-window
+    `values` dict (`{title: value}` — value can be a string like "211.30")."""
+    for v in values.values():
+        try:
+            return round(float(str(v).replace(",", "").strip()), 2)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _extract_indicator_values(
+    applied: list[str], studies: list[dict[str, Any]],
+) -> dict[str, float]:
+    """Map our short indicator names → current values, from the real
+    `data_get_study_values` response (`{studies: [{name, values: {title: value}}]}`).
+
+    The MCP server returns ALL visible studies at once (no per-indicator arg).
+    `name` is `meta.description` from TradingView — usually just the indicator's
+    family name ("Moving Average Simple"), often WITHOUT the length. So for
+    SMA 50 vs SMA 200 we disambiguate in two passes:
+
+    Pass 1 — length-aware: prefer studies where the length appears either in
+    `name` (e.g. "Moving Average Simple (50)") OR in any title in `values`
+    (e.g. `{"MA(50)": "211.30"}`).
+    Pass 2 — positional: fall back to the first unused matching study, taking
+    studies in the order the MCP server returned them (chart-layer order,
+    which matches add-order for our use case).
+
+    A study is "consumed" once mapped, so SMA 50 and SMA 200 can never collide.
+    """
+    result: dict[str, float] = {}
+    used: set[int] = set()
+
+    def _resolve(short: str, *, length_aware: bool) -> None:
+        try:
+            full_name, params = _translate_indicator(short)
+        except KeyError:
+            return
+        length_str = str(params.get("length")) if "length" in params else None
+
+        for i, s in enumerate(studies):
+            if i in used:
+                continue
+            name = s.get("name") or ""
+            values = s.get("values") or {}
+            if full_name not in name:
+                continue
+            if length_aware and length_str is not None:
+                in_desc = length_str in name
+                in_title = any(length_str in (t or "") for t in values.keys())
+                if not (in_desc or in_title):
+                    continue
+            v = _first_numeric_value(values)
+            if v is not None:
+                result[short] = v
+                used.add(i)
+                return
+
+    # Pass 1: prefer length-disambiguated matches (SMA 50 vs 200, RSI 14 vs others).
+    for short in applied:
+        _resolve(short, length_aware=True)
+    # Pass 2: positional fallback for anything still unmatched (no length, or
+    # length not surfaced in the description/values titles).
+    for short in applied:
+        if short not in result:
+            _resolve(short, length_aware=False)
+    return result
+
+
+def _partition_pine_levels(
+    studies: list[dict[str, Any]], current_price: float,
+) -> dict[str, list[float]] | None:
+    """Flatten `data_get_pine_lines` `studies[].horizontal_levels` and split
+    by side relative to `current_price`.
+
+    Real response shape: `{studies: [{name, total_lines, horizontal_levels: [num, ...]}]}`
+    — no labels, no support/resistance distinction inline. Heuristic: levels
+    above the current price are resistance (closest first); below are support
+    (closest first). Returns None if no usable horizontal levels — caller
+    falls back to swing-derived S/R from the same `current_price`.
+    """
+    all_levels: list[float] = []
+    for s in studies or []:
+        for lvl in s.get("horizontal_levels") or []:
+            try:
+                all_levels.append(float(lvl))
+            except (TypeError, ValueError):
+                continue
+    if not all_levels:
+        return None
+    resistance = sorted({lvl for lvl in all_levels if lvl > current_price})[:2]
+    support = sorted({lvl for lvl in all_levels if lvl < current_price}, reverse=True)[:2]
+    if not resistance and not support:
+        return None
+    return {"resistance": resistance, "support": support}
+
+
+async def _encode_screenshot_file(file_path: str) -> str:
+    """Read a PNG from disk and return a `data:image/png;base64,…` URL.
+
+    The MCP server's `capture_screenshot` writes the PNG to its own
+    `screenshots/<fname>.png` directory and returns the absolute path —
+    NOT inline base64. We read the file in a threadpool to keep the event
+    loop free (chart capture happens on the same host as the backend, so
+    the file is locally readable).
+
+    Returns "" if the file is missing/unreadable/empty.
+    """
+    if not file_path:
+        return ""
+    p = Path(file_path)
+    if not p.is_file():
+        log.info("capture_screenshot file not found: %s", file_path)
+        return ""
+    try:
+        data = await asyncio.to_thread(p.read_bytes)
+    except OSError as e:
+        log.warning("could not read screenshot file %s: %s", file_path, e)
+        return ""
+    if not data:
+        return ""
+    return f"data:image/png;base64,{base64.b64encode(data).decode('ascii')}"
+
+
 async def _real_technical_levels(
     ticker: str, timeframe: str, indicators: list[str],
 ) -> dict[str, Any]:
     """Drive a real TradingView Desktop chart via the MCP server.
 
-    Sequence (each call is inside the same MCP session, serialised by the
-    asyncio.Lock in mcp_client.py — CDP is single-controller, see §4.1):
+    Sequence (each call serialised by the per-session lock in mcp_client.py —
+    CDP is single-controller, see proposed_changes/applied/002 §4.1):
 
       1. tv_health_check          — fast fail if TV Desktop / CDP isn't ready
       2. chart_set_symbol         — load the ticker
       3. chart_set_timeframe      — switch timeframe
       4. chart_manage_indicator   — add each requested indicator
-      5. quote_get                — read the live current price (needed early
-                                    so the S/R fallback below uses the REAL
-                                    price, not MOCK_QUOTES — proposal 022)
-      6. data_get_study_values    — read indicator values back
-      7. data_get_pine_lines      — pull drawn S/R levels (or compute later
-                                    from the real `current_price`)
-      8. capture_screenshot       — PNG → base64-encoded data URL
+      5. quote_get                — live current price (needed early so the
+                                    S/R fallback below has it)
+      6. data_get_study_values    — ONE call (no args) returns all visible
+                                    studies; we map each applied indicator
+                                    to its value via _extract_indicator_values
+      7. data_get_pine_lines      — `studies[].horizontal_levels` partitioned
+                                    by `current_price` for S/R
+      8. capture_screenshot       — returns a `file_path`; we read + base64-
+                                    encode via _encode_screenshot_file
 
-    Returns the same shape as `_mock_technical_levels` so the frontend treats
-    both identically. The only differences are `is_mock: False` and
-    `source: "tradingview_mcp"`.
+    Returns the same shape as `_mock_technical_levels` (same widget contract).
+    The only differences are `is_mock: False` and `source: "tradingview_mcp"`.
 
-    P1.2 first-real-run fixes (proposal 022):
-      - `quote_get` is now step 5 (was last) so the S/R fallback at step 7
-        uses the REAL current price, not the mock cache. Pre-022 a real NVDA
-        turn produced `current_price=211.14` alongside `resistance=[959.47, …]`
-        / `support=[881.24, …]` — those latter were the mock $942.50 baseline
-        × 1.018/1.06/0.935/0.88, i.e. a trust-#3 violation about where the
-        numbers came from.
-      - `log.info(...)` calls added at each MCP-response-shape mismatch
-        (was silent — produced empty `indicator_values` and empty
-        `screenshot_url` with no diagnostic). Once Langfuse traces show what
-        shapes the MCP server actually returns, a follow-up proposal can
-        teach the parser those shapes.
+    P1.2 first-real-run history:
+      - Pre-022: `quote_get` ran last → S/R fallback used MOCK_QUOTES (trust-#3
+        violation). 022 moved quote_get to step 5 and made silent shape
+        mismatches audible.
+      - Pre-023 (this): the parsers for `data_get_study_values` / `pine_lines`
+        / `capture_screenshot` were built against guessed shapes that didn't
+        match the actual MCP server (`tradesdontlie/tradingview-mcp`). 023
+        rewrote them against the real shapes from the JS source.
     """
     from mcp_client import MCPClientError, tv_call
 
@@ -184,13 +313,14 @@ async def _real_technical_levels(
                           {"action": "add", "name": full_name, **params})
             applied.append(short)
 
-        # 5. Pull the live price NOW (was step 7 pre-022). Needed for both the
-        # response AND for the S/R fallback below — without it the fallback
-        # called _extract_price(ticker) → MOCK_QUOTES and produced wildly-off
-        # levels alongside a real `current_price`.
+        # 5. Live price — needed for both the response AND the S/R fallback.
+        # The MCP server's quote_get returns `{success, symbol, last, close, …}`
+        # (no `price` field); we also probe `price` for forward-compat.
         try:
             quote = await tv_call("quote_get", {"symbol": ticker})
-            current_price = float(quote.get("price") or quote.get("last") or 0)
+            current_price = float(
+                quote.get("last") or quote.get("close") or quote.get("price") or 0
+            )
             if not current_price:
                 log.info(
                     "quote_get(%s) returned no price; falling back to mock cache. raw: %r",
@@ -204,47 +334,44 @@ async def _real_technical_levels(
             )
             current_price = _extract_price(ticker)
 
-        # 6. Read indicator values back
+        # 6. Indicator values — ONE call (no args). Map by name + length.
         indicator_values: dict[str, float] = {}
-        for short in applied:
-            full_name, params = _translate_indicator(short)
-            study_id = full_name + (f"_{params['length']}" if "length" in params else "")
-            try:
-                study = await tv_call("data_get_study_values", {"study": study_id})
-                # The MCP server returns the last study value as `value` (or a list
-                # of values per series). Be defensive about shape.
-                v = study.get("value")
-                if isinstance(v, (int, float)):
-                    indicator_values[short] = round(float(v), 2)
-                elif isinstance(v, list) and v and isinstance(v[-1], (int, float)):
-                    indicator_values[short] = round(float(v[-1]), 2)
-                else:
-                    # Previously silent; surfaces in uvicorn log + Langfuse trace
-                    # so we can teach the parser whatever shape the MCP server
-                    # actually returns. Proposal 022.
-                    log.info(
-                        "data_get_study_values(%s) returned unexpected shape; "
-                        "indicator_values[%s] omitted. raw response: %r",
-                        study_id, short, study,
-                    )
-            except MCPClientError as e:
-                log.warning("data_get_study_values(%s) failed: %s", study_id, e)
-
-        # 7. S/R levels — try MCP-drawn Pine lines first; fall back to
-        # swing-derived levels computed from the REAL `current_price` (pre-022
-        # this called _extract_price(ticker) which read from MOCK_QUOTES).
-        # The levels remain a derivation (per trust principle #3) but they're
-        # at least derived from honest inputs now.
         try:
-            pine_lines = await tv_call("data_get_pine_lines", {})
-            parsed = _parse_pine_lines(pine_lines)
+            sv = await tv_call("data_get_study_values", {})
+            studies = sv.get("studies") or []
+            log.info(
+                "data_get_study_values returned %d studies: %s",
+                len(studies), [s.get("name") for s in studies],
+            )
+            indicator_values = _extract_indicator_values(applied, studies)
+            for short in applied:
+                if short not in indicator_values:
+                    log.info(
+                        "could not extract %s from studies; titles available: %s",
+                        short, [list((s.get("values") or {}).keys()) for s in studies],
+                    )
+        except MCPClientError as e:
+            log.warning("data_get_study_values failed: %s", e)
+
+        # 7. S/R levels — MCP-drawn Pine lines partitioned by current_price;
+        # fall back to swing-derived (from the REAL current_price, post-022).
+        try:
+            pl = await tv_call("data_get_pine_lines", {})
+            studies = pl.get("studies") or []
+            parsed = _partition_pine_levels(studies, current_price)
             if parsed is None:
                 log.info(
-                    "data_get_pine_lines returned no usable lines; "
-                    "computing swing-derived S/R from real price %.2f. raw: %r",
-                    current_price, pine_lines,
+                    "data_get_pine_lines returned no usable horizontal_levels; "
+                    "computing swing-derived S/R from real price %.2f. studies: %s",
+                    current_price, [s.get("name") for s in studies],
                 )
-            key_levels = parsed or _key_levels(current_price)
+                key_levels = _key_levels(current_price)
+            else:
+                swing = _key_levels(current_price)
+                key_levels = {
+                    "resistance": parsed["resistance"] or swing["resistance"],
+                    "support":    parsed["support"]    or swing["support"],
+                }
         except MCPClientError as e:
             log.warning(
                 "data_get_pine_lines failed: %s — computing swing-derived S/R from "
@@ -252,26 +379,25 @@ async def _real_technical_levels(
             )
             key_levels = _key_levels(current_price)
 
-        # 8. Screenshot — base64-encoded data URL inlined into widget JSON.
-        # Switch to a /api/screenshots/<hash>.png static route only if SSE
-        # bandwidth becomes a real problem (proposal §8 Q4).
+        # 8. Screenshot — MCP writes to disk, returns `file_path`. We read +
+        # base64-encode. Use region="chart" so we capture just the chart pane,
+        # not the whole TV window.
         screenshot_url = ""
         try:
-            shot = await tv_call("capture_screenshot", {"format": "png"})
-            png_b64 = shot.get("data") or shot.get("base64") or ""
-            if png_b64:
-                screenshot_url = _encode_screenshot(png_b64)
+            shot = await tv_call("capture_screenshot", {"region": "chart"})
+            file_path = shot.get("file_path") or ""
+            if file_path:
+                screenshot_url = await _encode_screenshot_file(file_path)
+                if not screenshot_url:
+                    log.info("capture_screenshot file empty/unreadable: %s", file_path)
             else:
-                # Previously silent — log so we can diagnose what shape the MCP
-                # server actually returns for screenshots. Proposal 022.
                 shape_hint = (
                     f"keys={list(shot.keys())}" if isinstance(shot, dict)
                     else f"type={type(shot).__name__}"
                 )
                 log.info(
-                    "capture_screenshot returned no `data`/`base64` field; "
-                    "screenshot omitted. %s. raw: %r",
-                    shape_hint, shot,
+                    "capture_screenshot returned no file_path; screenshot omitted. "
+                    "%s. raw: %r", shape_hint, shot,
                 )
         except MCPClientError as e:
             log.warning("capture_screenshot failed: %s", e)
@@ -303,6 +429,9 @@ def _encode_screenshot(b64_payload: str) -> str:
     """Wrap a base64-encoded PNG as a data URL the frontend <img> can render.
 
     Accepts either a raw base64 string or one already prefixed with `data:`.
+    Kept for forward-compat / direct base64 callers; the real path (023+)
+    goes through `_encode_screenshot_file` because the MCP server writes to
+    disk rather than returning base64 inline.
     """
     if b64_payload.startswith("data:"):
         return b64_payload
@@ -312,35 +441,6 @@ def _encode_screenshot(b64_payload: str) -> str:
     except Exception:
         return ""
     return f"data:image/png;base64,{b64_payload}"
-
-
-def _parse_pine_lines(pine_lines: dict[str, Any]) -> dict[str, list[float]] | None:
-    """Extract horizontal S/R levels from TradingView's pine_lines payload.
-
-    Returns None if no usable lines are found — caller falls back to computed
-    swing levels.
-    """
-    lines = pine_lines.get("lines") or []
-    supports: list[float] = []
-    resistances: list[float] = []
-    for ln in lines:
-        # Heuristic: horizontal lines have equal y1 and y2; classify by colour
-        # or by user label if present.
-        y1 = ln.get("y1")
-        y2 = ln.get("y2")
-        if y1 is None or y2 is None or abs(y1 - y2) > 0.01:
-            continue
-        label = (ln.get("label") or "").lower()
-        if "support" in label:
-            supports.append(round(float(y1), 2))
-        elif "resistance" in label:
-            resistances.append(round(float(y1), 2))
-    if not supports and not resistances:
-        return None
-    return {
-        "support": sorted(supports)[:2],
-        "resistance": sorted(resistances, reverse=True)[:2],
-    }
 
 
 def _extract_price(ticker: str) -> float:
