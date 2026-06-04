@@ -18,6 +18,10 @@ P4.2 (016):     when authenticated, each turn is persisted to Supabase under the
 P4.4 (017):     each turn is wrapped in a Langfuse trace (`observability.trace_chat`)
                 so the agent loop, tool calls, token usage, and latencies show up
                 per-user in the Langfuse dashboard. No-op when unconfigured.
+P4.3 (025):     each turn recalls this user's Mem0 memories (scoped by the
+                authenticated `user_id`) and injects them into the system prompt;
+                after the turn it stores the new salient facts. No-op when
+                unconfigured. Scope is ALWAYS `auth.user_id` — never client input.
 """
 
 from __future__ import annotations
@@ -37,6 +41,7 @@ load_dotenv()
 
 # Import agent AFTER load_dotenv so module-level env reads work
 import db  # noqa: E402
+import memory  # noqa: E402
 import observability  # noqa: E402
 from agent import MODEL, run_agent  # noqa: E402
 from auth import AuthCtx, auth_configured, require_auth, resolve_auth  # noqa: E402
@@ -88,6 +93,8 @@ async def healthz() -> dict[str, Any]:
         "persistence_configured": db.persistence_configured(),
         # P4.4 observability diagnostics.
         "langfuse_configured": observability.langfuse_configured(),
+        # P4.3 memory diagnostics.
+        "memory_configured": memory.memory_configured(),
     }
 
 
@@ -172,8 +179,24 @@ async def chat(
             text_acc: list[str] = []
             widget_acc: list[dict[str, Any]] = []
 
+            # ---- P4.3: recall this user's memories (scoped by the trusted
+            # `auth.user_id` — the SAME id the trace is tagged with) and inject
+            # them into the agent's system prompt for this turn. No-op + ""
+            # when Mem0 is unconfigured; failure-tolerant (a Mem0 hiccup injects
+            # nothing and never breaks the turn).
+            mem = memory.get_memory()
             try:
-                async for ev in run_agent(req.message, auth.user_id, tracer=tracer):
+                memory_context = await mem.recall(user_id=auth.user_id, query=req.message)
+            except Exception:
+                memory_context = ""
+
+            try:
+                async for ev in run_agent(
+                    req.message,
+                    auth.user_id,
+                    tracer=tracer,
+                    memory_context=memory_context,
+                ):
                     if ev["event"] == "widget":
                         widget_acc.append(ev["data"])
                     elif ev["event"] == "message":
@@ -201,6 +224,26 @@ async def chat(
                     )
                 except Exception:
                     pass  # don't fail the stream on a DB hiccup
+
+            # ---- P4.3: store the new salient facts from this exchange ----
+            # Runs AFTER the agent's `done` event has already reached the client,
+            # so Mem0's extraction latency is invisible to the user (same place
+            # the persistence write sits). Scoped by `auth.user_id`; no-op when
+            # Mem0 is unconfigured; never raises into the stream. We pass the
+            # user message (always) plus the assistant's markdown text if any —
+            # widgets are skipped (their JSON is noise for fact extraction; the
+            # durable user facts live in the message). NB: unlike persistence,
+            # this is NOT gated on `auth.token` — Mem0 is keyed by `user_id`, so
+            # demo turns store under the shared "demo" bucket (local only;
+            # production is REQUIRE_AUTH=1, so every user is a distinct UUID).
+            try:
+                await mem.remember(
+                    user_id=auth.user_id,
+                    user_message=req.message,
+                    assistant_text="\n\n".join(t for t in text_acc if t) or None,
+                )
+            except Exception:
+                pass  # memory is best-effort; never break the stream
 
     return EventSourceResponse(event_stream())
 
