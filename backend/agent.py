@@ -23,6 +23,13 @@ the context to 200K+ tokens after two real-mode chart calls). The full URLs
 are restored on the terminal widget emission so the frontend still gets the
 rendered image. See `_compact_for_llm()` and the screenshot-restore block
 inside `run_agent`.
+
+P4.3 (proposal 025): an optional `memory_context` string — this user's recalled
+Mem0 facts, already formatted as a system-prompt block by `memory.recall()` —
+is appended to the system prompt for this turn only. The agent itself stays
+memory-agnostic: `main.py` does the per-user search (scoped by the authenticated
+`user_id`) and the post-turn store; `run_agent` only injects what it's handed.
+Default `""` → behaviour identical to pre-025.
 """
 
 from __future__ import annotations
@@ -230,14 +237,27 @@ async def run_agent(
     user_message: str,
     user_id: str = "demo",
     tracer: Tracer = NOOP_TRACER,
+    memory_context: str = "",
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Run one user turn through the Claude tool-use loop.
 
     Yields SSE event dicts. ``tracer`` (P4.4) receives generations + tool spans;
     pass ``NOOP_TRACER`` (the default) when observability isn't wanted.
+
+    ``memory_context`` (P4.3) is this user's recalled Mem0 facts, pre-formatted
+    as a system-prompt block by ``memory.recall()``. It's appended to the system
+    prompt for THIS turn only; ``""`` (the default) leaves the prompt unchanged.
     """
     start_time = time.monotonic()
     client = _get_client()
+    # P4.3: per-turn system prompt = the static prompt + this user's recalled
+    # memories (already scoped to the authenticated user by main.py). Built once
+    # here, reused across every iteration of the tool loop below.
+    system_prompt = (
+        f"{SYSTEM_PROMPT}{memory_context}"
+        if isinstance(memory_context, str) and memory_context
+        else SYSTEM_PROMPT
+    )
     messages: list[MessageParam] = [{"role": "user", "content": user_message}]
     iterations = 0
     # Per-turn screenshot accounting (proposal 024). Maps `tool_use_id` → real
@@ -257,7 +277,7 @@ async def run_agent(
             async with client.messages.stream(
                 model=MODEL,
                 max_tokens=4096,
-                system=SYSTEM_PROMPT,
+                system=system_prompt,
                 tools=anthropic_tool_specs(),
                 messages=messages,
             ) as stream:
