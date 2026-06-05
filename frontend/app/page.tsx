@@ -4,6 +4,16 @@ import { AuthGate, useAuth } from '@/components/AuthGate';
 import { ChatBar } from '@/components/ChatBar';
 import { ThinkingCard, type Thought } from '@/components/ThinkingCard';
 import { WidgetRenderer } from '@/components/widgets/WidgetRenderer';
+import {
+  classifyIntent,
+  hashText,
+  trackChatError,
+  trackChatSessionStarted,
+  trackOrderTicketShown,
+  trackPromptSubmitted,
+  trackWidgetGenerated,
+  trackWidgetPinned,
+} from '@/lib/analytics';
 import { streamChat, type ChatEvent, type ChatRequest } from '@/lib/sse';
 import { getAccessToken, signOut } from '@/lib/supabase';
 import type { Widget } from '@/lib/widgets';
@@ -38,6 +48,9 @@ function ChatScreen() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const ctrlRef = useRef<AbortController | null>(null);
   const screenRef = useRef<HTMLDivElement>(null);
+  // Anchor for widget_pinned's time-since-session-start. Reset whenever a new
+  // session begins (mount + signed-in-user change).
+  const sessionStartRef = useRef(performance.now());
 
   // Clear any active conversation when the signed-in user changes (incl.
   // sign-out → null). Prevents one user's id from being echoed under another.
@@ -45,10 +58,16 @@ function ChatScreen() {
   useEffect(() => {
     setConversationId(null);
     setTurns([]);
+    // A signed-in-user change (and the initial mount) starts a fresh analytics
+    // session — re-anchor the clock and fire chat_session_started.
+    sessionStartRef.current = performance.now();
+    trackChatSessionStarted();
   }, [userKey]);
 
   async function handleSubmit(text: string) {
     if (streaming) return;
+    // Activation-funnel event — hash only, never the raw prompt text (PII rule).
+    trackPromptSubmitted(classifyIntent(text), hashText(text));
     setStreaming(true);
     const turnId = crypto.randomUUID();
     const startedAt = performance.now();
@@ -71,6 +90,18 @@ function ChatScreen() {
       if (ev.event === 'conversation') {
         setConversationId(ev.data.id);
         return;
+      }
+
+      // ── analytics — side effects kept OUT of the setTurns updater (which
+      // must stay pure). Fire on the raw event here, mutate state below. ──
+      if (ev.event === 'widget') {
+        trackWidgetGenerated(ev.data.type, performance.now() - startedAt);
+        if (ev.data.type === 'order_ticket') {
+          const d = ev.data.data;
+          trackOrderTicketShown(d.ticker, d.notional, !!(d.tp_price || d.sl_price));
+        }
+      } else if (ev.event === 'error') {
+        trackChatError(ev.data.message);
       }
 
       setTurns((prev) =>
@@ -123,6 +154,7 @@ function ChatScreen() {
 
   function pinWidget(w: Widget) {
     setPinnedWidgets((prev) => [w, ...prev]);
+    trackWidgetPinned(w.type, performance.now() - sessionStartRef.current);
   }
 
   return (
