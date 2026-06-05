@@ -50,7 +50,7 @@ These are non-negotiable. They're what distinguishes us from a chat-with-PDF wra
 | Broker | Alpaca paper trading | Real broker API, $100k paper, no KYC, no real money |
 | Market data | yfinance | 15-min delayed, free, no rate limits in practice |
 | News | Anthropic web search | Already in Claude API, no separate provider |
-| Charts | TradingView MCP (`tradesdontlie/tradingview-mcp`) | The talk-to-charts wedge (Real chart in local dev; mock in production until containerised TV Desktop (v2)) |
+| Charts | TradingView MCP (`tradesdontlie/tradingview-mcp`) | The talk-to-charts wedge. Real chart in local dev; mock in production until containerised TV Desktop (v2). **Live charts need BOTH `USE_MOCK_TA=0` AND TV Desktop open on the debug port** (`open -a "TradingView" --args --remote-debugging-port=9222`); if TV Desktop is closed the card silently degrades to mock data, labelled `(mocked — live data unavailable)` since proposal 029. See README "Talk-to-your-charts". |
 | Indicators math | ta-lib (Python) | For portfolio risk / correlation, not chart rendering |
 | Memory | Mem0 hosted platform (`mem0ai>=2.0.0,<3.0.0`, `AsyncMemoryClient`) | Per-user fact recall across conversations (P4.3, proposals 025+026). Optional `memory` dep group; no-op when `MEM0_API_KEY` unset. Scoped by the authenticated `user_id` — `search(filters={"user_id":…}, top_k=…)`, `add(messages, user_id=…)`. |
 | Observability | Langfuse (`langfuse>=4.7.0,<5.0.0`, OTel) | Per-turn agent traces — one `chat` span with `generation`/`tool:*` children, tagged `user.id` (P4.4, proposals 017+018). No-op when unconfigured. |
