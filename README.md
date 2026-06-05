@@ -114,6 +114,22 @@ P1.2's wedge: the user says "add RSI to NVDA" or "draw support at 220" and the c
 
 If you forget and set `USE_MOCK_TA=0` in production, every chart-related prompt will return `error: "tradingview_mcp_unreachable"` until you flip it back.
 
+### Limitation: live charts require TradingView Desktop to be *open*
+
+This is the most common confusion, so it's called out explicitly:
+
+- **`USE_MOCK_TA=0` is not enough on its own.** The real path also needs **TradingView Desktop actually running with the debug port**:
+
+  ```bash
+  open -a "TradingView" --args --remote-debugging-port=9222
+  ```
+
+  Verify it's live before using the app: `curl -s localhost:9222/json/version` should return a JSON blob whose User-Agent contains `TVDesktop`. If that curl fails, TV Desktop isn't reachable.
+
+- **If TV Desktop is closed (or the debug port is down) while `USE_MOCK_TA=0`,** the chart card can **silently degrade to mock data** — `current_price` and the S/R levels fall back to the built-in mock quote cache (e.g. NVDA shows `$942.50`), the screenshot is omitted (you get the inline SVG, not a real TradingView capture), even though the card is otherwise on the "real" path. As of proposal **029**, this degraded state is no longer disguised: the card's **`sources` are downgraded to `TradingView (mocked — live data unavailable)`** so you can tell at a glance the numbers aren't live. Before 029 it misleadingly showed `TradingView Desktop` / `Live OHLC via TradingView MCP` over mock numbers (a trust-principle-#3 gap).
+
+- **Net rule:** for live charts you need *both* `USE_MOCK_TA=0` **and** TV Desktop open on `:9222`. For a clean, honest demo without TV Desktop, set `USE_MOCK_TA=1` — then the card is fully mock and labelled as such.
+
 ## Project layout
 
 See [CLAUDE.md § Repo layout](./CLAUDE.md#repo-layout).
