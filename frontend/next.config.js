@@ -14,6 +14,7 @@ const nextConfig = {
     return [
       { source: '/api/chat', destination: `${backend}/api/chat` },
       { source: '/api/healthz', destination: `${backend}/healthz` },
+      { source: '/api/portfolio', destination: `${backend}/api/portfolio` },
       { source: '/api/mock-chart/:path*', destination: `${backend}/api/mock-chart/:path*` },
     ];
   },
