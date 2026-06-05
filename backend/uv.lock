@@ -67,7 +67,7 @@ dev = [
     { name = "pytest-asyncio", specifier = ">=0.24.0" },
     { name = "ruff", specifier = ">=0.7.0" },
 ]
-memory = [{ name = "mem0ai", specifier = ">=0.1.0" }]
+memory = [{ name = "mem0ai", specifier = ">=2.0.0,<3.0.0" }]
 
 [[package]]
 name = "alpaca-py"
