@@ -745,3 +745,17 @@ Both P5 Analytics+UX proposals are now applied to the live tree and verified.
 4. Backend down → `GET /api/portfolio` 500 → `fetchPortfolio` returns null → Hero **falls back to static** `$51,000.00 / +$964.10` (green), no crash; backend restart → live value returns.
 
 Operational notes worth keeping: `/api/portfolio` honours `REQUIRE_AUTH` — token-less curl 401s under `REQUIRE_AUTH=1` (expected); to see the mock `$51k` you need `USE_MOCK_BROKER=1` (real Alpaca keys otherwise return the live book). **P5 Analytics+UX slice is complete.** Remaining P5: the deferred security-hardening track (rate-limit + Supabase-backed token budget, daily-trade cap, DOMPurify, CSP/HSTS, dep audit) + proposal 029 (TA mock-source downgrade, awaiting apply) + the switchable-Alpaca proposal (now numbered 030).
+
+---
+
+## 2026-06-05 · 029 applied & verified across all three TA paths
+
+Proposal 029 (TA degraded-source label) applied verbatim to `backend/tools/technicals.py` (diff vs the proposed copy = identical) and verified on every path:
+
+- **Pure mock** (`USE_MOCK_TA=1`) → `TradingView (mocked)` — unchanged. ✓
+- **Live** (TV Desktop open on `:9222`, real `quote_get`) → real numbers + `[TradingView Desktop, Live OHLC via TradingView MCP]`. ✓
+- **Degraded** (TV Desktop closed while `USE_MOCK_TA=0`) → the NVDA card showed the mock numbers ($942.50 / R $959.47 / S $881.24) but the source pill now reads **`TradingView (mocked — live data unavailable)`** (`source: "tradingview_mcp_degraded"`). ✓ — closes the trust-#3 / rule-#7 gap where mock numbers used to sit under a "live TradingView" label.
+
+This also completes the 2026-06-05 TradingView-limitation documentation (README "Talk-to-your-charts" subsection + `.env.example` + CLAUDE.md Charts row): live charts require BOTH `USE_MOCK_TA=0` AND TV Desktop open on `:9222` (`open -a "TradingView" --args --remote-debugging-port=9222`), else the card degrades (now honestly labelled).
+
+**P5 status:** the Analytics + UX slice (027 + 028) plus the 029 source-fidelity fix are all applied & verified. Remaining P5 = the security-hardening track (rate-limit + Supabase-backed token budget, daily-trade cap, DOMPurify, CSP/HSTS, dep audit) and proposal 030 (switchable per-user Alpaca routing). Proposal 031 (dead OrderTicket/Tracker buttons + events) shelved.
