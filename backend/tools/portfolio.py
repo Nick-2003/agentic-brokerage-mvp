@@ -20,6 +20,10 @@ MOCK_PORTFOLIO = {
     "total_equity": 51000.00,
     "cash": 3914.50,
     "buying_power": 7829.00,
+    # P5/028: day P&L for the live Hero header. Mock keeps the established demo
+    # numbers ($964.10 / +1.93%) so mock-mode looks identical to the old hardcode.
+    "day_pnl": 964.10,
+    "day_pnl_pct": 1.93,
     "currency": "$",
     "is_paper": True,
     "is_mock": True,
@@ -44,10 +48,20 @@ async def _fetch_alpaca_portfolio(user_id: str) -> dict[str, Any]:
     account = client.get_account()
     positions = client.get_all_positions()
 
+    # P5/028: today's P&L for the Hero header. Alpaca's account carries
+    # `last_equity` (the prior trading day's close); today's change is the
+    # delta from it. Guard divide-by-zero on a brand-new/empty account.
+    equity = float(account.equity)
+    last_equity = float(getattr(account, "last_equity", 0) or 0)
+    day_pnl = equity - last_equity
+    day_pnl_pct = (day_pnl / last_equity * 100) if last_equity else 0.0
+
     return {
-        "total_equity": float(account.equity),
+        "total_equity": equity,
         "cash": float(account.cash),
         "buying_power": float(account.buying_power),
+        "day_pnl": day_pnl,
+        "day_pnl_pct": day_pnl_pct,
         "currency": "$",
         "is_paper": True,
         "is_mock": False,

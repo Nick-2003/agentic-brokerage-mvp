@@ -14,6 +14,7 @@ import {
   trackWidgetGenerated,
   trackWidgetPinned,
 } from '@/lib/analytics';
+import { fetchPortfolio, type PortfolioSummary } from '@/lib/portfolio';
 import { streamChat, type ChatEvent, type ChatRequest } from '@/lib/sse';
 import { getAccessToken, signOut } from '@/lib/supabase';
 import type { Widget } from '@/lib/widgets';
@@ -43,6 +44,9 @@ function ChatScreen() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [pinnedWidgets, setPinnedWidgets] = useState<Widget[]>([]);
+  // P5/028: live portfolio summary for the Hero header. null = loading or
+  // fetch failed → Hero falls back to static text.
+  const [portfolio, setPortfolio] = useState<PortfolioSummary | null>(null);
   // P4.2: the active conversation. null = the next turn starts a new one;
   // the backend echoes the id back via a `conversation` SSE event.
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -62,6 +66,20 @@ function ChatScreen() {
     // session — re-anchor the clock and fire chat_session_started.
     sessionStartRef.current = performance.now();
     trackChatSessionStarted();
+  }, [userKey]);
+
+  // P5/028: fetch the portfolio summary on mount and whenever the signed-in
+  // user changes (the token determines whose account we read).
+  useEffect(() => {
+    let cancelled = false;
+    getAccessToken()
+      .then(fetchPortfolio)
+      .then((p) => {
+        if (!cancelled) setPortfolio(p);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [userKey]);
 
   async function handleSubmit(text: string) {
@@ -172,7 +190,7 @@ function ChatScreen() {
         {/* Scrollable screen */}
         <div ref={screenRef} className="flex-1 overflow-y-auto overflow-x-hidden no-scrollbar pb-[120px]">
           <Header />
-          <Hero pinnedCount={pinnedWidgets.length} />
+          <Hero pinnedCount={pinnedWidgets.length} portfolio={portfolio} />
 
           {/* Pinned widgets (dashboard) */}
           {pinnedWidgets.length > 0 && (
@@ -284,12 +302,30 @@ function Header() {
   );
 }
 
-function Hero({ pinnedCount }: { pinnedCount: number }) {
+function Hero({ pinnedCount, portfolio }: { pinnedCount: number; portfolio: PortfolioSummary | null }) {
+  // Fall back to the established demo numbers while loading / on fetch failure,
+  // so the header is never empty or broken.
+  const hasData = portfolio != null && portfolio.total_equity != null;
+  const currency = portfolio?.currency ?? '$';
+  const equity = hasData ? portfolio!.total_equity : 51000.0;
+  const dayPnl = portfolio?.day_pnl ?? 964.1;
+  const dayPnlPct = portfolio?.day_pnl_pct ?? 1.93;
+  const up = dayPnl >= 0;
+  const sign = up ? '+' : '-';
+
+  const fmt = (n: number) =>
+    n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const equityText = `${currency}${fmt(equity)}`;
+  const pnlText = `${sign}${currency}${fmt(Math.abs(dayPnl))} (${sign}${Math.abs(dayPnlPct).toFixed(2)}%) today`;
+
   return (
     <div className="px-6 pt-5 pb-1">
       <div className="text-xs text-text-3 uppercase tracking-[0.06em] mb-1.5">Portfolio value</div>
-      <div className="text-4xl font-semibold -tracking-tight">$51,000.00</div>
-      <div className="mt-1 text-sm text-green-DEFAULT font-medium">+$964.10 (+1.93%) today</div>
+      <div className="text-4xl font-semibold -tracking-tight">{equityText}</div>
+      <div className={`mt-1 text-sm font-medium ${up ? 'text-green-DEFAULT' : 'text-red-DEFAULT'}`}>
+        {pnlText}
+      </div>
       {pinnedCount === 0 && (
         <div className="mt-2 text-[11px] text-text-3">Your home is empty — pin a widget to start building it.</div>
       )}

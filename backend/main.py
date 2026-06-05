@@ -11,6 +11,7 @@ Exposes:
                                           falls back to "demo" — local mock demo path.
     GET  /api/conversations             — list this user's conversations (RLS-filtered)
     GET  /api/conversations/{id}        — fetch the messages in a conversation
+    GET  /api/portfolio                 — total equity + today's P&L for the Hero header (P5/028)
 
 P4.1 (012/015): identity comes from the verified JWT, never the request body.
 P4.2 (016):     when authenticated, each turn is persisted to Supabase under the
@@ -46,6 +47,7 @@ import observability  # noqa: E402
 from agent import MODEL, run_agent  # noqa: E402
 from auth import AuthCtx, auth_configured, require_auth, resolve_auth  # noqa: E402
 from tools import TOOL_REGISTRY  # noqa: E402
+from tools.portfolio import get_portfolio  # noqa: E402
 
 app = FastAPI(
     title="Agentic Brokerage MVP",
@@ -284,6 +286,32 @@ async def get_conversation_endpoint(
     if not msgs:
         raise HTTPException(status_code=404, detail="not_found")
     return {"conversation_id": conversation_id, "messages": msgs}
+
+
+# ---------------------------------------------------------------------------
+# Portfolio summary — P5/028 (live Hero header)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/portfolio")
+async def portfolio_endpoint(
+    auth: AuthCtx = Depends(resolve_auth),
+) -> dict[str, Any]:
+    """Lightweight portfolio summary for the frontend Hero header.
+
+    Returns only the header fields (total equity + today's P&L) — NOT the full
+    positions list — so the home screen header doesn't over-expose holdings on a
+    non-chat endpoint. `get_portfolio` is the single source of truth and is
+    itself mock-gated, so demo mode (no token) returns the mock total.
+    """
+    p = await get_portfolio({}, auth.user_id)
+    return {
+        "total_equity": p.get("total_equity"),
+        "day_pnl": p.get("day_pnl"),
+        "day_pnl_pct": p.get("day_pnl_pct"),
+        "currency": p.get("currency", "$"),
+        "is_mock": p.get("is_mock", True),
+    }
 
 
 # ---------------------------------------------------------------------------
