@@ -283,10 +283,15 @@ async def _real_technical_levels(
       - Pre-022: `quote_get` ran last → S/R fallback used MOCK_QUOTES (trust-#3
         violation). 022 moved quote_get to step 5 and made silent shape
         mismatches audible.
-      - Pre-023 (this): the parsers for `data_get_study_values` / `pine_lines`
+      - Pre-023: the parsers for `data_get_study_values` / `pine_lines`
         / `capture_screenshot` were built against guessed shapes that didn't
         match the actual MCP server (`tradesdontlie/tradingview-mcp`). 023
         rewrote them against the real shapes from the JS source.
+      - 029 (this): when `quote_get` fails (e.g. TV Desktop closed while
+        USE_MOCK_TA=0), `current_price` + the swing-derived S/R fall back to
+        the mock cache. We now flag that (`price_is_mock`) and DOWNGRADE the
+        `sources` so the card never shows mock numbers under a "live
+        TradingView" label — closing the trust-#3 / rule-#7 gap.
     """
     from mcp_client import MCPClientError, tv_call
 
@@ -313,6 +318,12 @@ async def _real_technical_levels(
                           {"action": "add", "name": full_name, **params})
             applied.append(short)
 
+        # Tracks whether a headline number (price → and the swing S/R derived
+        # from it) came from the mock cache rather than the live MCP. Drives the
+        # `sources` downgrade at the return so we never present mock numbers as
+        # "Live OHLC via TradingView MCP" (proposal 029).
+        price_is_mock = False
+
         # 5. Live price — needed for both the response AND the S/R fallback.
         # The MCP server's quote_get returns `{success, symbol, last, close, …}`
         # (no `price` field); we also probe `price` for forward-compat.
@@ -327,12 +338,14 @@ async def _real_technical_levels(
                     ticker, quote,
                 )
                 current_price = _extract_price(ticker)
+                price_is_mock = True
         except MCPClientError as e:
             log.warning(
                 "quote_get(%s) failed: %s — falling back to mock cache for current_price",
                 ticker, e,
             )
             current_price = _extract_price(ticker)
+            price_is_mock = True
 
         # 6. Indicator values — ONE call (no args). Map by name + length.
         indicator_values: dict[str, float] = {}
@@ -402,6 +415,20 @@ async def _real_technical_levels(
         except MCPClientError as e:
             log.warning("capture_screenshot failed: %s", e)
 
+        # When the live price degraded to the mock cache, the headline numbers
+        # (price + the swing-derived S/R computed from it) are NOT live. Label
+        # the source honestly instead of claiming "Live OHLC via TradingView
+        # MCP" (trust principle #3 / rule #7). Proposal 029.
+        if price_is_mock:
+            source = "tradingview_mcp_degraded"
+            sources = [{"name": "TradingView (mocked — live data unavailable)"}]
+        else:
+            source = "tradingview_mcp"
+            sources = [
+                {"name": "TradingView Desktop", "url": "https://www.tradingview.com"},
+                {"name": "Live OHLC via TradingView MCP"},
+            ]
+
         return {
             "ticker": ticker,
             "timeframe": timeframe,
@@ -413,11 +440,8 @@ async def _real_technical_levels(
             "trend": _infer_trend(current_price, indicator_values),
             "is_mock": False,
             "screenshot_url": screenshot_url,
-            "source": "tradingview_mcp",
-            "sources": [
-                {"name": "TradingView Desktop", "url": "https://www.tradingview.com"},
-                {"name": "Live OHLC via TradingView MCP"},
-            ],
+            "source": source,
+            "sources": sources,
         }
     except MCPClientError as e:
         # Surface error honestly — no silent fall-through to mock per the
