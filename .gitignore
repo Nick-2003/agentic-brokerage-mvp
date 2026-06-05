@@ -43,3 +43,5 @@ next-env.d.ts
 self_management/
 proposed_changes/
 *.tsbuildinfo
+/*.tsbuildinfo
+frontend/tsconfig.tsbuildinfo
