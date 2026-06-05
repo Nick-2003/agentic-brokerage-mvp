@@ -50,15 +50,18 @@ auth = [
 # lazy-imports `mem0` and no-ops when MEM0_API_KEY is unset OR the package isn't
 # installed, so the backend boots either way. Enable with:
 #     uv sync --group memory     (then set a real MEM0_API_KEY)
-# Heads-up (confirm on first `uv sync --group memory`, à la the 006 FMP field
-# names / 016 supabase-pyiceberg lessons): the hosted Mem0 platform client only
-# needs the API key, but base `mem0ai` historically pulls moderately heavy
-# transitive deps (e.g. openai, qdrant-client) that the platform path doesn't
-# use client-side. They install cleanly (pure-Python, no pyiceberg-style build
-# break) but add image weight — revisit/cap at P6 deploy if it matters. Pin is
-# loose to let uv resolve a working AsyncMemoryClient; tighten once confirmed.
+# Pinned to the v3-client line (>=2.0,<3.0) — VERIFIED against the installed
+# mem0ai 2.0.4. This matters for correctness, not just stability: the 2.x v3
+# client's `AsyncMemoryClient.search()` scopes by `filters={"user_id": …}` and
+# `top_k`, and REJECTS a top-level `user_id=` kwarg (ENTITY_PARAMS guard) —
+# `memory.py` is written to that contract. An older 0.x or a future 3.x could
+# change the call shape and silently break recall (it fails closed). Re-verify
+# `memory.py`'s search/add call shapes before widening this pin.
+# Image-weight note (revisit at P6 deploy): base `mem0ai` pulls moderately heavy
+# transitive deps (e.g. openai) the hosted-platform path doesn't use
+# client-side; pure-Python, installs cleanly (no pyiceberg-style build break).
 memory = [
-    "mem0ai>=0.1.0",
+    "mem0ai>=2.0.0,<3.0.0",
 ]
 dev = [
     "pytest>=8.3.0",

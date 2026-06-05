@@ -60,17 +60,21 @@ class FakeAsyncMemoryClient:
     def __init__(self, *args, **kwargs):
         FakeAsyncMemoryClient.init_kwargs = kwargs
 
-    async def search(self, query, *, user_id, limit=None):
+    async def search(self, query, *, filters=None, top_k=None, **kwargs):
+        # Mirrors the real mem0 2.x v3 client: scope rides in `filters`, the
+        # limit is `top_k`. Passing `user_id=` here would land in **kwargs —
+        # the real client REJECTS that (ENTITY_PARAMS guard), so the test
+        # asserts the scope arrives via `filters`, never a top-level user_id.
         FakeAsyncMemoryClient.calls.append(
-            ("search", {"query": query, "user_id": user_id, "limit": limit})
+            ("search", {"query": query, "filters": filters, "top_k": top_k, "kwargs": kwargs})
         )
         if FakeAsyncMemoryClient.search_raises:
             raise RuntimeError("mem0 search boom")
         return FakeAsyncMemoryClient.search_return
 
-    async def add(self, messages, *, user_id):
+    async def add(self, messages, *, user_id=None, **kwargs):
         FakeAsyncMemoryClient.calls.append(
-            ("add", {"messages": messages, "user_id": user_id})
+            ("add", {"messages": messages, "user_id": user_id, "kwargs": kwargs})
         )
         if FakeAsyncMemoryClient.add_raises:
             raise RuntimeError("mem0 add boom")
@@ -156,8 +160,12 @@ async def main() -> None:
     block = await store.recall(user_id="USER-A-uuid", query="how's my book?")
     last_search = [c for c in FakeAsyncMemoryClient.calls if c[0] == "search"][-1]
     check(
-        "recall passes the EXACT user_id to mem0.search (scope key, never substituted)",
-        last_search[1]["user_id"] == "USER-A-uuid",
+        "recall scopes via filters={'user_id': …} (mem0 v3 contract; EXACT id, never substituted)",
+        last_search[1]["filters"] == {"user_id": "USER-A-uuid"},
+    )
+    check(
+        "recall never passes user_id as a top-level kwarg (the banned ENTITY_PARAM)",
+        "user_id" not in last_search[1]["kwargs"],
     )
     check("recall passes the query through", last_search[1]["query"] == "how's my book?")
     check("recall block contains the recalled facts", "Holds NVDA and TSLA" in block and "2% risk per trade" in block)
@@ -186,7 +194,7 @@ async def main() -> None:
     _reset_fake()  # limit is read per-call, so no reload needed
     await store.recall(user_id="u", query="q")
     last_search = [c for c in FakeAsyncMemoryClient.calls if c[0] == "search"][-1]
-    check("MEM0_SEARCH_LIMIT forwarded to mem0.search", last_search[1]["limit"] == 3)
+    check("MEM0_SEARCH_LIMIT forwarded as top_k to mem0.search", last_search[1]["top_k"] == 3)
     os.environ.pop("MEM0_SEARCH_LIMIT", None)
 
     # Three 100-char facts, cap the body at 250: two lines (~101 each) fit, the
@@ -242,16 +250,23 @@ async def main() -> None:
     check("add raising → remember swallows (no exception escapes)", ok)
 
     # ── 11) sticky-unavailable: a broken mem0 import → NOOP, no retries ──
-    m2 = _load_memory_fresh()
-    broken = ModuleType("mem0")  # no AsyncMemoryClient attr → AttributeError on access
+    # This case INTENTIONALLY triggers memory.get_memory()'s
+    # `logger.warning("mem0 init failed", exc_info=True)`. That warning is
+    # correct in production — but here it's expected, so silence the "memory"
+    # logger to keep a PASSING test's output clean (no scary traceback).
+    import logging
 
-    def _boom(*a, **k):
-        raise ImportError("mem0 not installed")
-
-    sys.modules["mem0"] = broken
-    # Force the import path to fail by removing the attribute lookup target.
-    got = m2.get_memory()
-    check("broken mem0 import → get_memory() falls back to NOOP", got is m2.NOOP_MEMORY)
+    _mem_logger = logging.getLogger("memory")
+    _prev_level = _mem_logger.level
+    _mem_logger.setLevel(logging.CRITICAL)
+    try:
+        m2 = _load_memory_fresh()
+        broken = ModuleType("mem0")  # no AsyncMemoryClient attr → ImportError on the from-import
+        sys.modules["mem0"] = broken
+        got = m2.get_memory()
+        check("broken mem0 import → get_memory() falls back to NOOP", got is m2.NOOP_MEMORY)
+    finally:
+        _mem_logger.setLevel(_prev_level)
     # restore the good fake for any later reuse
     _install_fake_mem0()
 
