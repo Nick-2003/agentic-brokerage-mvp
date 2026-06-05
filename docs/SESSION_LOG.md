@@ -729,3 +729,19 @@ First P5 session. Scoped (with Nicholas) to the **Analytics + UX** slice of the 
 **Proposal 029 drafted** (`proposed_changes/029-ta-mock-fallback-sources/`, 1 file — `technicals.py`): when the real path falls back to the mock cache for `current_price`, set a `price_is_mock` flag and **downgrade the widget sources** to `TradingView (mocked — live data unavailable)` (`source: "tradingview_mcp_degraded"`), instead of claiming live TradingView over mock numbers — closing the trust-#3 / rule-#7 gap. Keyed only on the price mock-cache fallback (a real price with a missing screenshot/indicators is not downgraded); `is_mock` left False; live + pure-mock paths unchanged. `py_compile` ✓; diff vs live = only the targeted edits.
 
 **Numbering note:** MEDIUM-3 (switchable Alpaca routing) was tentatively "029" in the plan; since 029 is now the TA-source fix, MEDIUM-3 moves to **030** (still to be drafted after 027/028 are implemented).
+
+---
+
+## 2026-06-05 · 027 + 028 applied & verified end-to-end
+
+Both P5 Analytics+UX proposals are now applied to the live tree and verified.
+
+**027 (PostHog) — verified** from a live PostHog events export (`team_id 187304`): all 6 wired events fire with correct payloads — `prompt_submitted` (12×, every one carrying `text_hash`, no raw text; intents bucketed: technical_analysis/place_trade/stock_research/morning_brief/other), `widget_generated` (10×, 5 widget types incl. ta_chart/order_ticket/morning_brief/portfolio_risk/thesis, `latency_ms` populated), `order_ticket_shown` (2×, `TSLA` / notional `2460` / `has_tp_sl True` — correct for "buy 10 TSLA @ 246, TP 290, SL 225"), `widget_pinned`, `chat_error` (`Read error: network error`), `chat_session_started`. Known dev-only quirk: `chat_session_started` double-fires under React Strict Mode (8 events / 4 page loads; prod halves). Reassessment of "all buttons": the buttons 027 covers (submit, example prompts, pin) all emit correctly; OrderTicket Confirm/Edit + Tracker tap are **dead buttons** (no handler wired) and emit nothing — deferred to a possible proposal 031 (shelved per Nicholas).
+
+**028 (live Hero portfolio) — verified, all 4 acceptance criteria:**
+1. Backend `import main` OK; `pnpm typecheck` clean under Node 22.22.3 (note: pnpm needs Node ≥22 — a shell on Node 20 fails to even start pnpm).
+2. Demo curl on a throwaway `:8001` (`REQUIRE_AUTH=0 USE_MOCK_MARKET=1 USE_MOCK_BROKER=1`) → `{"total_equity":51000.0,"day_pnl":964.1,"day_pnl_pct":1.93,"currency":"$","is_mock":true}`.
+3. Real path (Bearer token, real Alpaca, `:8000` `REQUIRE_AUTH=1`) → Hero shows `$99,998.93 / −$0.05 (−0.00%)` in red, **matching the Alpaca dashboard** (portfolio $99,998.94, Daily Change −$0.04 at capture) — confirms `day_pnl = equity − last_equity` and the negative→`text-red-DEFAULT` render.
+4. Backend down → `GET /api/portfolio` 500 → `fetchPortfolio` returns null → Hero **falls back to static** `$51,000.00 / +$964.10` (green), no crash; backend restart → live value returns.
+
+Operational notes worth keeping: `/api/portfolio` honours `REQUIRE_AUTH` — token-less curl 401s under `REQUIRE_AUTH=1` (expected); to see the mock `$51k` you need `USE_MOCK_BROKER=1` (real Alpaca keys otherwise return the live book). **P5 Analytics+UX slice is complete.** Remaining P5: the deferred security-hardening track (rate-limit + Supabase-backed token budget, daily-trade cap, DOMPurify, CSP/HSTS, dep audit) + proposal 029 (TA mock-source downgrade, awaiting apply) + the switchable-Alpaca proposal (now numbered 030).
