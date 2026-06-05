@@ -215,7 +215,18 @@ class _Mem0Memory:
         if not user_id or not query:
             return ""
         try:
-            res = await self._client.search(query, user_id=user_id, limit=_search_limit())
+            # mem0 v3 client (2.x): the scope key MUST go inside `filters` —
+            # passing `user_id=` as a top-level kwarg raises ValueError (it's an
+            # "entity param", banned in search()). The result limit is `top_k`,
+            # not `limit`. Verified against the installed mem0 2.0.4 source
+            # (`client/main.py::AsyncMemoryClient.search`, which checks
+            # `ENTITY_PARAMS & kwargs` and tells you to use filters). Getting
+            # this wrong fails CLOSED — the except below swallows the ValueError
+            # and recall silently returns nothing, so the feature looks alive
+            # but never recalls. That's why it's pinned + tested explicitly.
+            res = await self._client.search(
+                query, filters={"user_id": user_id}, top_k=_search_limit()
+            )
         except Exception:  # noqa: BLE001 — memory is best-effort
             logger.debug("mem0 search failed; injecting no memories", exc_info=True)
             return ""
@@ -234,6 +245,10 @@ class _Mem0Memory:
         try:
             # Mem0 does its own LLM-based salient-fact extraction server-side;
             # we hand it the raw exchange and let it decide what's worth keeping.
+            # NB (asymmetry with search above): `add()` in mem0 2.x DOES accept
+            # `user_id=` as a top-level kwarg — it has no ENTITY_PARAMS guard
+            # (verified against the installed source + docstring). Do NOT
+            # "fix" this to `filters={"user_id": ...}` to match recall.
             await self._client.add(messages, user_id=user_id)
         except Exception:  # noqa: BLE001 — memory is best-effort
             logger.debug("mem0 add failed; memory not stored this turn", exc_info=True)

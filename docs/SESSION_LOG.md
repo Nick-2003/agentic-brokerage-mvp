@@ -669,3 +669,25 @@ With P1.2 finally complete end-to-end (024 in) and P4.1/P4.2/P4.4 all done, Mem0
 **Apply order (pyproject delta → the 016 gotcha):** `cp pyproject.toml` → `cd backend && uv sync --group memory` → apply the rest (`memory.py`, `agent.py`, `main.py`, `.env.example`, `prompts/system.md`) → `cp` the test. Then post-apply: `/healthz.memory_configured: true`; the two-conversation recall check on a real UUID; and the **two-account isolation check** (account B never surfaces A's facts — the P4.3 gate, same discipline that cleared P4.2's HIGH-2).
 
 **On apply, P4 is complete** (auth → persistence+RLS → observability → memory all done). Remaining: update `CLAUDE.md`'s stack table to list Mem0 + Langfuse (PRIORITIES P4 line 147; its "never deviate silently" rule). Next live front becomes **P5 pre-launch lockdown** (PostHog, live Hero portfolio value, rate limiting, DOMPurify, CSP/HSTS, dep audits) — plus the still-open **P1.2 first real TradingView integration test**.
+
+---
+
+## 2026-06-04 · 025 applied — first `uv sync --group memory` exposed a wrong mem0 call shape (v3-API correction)
+
+Nicholas applied 025 and ran the test. It reported **29/29 passed** — but printed a scary traceback mid-run (test case 11 deliberately feeds `get_memory()` a broken `mem0` module to prove the NOOP fallback; the trace was `memory.py`'s own `logger.warning(exc_info=True)` doing its job — expected, not a failure). Silenced that one expected log line in the test so a passing run reads clean.
+
+**The real find, surfaced because `mem0ai` was now actually installed (2.0.4, a v3 client):** the proposal's biggest draft-time unknown — "does `user_id` go where I assumed?" — was **wrong**, and wrong in the fail-closed direction:
+
+- `mem0.AsyncMemoryClient.search()` checks `ENTITY_PARAMS & kwargs` (ENTITY_PARAMS ⊇ {user_id, agent_id, run_id, app_id}) and **raises `ValueError("…Use filters={'user_id': '...'} instead")`** on a top-level `user_id=`. The limit param is `top_k`, not `limit`. So the draft's `search(query, user_id=…, limit=…)` would have raised → been swallowed by recall's `except` → **silently recalled nothing on every turn.** The feature would have looked alive (no crash, turns complete) but been dead. Classic fail-closed bug that only a real-library check catches — exactly the 006-FMP-fields lesson ("verify against the live thing, not the happy-path assumption").
+- `add()` has **no** such guard and accepts `user_id=` directly (docstring + source) — so `add(messages, user_id=…)` is correct. Documented the asymmetry inline so nobody "fixes" it to match recall.
+- Also: `AsyncMemoryClient.__init__` does a **network key-validation** that raises on a bad key — handled by `get_memory()`'s try/except → sticky NOOP (so a bad `MEM0_API_KEY` degrades gracefully, doesn't crash boot).
+
+**Fix (verified, applied to live + the 025 proposal copy, kept identical):**
+- `memory.py` recall → `search(query, filters={"user_id": user_id}, top_k=_search_limit())`; add unchanged. Inline comments cite the installed-source contract + the fail-closed warning.
+- `pyproject.toml` pin tightened `mem0ai>=0.1.0` → **`>=2.0.0,<3.0.0`** — a *correctness* pin (the v3 call shape is version-specific; a 0.x or 3.x could silently break recall). Installed 2.0.4 already satisfies it → no `uv sync` needed.
+- Test updated to the v3 contract: fake client now takes `search(query, *, filters=, top_k=, **kwargs)`; headline assertions are now "recall scopes via `filters={'user_id': …}`" **and** "recall never passes `user_id` as a top-level kwarg (the banned ENTITY_PARAM)". **30/30** (was 29; +1 for the new banned-kwarg check), and the run is now clean (no stray traceback).
+- README + STATUS updated; "API unverified at draft" risk replaced with the VERIFIED v3 contract section.
+
+**Evidence trail:** read `AsyncMemoryClient.{search,add}` source from the installed package; confirmed `ENTITY_PARAMS` membership and `SearchMemoryOptions`/`AddMemoryOptions` fields (`top_k` lives there, `limit` doesn't); empirically, a real-client construction with a dummy key raises at `_validate_api_key()` before the call guard — so the source read (not a live call) is the definitive check, and it's conclusive.
+
+**Pattern note (mirrors the 002→022/023 cluster):** a "new external integration" proposal that can't exercise the real dependency at draft time should expect a first-real-install correction. 025's was a single, contained, offline-verifiable fix the moment the package was actually present — same discipline that kept the 002 and 006 trails clean. **Still pending for full P4.3 sign-off:** live runtime with a real `MEM0_API_KEY` (recall round-trips a stored fact across two conversations) + the two-account isolation check (account B never surfaces A's facts — the P4.3 gate). Code path is correct; only the live network leg is unverified.
