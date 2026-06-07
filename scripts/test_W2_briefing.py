@@ -71,20 +71,48 @@ async def main() -> None:
     check("facts: ytd display", f["ytd_display"] == "+HK$41,210.55")
     check("facts: max_chars present", isinstance(f["max_chars"], int))
 
-    # ---- gather_market_context: TRUST GUARD — mock context dropped in a LIVE brief ----
-    # `snap` is the raw parsed fixture (is_mock False) → simulates a live snapshot.
-    # get_macro_snapshot / get_company_news are mock-only, so both must be dropped.
+    # ---- gather_market_context: LIVE → real news (stubbed), mock macro suppressed ----
+    # `snap` is the raw parsed fixture (is_mock False) → a live snapshot. Macro is
+    # mock-only so it's dropped; news comes from fetch_recent_news — stub it (no network).
+    async def _fake_real_news(tickers, limit=2, since=None):  # noqa: ANN001
+        return {
+            "news_by_ticker": {
+                "NVDA": [{"headline": "Real NVDA headline", "source": "Reuters",
+                          "ts": "2026-06-05T10:00:00Z", "url": None}]
+            },
+            "is_mock": False,
+        }
+
+    _orig_news = br.fetch_recent_news
+    br.fetch_recent_news = _fake_real_news  # type: ignore[assignment]
     ctx_live = await br.gather_market_context(snap)
+    br.fetch_recent_news = _orig_news  # type: ignore[assignment]
     check("context(live): mock macro suppressed", ctx_live["macro"] == {})
-    check("context(live): mock news suppressed", ctx_live["news_by_ticker"] == {})
+    check("context(live): real news used (not mock)", "NVDA" in ctx_live["news_by_ticker"])
 
     # A mock-demo snapshot (is_mock True) → mock context allowed (it's a labelled demo).
     msnap = await ib.get_portfolio_snapshot()  # USE_MOCK_IBKR=1 → is_mock True
     ctx = await br.gather_market_context(msnap)
     check("context(mock): macro present", bool(ctx["macro"]))
-    check("context(mock): news for NVDA mover", "NVDA" in ctx["news_by_ticker"])
+    check("context(mock): mock news for NVDA mover", "NVDA" in ctx["news_by_ticker"])
     f2 = br.compute_brief_facts(msnap, ctx)
     check("context(mock): headlines attached to top mover", len(f2["movers"][0]["headlines"]) >= 1)
+
+    # ---- _parse_yf_news_item: tolerate both yfinance shapes ----
+    from news_context import _parse_yf_news_item as _pyf  # noqa: E402
+    nested = _pyf({"id": "x", "content": {
+        "title": "T1", "pubDate": "2026-06-05T10:00:00Z",
+        "provider": {"displayName": "Reuters"}, "canonicalUrl": {"url": "http://e/1"}}})
+    check("yf parse(nested): headline", nested["headline"] == "T1")
+    check("yf parse(nested): source from provider", nested["source"] == "Reuters")
+    check("yf parse(nested): ts iso passthrough", nested["ts"] == "2026-06-05T10:00:00Z")
+    check("yf parse(nested): url from canonicalUrl", nested["url"] == "http://e/1")
+    flat = _pyf({"title": "T2", "publisher": "WSJ",
+                 "providerPublishTime": 1717579800, "link": "http://e/2"})
+    check("yf parse(flat): headline", flat["headline"] == "T2")
+    check("yf parse(flat): source from publisher", flat["source"] == "WSJ")
+    check("yf parse(flat): epoch → iso ts", bool(flat["ts"]) and "T" in flat["ts"])
+    check("yf parse(no title) → None", _pyf({"content": {"summary": "no title"}}) is None)
 
     # ---- mock render ----
     text = br._render_mock_briefing(f2)
