@@ -15,14 +15,19 @@ import sys
 from pathlib import Path
 
 _HERE = Path(__file__).resolve()
-# Put BOTH the proposal backend (has briefing.py + prompts) and the repo backend
-# (has ibkr_flex.py + tools/) on sys.path. Walk up to find each.
-for _up in _HERE.parents:
-    cand = _up / "backend"
-    if (cand / "briefing.py").exists():
-        sys.path.insert(0, str(cand))
-    if (cand / "ibkr_flex.py").exists():
-        sys.path.append(str(cand))
+# Put both backends on sys.path: the one CO-LOCATED with this test (its `briefing.py`
+# — the proposal copy pre-apply, the repo copy post-apply) MUST win for `import
+# briefing`, and the repo backend (has `ibkr_flex.py` + `tools/`) supplies the rest.
+# Insert the repo backend first, then the co-located one (last insert(0) wins) so a
+# stale APPLIED briefing.py never shadows the version this test ships with.
+_COLOCATED_BACKEND = _HERE.parents[1] / "backend"
+_repo_backend = next(
+    (up / "backend" for up in _HERE.parents if (up / "backend" / "ibkr_flex.py").exists()),
+    None,
+)
+if _repo_backend is not None:
+    sys.path.insert(0, str(_repo_backend))       # ibkr_flex + tools
+sys.path.insert(0, str(_COLOCATED_BACKEND))      # briefing.py — wins over any applied copy
 
 os.environ["USE_MOCK_IBKR"] = "1"      # parse the bundled fixture
 os.environ["USE_MOCK_MARKET"] = "1"    # deterministic macro + news
@@ -66,12 +71,20 @@ async def main() -> None:
     check("facts: ytd display", f["ytd_display"] == "+HK$41,210.55")
     check("facts: max_chars present", isinstance(f["max_chars"], int))
 
-    # ---- gather_market_context (mock market tools, offline) ----
-    ctx = await br.gather_market_context(snap)
-    check("context: macro snapshot present", bool(ctx["macro"]))
-    check("context: news fetched for NVDA mover", "NVDA" in ctx["news_by_ticker"])
-    f2 = br.compute_brief_facts(snap, ctx)
-    check("context: headlines attached to top mover", len(f2["movers"][0]["headlines"]) >= 1)
+    # ---- gather_market_context: TRUST GUARD — mock context dropped in a LIVE brief ----
+    # `snap` is the raw parsed fixture (is_mock False) → simulates a live snapshot.
+    # get_macro_snapshot / get_company_news are mock-only, so both must be dropped.
+    ctx_live = await br.gather_market_context(snap)
+    check("context(live): mock macro suppressed", ctx_live["macro"] == {})
+    check("context(live): mock news suppressed", ctx_live["news_by_ticker"] == {})
+
+    # A mock-demo snapshot (is_mock True) → mock context allowed (it's a labelled demo).
+    msnap = await ib.get_portfolio_snapshot()  # USE_MOCK_IBKR=1 → is_mock True
+    ctx = await br.gather_market_context(msnap)
+    check("context(mock): macro present", bool(ctx["macro"]))
+    check("context(mock): news for NVDA mover", "NVDA" in ctx["news_by_ticker"])
+    f2 = br.compute_brief_facts(msnap, ctx)
+    check("context(mock): headlines attached to top mover", len(f2["movers"][0]["headlines"]) >= 1)
 
     # ---- mock render ----
     text = br._render_mock_briefing(f2)
@@ -82,7 +95,7 @@ async def main() -> None:
     check("mock render: no HTML tags", "<strong>" not in text and "<em>" not in text)
 
     # ---- generate_briefing (mock path) ----
-    out = await br.generate_briefing(snap, ctx)
+    out = await br.generate_briefing(msnap, ctx)
     check("generate(mock): is_mock True (snapshot mock)", out["is_mock"] is True)
     check("generate(mock): model 'mock'", out["model"] == "mock")
     check("generate(mock): base_currency carried", out["base_currency"] == "HKD")
@@ -121,7 +134,7 @@ async def main() -> None:
         messages = _Msgs()
 
     br._client = _FakeClient()  # type: ignore[assignment]
-    real = await br.generate_briefing(snap, ctx)  # USE_MOCK_BRIEFING unset, key set
+    real = await br.generate_briefing(snap, ctx_live)  # live snapshot + suppressed ctx
     check("real: used LLM text", real["text"].startswith("📈 *Your IBKR book*"))
     check("real: model is not 'mock'", real["model"] != "mock")
     # `snap` is the raw parsed fixture (is_mock False); gen path is real → is_mock False.
@@ -142,7 +155,7 @@ async def main() -> None:
 
     br._client = _EmptyClient()  # type: ignore[assignment]
     try:
-        await br.generate_briefing(snap, ctx)
+        await br.generate_briefing(snap, ctx_live)
         check("real: empty response raises", False)
     except br.BriefingError as e:
         check("real: empty → briefing_empty code", e.code == "briefing_empty")

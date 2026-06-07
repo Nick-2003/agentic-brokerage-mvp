@@ -200,13 +200,32 @@ def compute_brief_facts(snapshot: dict, market_context: dict | None = None) -> d
 
 async def gather_market_context(snapshot: dict) -> dict:
     """The "why it moved / what it means" layer: macro snapshot + headlines for
-    the snapshot's biggest movers. Reuses the chat product's market tools
-    (mock-aware via `USE_MOCK_MARKET`). Best-effort — a failure here degrades the
-    brief (no news / no macro) but never aborts it.
+    the snapshot's biggest movers. Reuses the chat product's market tools.
+    Best-effort — a failure here degrades the brief (no news / no macro) but
+    never aborts it.
+
+    TRUST GUARD (real-run fix): a *live* brief must never present mock context as
+    real (trust #1 "no number without a source" / #5 "no hallucinated data"). The
+    macro snapshot (`get_macro_snapshot`) and news (`get_company_news`) are still
+    mock-only today — they always return `is_mock: True` — so for a real holdings
+    snapshot we DROP any context layer that comes back mock, rather than letting
+    Claude quote fabricated futures/VIX/Fed-events or invented headlines in a
+    message sent to a real user. When the whole brief is a labelled mock demo
+    (`snapshot.is_mock`), mock context is fine — the output carries `is_mock`.
+    Real macro/news wiring (yfinance / web search / FMP) is a later, separate
+    market-context task; until it lands, a live brief is honestly portfolio-only.
     """
     ctx: dict[str, Any] = {"macro": {}, "news_by_ticker": {}}
+    allow_mock = bool(snapshot.get("is_mock"))
+
+    def _real_enough(result: dict | None) -> bool:
+        # Include the layer only if it's real, or if the whole brief is a demo.
+        return bool(result) and (allow_mock or not result.get("is_mock"))
+
     try:
-        ctx["macro"] = await get_macro_snapshot({}, "system")
+        macro = await get_macro_snapshot({}, "system")
+        if _real_enough(macro):
+            ctx["macro"] = macro
     except Exception as e:  # noqa: BLE001 — context is best-effort
         log.info("briefing: macro snapshot unavailable: %s", e)
 
@@ -219,7 +238,8 @@ async def gather_market_context(snapshot: dict) -> dict:
     if tickers:
         try:
             res = await get_company_news({"tickers": tickers, "limit": 2}, "system")
-            ctx["news_by_ticker"] = res.get("news_by_ticker", {})
+            if _real_enough(res):
+                ctx["news_by_ticker"] = res.get("news_by_ticker", {})
         except Exception as e:  # noqa: BLE001
             log.info("briefing: news unavailable: %s", e)
     return ctx

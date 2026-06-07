@@ -29,18 +29,22 @@ import sys
 from pathlib import Path
 
 _HERE = Path(__file__).resolve()
-for _up in _HERE.parents:
-    cand = _up / "backend"
-    if (cand / "briefing.py").exists():
-        sys.path.insert(0, str(cand))
-    if (cand / "ibkr_flex.py").exists():
-        sys.path.append(str(cand))
-        try:
-            from dotenv import load_dotenv
+# Co-located backend (proposal copy pre-apply, repo copy post-apply) wins for
+# `import briefing`; the repo backend supplies ibkr_flex + tools + .env.
+_COLOCATED_BACKEND = _HERE.parents[1] / "backend"
+_repo_backend = next(
+    (up / "backend" for up in _HERE.parents if (up / "backend" / "ibkr_flex.py").exists()),
+    None,
+)
+if _repo_backend is not None:
+    sys.path.insert(0, str(_repo_backend))
+    try:
+        from dotenv import load_dotenv
 
-            load_dotenv(cand / ".env")
-        except Exception:
-            pass
+        load_dotenv(_repo_backend / ".env")
+    except Exception:
+        pass
+sys.path.insert(0, str(_COLOCATED_BACKEND))
 
 import briefing as br  # noqa: E402
 
