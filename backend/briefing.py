@@ -39,7 +39,7 @@ from typing import Any
 from anthropic import AsyncAnthropic
 
 import ibkr_flex
-from news_context import fetch_recent_news
+from news_context import fetch_macro_context, fetch_recent_news
 from tools.market import get_company_news, get_macro_snapshot
 
 log = logging.getLogger(__name__)
@@ -113,6 +113,39 @@ def _pct(v: float | None, *, signed: bool = True) -> str | None:
         return None
     sign = "+" if (signed and v >= 0) else ""
     return f"{sign}{v:.2f}%"
+
+
+def _macro_indicators(macro: dict | None) -> list[dict]:
+    """Normalise the macro context to a uniform `[{label, display}, ...]` list,
+    whatever the source — so the prompt + mock render see ONE shape.
+
+    - Real `fetch_macro_context` → already an `indicators` list (passed through).
+    - Old `get_macro_snapshot` mock dict → a few `{label, display}` lines built
+      from its scalar keys (so the deterministic demo still shows macro).
+    - Empty / missing → `[]` (a live brief with no macro just omits the line).
+    """
+    if not macro:
+        return []
+    inds = macro.get("indicators")
+    if isinstance(inds, list):
+        return inds
+    out: list[dict] = []
+
+    def _push(label: str, val: Any, kind: str) -> None:
+        if val is None:
+            return
+        if kind == "move":
+            out.append({"label": label, "display": f"{label} {float(val):+.2f}%"})
+        elif kind == "pct_level":
+            out.append({"label": label, "display": f"{label} {float(val):.2f}%"})
+        else:
+            out.append({"label": label, "display": f"{label} {val}"})
+
+    _push("S&P 500 futures", macro.get("sp_futures_pct"), "move")
+    _push("Nasdaq futures", macro.get("nasdaq_futures_pct"), "move")
+    _push("VIX", macro.get("vix"), "level")
+    _push("US 10Y yield", macro.get("treasury_10y_yield_pct"), "pct_level")
+    return out
 
 
 # --- facts computation (exact numbers; LLM only writes prose around these) ------
@@ -192,7 +225,7 @@ def compute_brief_facts(snapshot: dict, market_context: dict | None = None) -> d
         "mtd_display": _money(perf.get("mtd"), base, signed=True),
         "ytd": perf.get("ytd"),
         "ytd_display": _money(perf.get("ytd"), base, signed=True),
-        "macro": ctx.get("macro") or {},
+        "macro": _macro_indicators(ctx.get("macro")),
         "permalink": ctx.get("permalink"),  # W4 fills this; None for now
     }
 
@@ -211,10 +244,9 @@ async def gather_market_context(snapshot: dict) -> dict:
         per-ticker headlines via `fetch_recent_news` (yfinance), so Claude grounds
         causes in actual reporting instead of inventing them. For a labelled mock
         DEMO (`snapshot.is_mock`) we use the deterministic `get_company_news` mock.
-      • Macro (the "what it means" layer) — `get_macro_snapshot` is still
-        mock-only (no real futures/VIX/yields source wired yet), so we DROP it
-        from a live brief rather than quote fabricated figures, and only include
-        it in a mock demo. Wiring real macro is the next market-context task.
+      • Macro (the "what it means" layer) — for a LIVE snapshot we fetch REAL
+        indicators (index futures / VIX / 10Y / commodities) via
+        `fetch_macro_context`; for a DEMO we use the `get_macro_snapshot` mock.
     """
     ctx: dict[str, Any] = {"macro": {}, "news_by_ticker": {}}
     allow_mock = bool(snapshot.get("is_mock"))
@@ -223,9 +255,13 @@ async def gather_market_context(snapshot: dict) -> dict:
         # Include the layer only if it's real, or if the whole brief is a demo.
         return bool(result) and (allow_mock or not result.get("is_mock"))
 
-    # Macro: mock-only today → kept for a demo, suppressed on a live brief.
+    # Macro: live → real indicators; demo → mock snapshot.
     try:
-        macro = await get_macro_snapshot({}, "system")
+        macro = (
+            await get_macro_snapshot({}, "system")
+            if allow_mock
+            else await fetch_macro_context()
+        )
         if _real_enough(macro):
             ctx["macro"] = macro
     except Exception as e:  # noqa: BLE001 — context is best-effort
@@ -283,6 +319,9 @@ def _render_mock_briefing(facts: dict) -> str:
         lines.append("Movers: " + "; ".join(parts) + ".")
     else:
         lines.append("No per-position moves in today's statement.")
+    macro = facts.get("macro") or []
+    if macro:
+        lines.append("Market: " + "; ".join(m["display"] for m in macro[:3]) + ".")
     tail = []
     if facts.get("mtd_display"):
         tail.append(f"MTD *{facts['mtd_display']}*")

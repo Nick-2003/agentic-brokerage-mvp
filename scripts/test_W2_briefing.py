@@ -71,9 +71,9 @@ async def main() -> None:
     check("facts: ytd display", f["ytd_display"] == "+HK$41,210.55")
     check("facts: max_chars present", isinstance(f["max_chars"], int))
 
-    # ---- gather_market_context: LIVE → real news (stubbed), mock macro suppressed ----
-    # `snap` is the raw parsed fixture (is_mock False) → a live snapshot. Macro is
-    # mock-only so it's dropped; news comes from fetch_recent_news — stub it (no network).
+    # ---- gather_market_context: LIVE → real news + real macro (both stubbed) ----
+    # `snap` is the raw parsed fixture (is_mock False) → a live snapshot. News + macro
+    # come from the real fetchers — stub both so the test stays offline.
     async def _fake_real_news(tickers, limit=2, since=None):  # noqa: ANN001
         return {
             "news_by_ticker": {
@@ -83,12 +83,26 @@ async def main() -> None:
             "is_mock": False,
         }
 
-    _orig_news = br.fetch_recent_news
-    br.fetch_recent_news = _fake_real_news  # type: ignore[assignment]
+    async def _fake_real_macro():
+        return {
+            "indicators": [
+                {"label": "VIX", "symbol": "^VIX", "price": 21.51,
+                 "change_pct": 39.8, "display": "VIX 21.51 (+39.8%)"}
+            ],
+            "is_mock": False, "source": "yfinance",
+        }
+
+    _orig_news, _orig_macro = br.fetch_recent_news, br.fetch_macro_context
+    br.fetch_recent_news = _fake_real_news        # type: ignore[assignment]
+    br.fetch_macro_context = _fake_real_macro     # type: ignore[assignment]
     ctx_live = await br.gather_market_context(snap)
-    br.fetch_recent_news = _orig_news  # type: ignore[assignment]
-    check("context(live): mock macro suppressed", ctx_live["macro"] == {})
+    br.fetch_recent_news, br.fetch_macro_context = _orig_news, _orig_macro  # type: ignore[assignment]
+    check("context(live): real macro used (indicators list)",
+          isinstance(ctx_live["macro"].get("indicators"), list) and bool(ctx_live["macro"]["indicators"]))
     check("context(live): real news used (not mock)", "NVDA" in ctx_live["news_by_ticker"])
+    f_live = br.compute_brief_facts(snap, ctx_live)
+    check("facts(live): macro normalised to [{label,display}]",
+          isinstance(f_live["macro"], list) and f_live["macro"][0]["display"] == "VIX 21.51 (+39.8%)")
 
     # A mock-demo snapshot (is_mock True) → mock context allowed (it's a labelled demo).
     msnap = await ib.get_portfolio_snapshot()  # USE_MOCK_IBKR=1 → is_mock True
@@ -97,6 +111,8 @@ async def main() -> None:
     check("context(mock): mock news for NVDA mover", "NVDA" in ctx["news_by_ticker"])
     f2 = br.compute_brief_facts(msnap, ctx)
     check("context(mock): headlines attached to top mover", len(f2["movers"][0]["headlines"]) >= 1)
+    check("facts(mock): old macro dict normalised to list",
+          isinstance(f2["macro"], list) and any("VIX" in m["display"] for m in f2["macro"]))
 
     # ---- _parse_yf_news_item: tolerate both yfinance shapes ----
     from news_context import _parse_yf_news_item as _pyf  # noqa: E402
@@ -113,6 +129,15 @@ async def main() -> None:
     check("yf parse(flat): source from publisher", flat["source"] == "WSJ")
     check("yf parse(flat): epoch → iso ts", bool(flat["ts"]) and "T" in flat["ts"])
     check("yf parse(no title) → None", _pyf({"content": {"summary": "no title"}}) is None)
+
+    # ---- _macro_display: per-kind formatting ----
+    from news_context import _macro_display as _md  # noqa: E402
+    check("macro disp(move): overnight %",
+          _md("S&P 500 futures", "move", 7400.0, -2.07) == "S&P 500 futures -2.07%")
+    check("macro disp(pct_level): yield as level",
+          _md("US 10Y yield", "pct_level", 4.54, None) == "US 10Y yield 4.54%")
+    check("macro disp(level): VIX level + move",
+          _md("VIX", "level", 21.51, 39.8) == "VIX 21.51 (+39.8%)")
 
     # ---- mock render ----
     text = br._render_mock_briefing(f2)
