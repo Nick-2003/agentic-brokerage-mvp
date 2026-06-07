@@ -821,3 +821,17 @@ First live probe of the IBKR Flex connector (W1 was applied to live). **The toke
 **Fix (in the W1 proposal):** `_http_get` now tags DNS/TCP failures `ibkr_flex_connect_error`; `_get_statement` tries the returned `<Url>` first and, on a connect error, **falls back to GetStatement on the same host/service as SendRequest** (`_GETSTATEMENT_FALLBACK` = ndcdyn …/FlexWebService/GetStatement, confirmed reachable) via `_candidate_get_urls`. Faithful (uses IBKR's Url when reachable) + resilient. Offline test **27/27** (added a host-fallback case). Changed files: `backend/ibkr_flex.py` + `scripts/test_W1_ibkr_flex.py`; probe/fixture unchanged.
 
 **Re-sync needed:** W1 was applied before this fix, so live `backend/ibkr_flex.py` must be re-copied from the proposal, then re-run the probe. **Still pending:** the statement actually downloading + parsing → only then can we do the attr-name reconciliation (the original "known unknown"; the run hasn't reached the XML yet).
+
+## 2026-06-05 · W1 real-run fix #2 — parser reconciled to the live Flex XML (VERIFIED)
+
+The probe (post-fix-#1) downloaded the real statement (acct U19883362, 98 KB) and the parse exposed the predicted attr/shape gaps. Reconciled `parse_flex_statement` against the actual XML:
+- **Daily P&L attr is `total`** on `MTMPerformanceSummaryUnderlying` (not `mtmPnl`) — `day_pnl` was null for every position.
+- **`OpenPositions` emits `SUMMARY` + `LOT` rows** per symbol; the LOT row has empty `percentOfNAV` and was overwriting the SUMMARY value → kept SUMMARY rows only.
+- **Holdings = OpenPositions only.** The MTM section also lists cash legs (HKD/USD) and symbols sold today (AAOI, RONB); my prior code created position slots from MTM → they leaked into `positions`. Now MTM/SecuritiesInfo only *enrich* existing holdings.
+- **Base currency = the NAV section's `currency` (HKD)**, not a position's native USD (positions are USD; account base is HKD). Added `position_value_base` (`positionValueInBase`) + `fx_rate_to_base` so W2 can present consistently in base.
+- **Two `EquitySummaryByReportDateInBase` rows** (prior + current) → pick the one matching the statement `toDate` (`as_of`); ChangeInNAV is authoritative for total/prev_total.
+- **Performance reads the account Total rows** (`symbol=""`) of `MTDYTDPerformanceSummary` (mtd/ytd + realized MTD/YTD) and `FIFOPerformanceSummaryInBase` (realized/unrealized) — previously it grabbed the first per-symbol row.
+
+**Verified against the live statement:** base HKD; 8 holdings (AAPL/CLSK/EOSE/GWRE/META/NBIS/NOW + a T-bill) each with day_pnl + pct_of_nav + description; NAV total 889,051 HKD (today), prev 898,999; change_in_nav.mtm −9,963.53; perf mtd −6,955 / ytd +30,979. Cash + sold-today symbols correctly excluded. The fixture (`mock_flex_statement.xml`) was rewritten to mirror the real shapes (HKD base, SUMMARY+LOT, `total` MTM, Total rows) so the offline test guards these; **32/32**.
+
+**Re-sync to live** (W1 was applied pre-fix): re-copy `backend/ibkr_flex.py`, `backend/data/mock_flex_statement.xml`, `scripts/test_W1_ibkr_flex.py`. **W1 is now done & live-verified** — the read-half of the bridge works end-to-end. Next: W3 (Twilio WhatsApp) or W2 (briefing generator). Note for W2: the account is HKD-base with USD holdings — present P&L in base (HKD) using `day_pnl`/`position_value_base`; today is a broad down day, good narrative test material.

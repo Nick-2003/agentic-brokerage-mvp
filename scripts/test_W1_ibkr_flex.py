@@ -74,24 +74,29 @@ def _env(mock=None, tok=None, qid=None) -> None:
 
 
 async def main() -> None:
-    # ---- parse_flex_statement(fixture) ----
+    # ---- parse_flex_statement(fixture) — reconciled to real Flex shapes ----
     snap = ib.parse_flex_statement(FIXTURE_XML)
     check("parse: account_id", snap["account_id"] == "U0000001")
-    check("parse: as_of", snap["as_of"] == "2026-06-04")
-    check("parse: base_currency USD", snap["base_currency"] == "USD")
-    check("parse: 2 positions", len(snap["positions"]) == 2)
+    check("parse: as_of (toDate)", snap["as_of"] == "2026-06-05")
+    check("parse: base_currency HKD (not position USD)", snap["base_currency"] == "HKD")
+    check("parse: 2 holdings only (cash/Total excluded)", len(snap["positions"]) == 2)
+    check("parse: no cash/total leaked", {p["symbol"] for p in snap["positions"]} == {"AAPL", "NVDA"})
     check("parse: is_mock False", snap["is_mock"] is False)
     aapl = next((p for p in snap["positions"] if p["symbol"] == "AAPL"), {})
-    check("parse: AAPL day_pnl 705.0", aapl.get("day_pnl") == 705.0)
-    check("parse: AAPL description merged", aapl.get("description") == "APPLE INC")
+    check("parse: AAPL day_pnl 705.0 (from MTM `total`)", aapl.get("day_pnl") == 705.0)
+    check("parse: AAPL description", aapl.get("description") == "APPLE INC")
     check("parse: AAPL quantity 300", aapl.get("quantity") == 300.0)
     check("parse: AAPL unrealized_pnl 6975.0", aapl.get("unrealized_pnl") == 6975.0)
-    check("parse: AAPL asset_class STK", aapl.get("asset_class") == "STK")
-    check("parse: NAV total", snap["nav"].get("total") == 248750.40)
+    check("parse: AAPL pct_of_nav 24.3 (LOT row didn't blank it)", aapl.get("pct_of_nav") == 24.3)
+    check("parse: AAPL position_value_base present", aapl.get("position_value_base") == 473459.61)
+    check("parse: AAPL fx_rate_to_base 7.8342", aapl.get("fx_rate_to_base") == 7.8342)
+    check("parse: NAV total = today's row (06-05)", snap["nav"].get("total") == 248750.40)
     check("parse: NAV prev_total from ChangeInNAV", snap["nav"].get("prev_total") == 246980.12)
     check("parse: change_in_nav.mtm", snap["change_in_nav"].get("mtm") == 1770.28)
-    check("parse: performance ytd", snap["performance"].get("ytd") == 41210.55)
-    check("parse: currency_rates HKD", snap["currency_rates"].get("HKD") == 0.128)
+    check("parse: performance mtd (Total row)", snap["performance"].get("mtd") == 1770.28)
+    check("parse: performance ytd (Total row)", snap["performance"].get("ytd") == 41210.55)
+    check("parse: performance unrealized (FIFO Total)", snap["performance"].get("unrealized") == 40539.00)
+    check("parse: currency_rates USD→base", snap["currency_rates"].get("USD") == 7.8342)
 
     # ---- get_portfolio_snapshot mock-first ----
     _env(mock="1")

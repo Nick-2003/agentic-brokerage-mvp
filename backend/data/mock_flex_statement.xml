@@ -1,38 +1,75 @@
 <FlexQueryResponse queryName="DailyBrief" type="AF">
   <FlexStatements count="1">
-    <FlexStatement accountId="U0000001" fromDate="2026-06-04" toDate="2026-06-04"
-                   period="LastBusinessDay" currency="USD">
+    <FlexStatement accountId="U0000001" fromDate="2026-06-05" toDate="2026-06-05"
+                   period="LastBusinessDay" whenGenerated="2026-06-05;20:00:00 EDT">
+      <!-- Base currency is HKD; positions are held in USD (mirrors the real account). -->
       <EquitySummaryInBase>
-        <EquitySummaryByReportDateInBase reportDate="2026-06-04"
-            total="248750.40" cash="18230.10" stock="230520.30"/>
+        <EquitySummaryByReportDateInBase accountId="U0000001" currency="HKD" reportDate="2026-06-04"
+            cash="18000.00" stock="228980.12" bonds="0" total="246980.12" />
+        <EquitySummaryByReportDateInBase accountId="U0000001" currency="HKD" reportDate="2026-06-05"
+            cash="18230.10" stock="230520.30" bonds="0" total="248750.40" />
       </EquitySummaryInBase>
-      <ChangeInNAV startingValue="246980.12" endingValue="248750.40"
-          mtm="1770.28" realized="0.00" dividends="0.00"/>
-      <OpenPositions>
-        <OpenPosition accountId="U0000001" currency="USD" symbol="AAPL" conid="265598"
-            assetCategory="STK" position="300" markPrice="201.45" positionValue="60435.00"
-            costBasisPrice="178.20" fifoPnlUnrealized="6975.00" percentOfNAV="24.3"/>
-        <OpenPosition accountId="U0000001" currency="USD" symbol="NVDA" conid="4815747"
-            assetCategory="STK" position="120" markPrice="1180.10" positionValue="141612.00"
-            costBasisPrice="900.40" fifoPnlUnrealized="33564.00" percentOfNAV="56.9"/>
-      </OpenPositions>
+      <ChangeInNAV accountId="U0000001" currency="HKD" fromDate="2026-06-05" toDate="2026-06-05"
+          startingValue="246980.12" mtm="1770.28" realized="0" dividends="0" endingValue="248750.40" />
+      <FIFOPerformanceSummaryInBase>
+        <FIFOPerformanceSummaryUnderlying assetCategory="STK" symbol="AAPL" description="APPLE INC"
+            conid="265598" reportDate="2026-06-05" totalRealizedPnl="0" totalUnrealizedPnl="6975.00" />
+        <FIFOPerformanceSummaryUnderlying assetCategory="STK" symbol="NVDA" description="NVIDIA CORP"
+            conid="4815747" reportDate="2026-06-05" totalRealizedPnl="0" totalUnrealizedPnl="33564.00" />
+        <FIFOPerformanceSummaryUnderlying assetCategory="" symbol="" description="Total (All Assets)"
+            reportDate="2026-06-05" totalRealizedPnl="0" totalUnrealizedPnl="40539.00" totalFifoPnl="40539.00" />
+      </FIFOPerformanceSummaryInBase>
       <MTMPerformanceSummaryInBase>
-        <MTMPerformanceSummaryUnderlying symbol="AAPL" conid="265598"
-            prevCloseQuantity="300" prevClosePrice="199.10" closeQuantity="300"
-            closePrice="201.45" mtmPnl="705.00"/>
-        <MTMPerformanceSummaryUnderlying symbol="NVDA" conid="4815747"
-            prevCloseQuantity="120" prevClosePrice="1171.22" closeQuantity="120"
-            closePrice="1180.10" mtmPnl="1065.60"/>
+        <MTMPerformanceSummaryUnderlying assetCategory="STK" symbol="AAPL" description="APPLE INC"
+            conid="265598" reportDate="2026-06-05" prevCloseQuantity="300" prevClosePrice="199.10"
+            closeQuantity="300" closePrice="201.45" transactionMtm="0" priorOpenMtm="705.00"
+            commissions="0" total="705.00" totalWithAccruals="705.00" />
+        <MTMPerformanceSummaryUnderlying assetCategory="STK" symbol="NVDA" description="NVIDIA CORP"
+            conid="4815747" reportDate="2026-06-05" prevCloseQuantity="120" prevClosePrice="1171.22"
+            closeQuantity="120" closePrice="1180.10" transactionMtm="0" priorOpenMtm="1065.60"
+            commissions="0" total="1065.60" totalWithAccruals="1065.60" />
+        <MTMPerformanceSummaryUnderlying assetCategory="CASH" symbol="USD" description="USD" conid="1029"
+            reportDate="2026-06-05" prevClosePrice="7.8345" closePrice="7.8342" total="0" totalWithAccruals="0" />
+        <MTMPerformanceSummaryUnderlying assetCategory="" symbol="" description="Total P/L"
+            transactionMtm="0" priorOpenMtm="0" total="1770.60" totalWithAccruals="1770.60" />
       </MTMPerformanceSummaryInBase>
-      <MTDYTDPerformanceSummaryInBase>
-        <MTDYTDPerformanceSummaryUnderlying symbol="" mtm="1770.28" mtmYTD="41210.55"/>
-      </MTDYTDPerformanceSummaryInBase>
+      <MTDYTDPerformanceSummary>
+        <MTDYTDPerformanceSummaryUnderlying assetCategory="STK" symbol="AAPL" description="APPLE INC"
+            conid="265598" mtmMTD="705.00" mtmYTD="3587.77" realizedPnlMTD="0" realizedPnlYTD="0" />
+        <MTDYTDPerformanceSummaryUnderlying assetCategory="STK" symbol="NVDA" description="NVIDIA CORP"
+            conid="4815747" mtmMTD="1065.60" mtmYTD="37622.78" realizedPnlMTD="0" realizedPnlYTD="0" />
+        <MTDYTDPerformanceSummaryUnderlying assetCategory="" symbol="" description="Total"
+            mtmMTD="1770.28" mtmYTD="41210.55" realizedPnlMTD="0" realizedPnlYTD="0" />
+      </MTDYTDPerformanceSummary>
+      <OpenPositions>
+        <OpenPosition accountId="U0000001" currency="USD" fxRateToBase="7.8342" assetCategory="STK"
+            symbol="AAPL" description="APPLE INC" conid="265598" reportDate="2026-06-05" position="300"
+            markPrice="201.45" positionValue="60435.00" positionValueInBase="473459.61"
+            costBasisPrice="178.20" percentOfNAV="24.3" fifoPnlUnrealized="6975.00"
+            side="Long" levelOfDetail="SUMMARY" />
+        <OpenPosition accountId="U0000001" currency="USD" fxRateToBase="7.8342" assetCategory="STK"
+            symbol="AAPL" description="APPLE INC" conid="265598" reportDate="2026-06-05" position="300"
+            markPrice="201.45" positionValue="60435.00" positionValueInBase="473459.61"
+            costBasisPrice="178.20" percentOfNAV="" fifoPnlUnrealized="6975.00"
+            side="Long" levelOfDetail="LOT" openDateTime="2026-04-27;09:30:00 EDT" />
+        <OpenPosition accountId="U0000001" currency="USD" fxRateToBase="7.8342" assetCategory="STK"
+            symbol="NVDA" description="NVIDIA CORP" conid="4815747" reportDate="2026-06-05" position="120"
+            markPrice="1180.10" positionValue="141612.00" positionValueInBase="1109408.90"
+            costBasisPrice="900.40" percentOfNAV="56.9" fifoPnlUnrealized="33564.00"
+            side="Long" levelOfDetail="SUMMARY" />
+        <OpenPosition accountId="U0000001" currency="USD" fxRateToBase="7.8342" assetCategory="STK"
+            symbol="NVDA" description="NVIDIA CORP" conid="4815747" reportDate="2026-06-05" position="120"
+            markPrice="1180.10" positionValue="141612.00" positionValueInBase="1109408.90"
+            costBasisPrice="900.40" percentOfNAV="" fifoPnlUnrealized="33564.00"
+            side="Long" levelOfDetail="LOT" openDateTime="2026-05-01;09:30:00 EDT" />
+      </OpenPositions>
       <SecuritiesInfo>
-        <SecurityInfo symbol="AAPL" conid="265598" description="APPLE INC" assetCategory="STK"/>
-        <SecurityInfo symbol="NVDA" conid="4815747" description="NVIDIA CORP" assetCategory="STK"/>
+        <SecurityInfo currency="USD" assetCategory="STK" symbol="AAPL" description="APPLE INC" conid="265598"/>
+        <SecurityInfo currency="USD" assetCategory="STK" symbol="NVDA" description="NVIDIA CORP" conid="4815747"/>
       </SecuritiesInfo>
       <ConversionRates>
-        <ConversionRate reportDate="2026-06-04" fromCurrency="HKD" toCurrency="USD" rate="0.1280"/>
+        <ConversionRate reportDate="2026-06-05" fromCurrency="USD" toCurrency="HKD" rate="7.8342"/>
+        <ConversionRate reportDate="2026-06-05" fromCurrency="EUR" toCurrency="HKD" rate="9.0266"/>
       </ConversionRates>
     </FlexStatement>
   </FlexStatements>

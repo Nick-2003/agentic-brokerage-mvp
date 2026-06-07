@@ -213,51 +213,73 @@ def parse_flex_statement(xml_text: str) -> dict:
     if stmt is None:
         raise IBKRFlexError("no <FlexStatement> in response", code="ibkr_flex_parse_failed")
 
+    as_of = _attr(stmt, "toDate", "reportDate", "fromDate")
+
+    # Open Positions = the user's current holdings. Each symbol appears as a
+    # `levelOfDetail="SUMMARY"` row AND one or more `"LOT"` rows; the LOT rows
+    # duplicate the values but blank out percentOfNAV — so keep SUMMARY only.
     positions: dict[str, dict] = {}
-
-    def _slot(sym: str) -> dict:
-        return positions.setdefault(sym, {"symbol": sym})
-
-    # Open Positions — core holdings
     for op in _findall(stmt, "OpenPosition"):
+        if _attr(op, "levelOfDetail") == "LOT":
+            continue
         sym = _attr(op, "symbol")
         if not sym:
             continue
-        _slot(sym).update({
+        positions[sym] = {
+            "symbol": sym,
+            "description": _attr(op, "description"),
             "currency": _attr(op, "currency"),
             "asset_class": _attr(op, "assetCategory"),
             "quantity": _anum(op, "position"),
             "mark_price": _anum(op, "markPrice"),
-            "position_value": _anum(op, "positionValue"),
+            "position_value": _anum(op, "positionValue"),            # native ccy
+            "position_value_base": _anum(op, "positionValueInBase"),  # base ccy (NAV ccy)
+            "fx_rate_to_base": _anum(op, "fxRateToBase"),
             "cost_basis_price": _anum(op, "costBasisPrice"),
             "unrealized_pnl": _anum(op, "fifoPnlUnrealized", "unrealizedPnl"),
             "pct_of_nav": _anum(op, "percentOfNAV"),
-        })
-    # MTM Performance Summary — per-position daily P&L (the "what moved")
+        }
+
+    # MTM Performance Summary — per-position daily P&L (the "what moved"), in
+    # base ccy. The real daily-MTM attr is `total` (transactionMtm + priorOpenMtm);
+    # `mtmPnl` is a fallback for other Flex versions. ENRICH existing holdings
+    # only — the MTM section also lists symbols sold today + cash rows (not holdings).
     for m in _findall(stmt, "MTMPerformanceSummaryUnderlying"):
         sym = _attr(m, "symbol")
-        if not sym:
+        if not sym or sym not in positions:
             continue
-        p = _slot(sym)
-        p["day_pnl"] = _anum(m, "mtmPnl", "totalMtmPnl")
-        p["prev_price"] = _anum(m, "prevClosePrice", "priorClosePrice")
-        p["close_price"] = _anum(m, "closePrice")
-    # Financial Instrument Information — full names / asset class
+        positions[sym]["day_pnl"] = _anum(m, "total", "totalWithAccruals", "mtmPnl")
+        positions[sym]["prev_price"] = _anum(m, "prevClosePrice", "priorClosePrice")
+        positions[sym]["close_price"] = _anum(m, "closePrice")
+    # Financial Instrument Information — fill any missing name / asset class.
     for s in _findall(stmt, "SecurityInfo"):
         sym = _attr(s, "symbol")
-        if sym and sym in positions:
-            positions[sym].setdefault("description", _attr(s, "description"))
-            positions[sym].setdefault("asset_class", _attr(s, "assetCategory"))
+        if sym in positions:
+            if not positions[sym].get("description"):
+                positions[sym]["description"] = _attr(s, "description")
+            if not positions[sym].get("asset_class"):
+                positions[sym]["asset_class"] = _attr(s, "assetCategory")
 
-    # NAV (Net Asset Value in Base) + Change in NAV.
-    # NB: an ElementTree element with NO children is *falsy* — so `a or b` on
-    # found leaf elements picks the wrong one. Always branch on `is None`.
-    nav: dict[str, Any] = {}
-    eq = _find(stmt, "EquitySummaryByReportDateInBase")
-    if eq is None:
+    # NAV (Net Asset Value in Base). There can be TWO EquitySummary rows (prior
+    # + current report date) — pick the one matching the statement's toDate
+    # (as_of), else the last (latest). (NB: a childless ET element is falsy, so
+    # select with `is None`/explicit matching, never `a or b`.)
+    eq_rows = _findall(stmt, "EquitySummaryByReportDateInBase")
+    eq = None
+    if eq_rows:
+        eq = next((r for r in eq_rows if _attr(r, "reportDate") == as_of), None) or eq_rows[-1]
+    elif _find(stmt, "EquitySummaryInBase") is not None:
         eq = _find(stmt, "EquitySummaryInBase")
+    nav: dict[str, Any] = {}
     if eq is not None:
-        nav = {"total": _anum(eq, "total"), "cash": _anum(eq, "cash"), "stock": _anum(eq, "stock")}
+        nav = {
+            "total": _anum(eq, "total"),
+            "cash": _anum(eq, "cash"),
+            "stock": _anum(eq, "stock"),
+            "bonds": _anum(eq, "bonds"),
+        }
+    # Change in NAV — authoritative for the overnight delta (its endingValue is
+    # today's total, startingValue is the prior close).
     change: dict[str, Any] = {}
     cin = _find(stmt, "ChangeInNAV")
     if cin is not None:
@@ -268,24 +290,37 @@ def parse_flex_statement(xml_text: str) -> dict:
             "realized": _anum(cin, "realized"),
             "dividends": _anum(cin, "dividends"),
         }
-        nav.setdefault("prev_total", change.get("starting"))
-        nav.setdefault("total", change.get("ending"))
+        if change.get("ending") is not None:
+            nav["total"] = change["ending"]
+        nav["prev_total"] = change.get("starting")
 
-    # Performance (MTD/YTD + realized/unrealized) — best-effort; reconciled by the probe.
-    # (Same childless-element-is-falsy caveat → branch on `is None`, not `or`.)
+    # Base currency = the currency of the NAV/ChangeInNAV section (e.g. HKD),
+    # NOT a position's native currency (positions can be in USD while the
+    # account base is HKD).
+    base_ccy = (
+        (_attr(eq, "currency") if eq is not None else None)
+        or (_attr(cin, "currency") if cin is not None else None)
+        or _attr(stmt, "currency")
+        or next((p.get("currency") for p in positions.values() if p.get("currency")), None)
+        or "USD"
+    )
+
+    # Performance — read the account TOTAL rows (the underlying with an empty
+    # `symbol`), not a per-symbol row. MTD/YTD live in MTDYTDPerformanceSummary;
+    # realized/unrealized totals in FIFOPerformanceSummary.
     perf: dict[str, Any] = {}
-    mtdytd = _find(stmt, "MTDYTDPerformanceSummaryUnderlying")
-    if mtdytd is None:
-        mtdytd = _find(stmt, "MTDYTDPerformanceSummary")
-    if mtdytd is not None:
-        perf["mtd"] = _anum(mtdytd, "mtm", "mtmMTD", "mtd")
-        perf["ytd"] = _anum(mtdytd, "mtmYTD", "ytd")
-    ru = _find(stmt, "RealizedUnrealizedPerformanceSummaryUnderlying")
-    if ru is None:
-        ru = _find(stmt, "RealizedUnrealizedPerformanceSummaryInBase")
-    if ru is not None:
-        perf["realized"] = _anum(ru, "totalRealized", "realized")
-        perf["unrealized"] = _anum(ru, "totalUnrealized", "unrealized")
+    mtot = next((r for r in _findall(stmt, "MTDYTDPerformanceSummaryUnderlying")
+                 if not _attr(r, "symbol")), None)
+    if mtot is not None:
+        perf["mtd"] = _anum(mtot, "mtmMTD", "mtm", "mtd")
+        perf["ytd"] = _anum(mtot, "mtmYTD", "ytd")
+        perf["realized_mtd"] = _anum(mtot, "realizedPnlMTD")
+        perf["realized_ytd"] = _anum(mtot, "realizedPnlYTD")
+    ftot = next((r for r in _findall(stmt, "FIFOPerformanceSummaryUnderlying")
+                 if not _attr(r, "symbol")), None)
+    if ftot is not None:
+        perf["realized"] = _anum(ftot, "totalRealizedPnl", "totalRealized", "realized")
+        perf["unrealized"] = _anum(ftot, "totalUnrealizedPnl", "totalUnrealized", "unrealized")
 
     # Currency rates (Include Currency Rates = Yes)
     rates: dict[str, float] = {}
@@ -293,12 +328,6 @@ def parse_flex_statement(xml_text: str) -> dict:
         ccy, rate = _attr(cr, "fromCurrency"), _anum(cr, "rate")
         if ccy and rate is not None:
             rates[ccy] = rate
-
-    base_ccy = (
-        _attr(stmt, "currency")
-        or next((p.get("currency") for p in positions.values() if p.get("currency")), None)
-        or "USD"
-    )
 
     # Make silent shape-mismatches audible (the 022 lesson — guides the real-probe fixups).
     if not positions:
@@ -310,7 +339,7 @@ def parse_flex_statement(xml_text: str) -> dict:
 
     return {
         "account_id": _attr(stmt, "accountId"),
-        "as_of": _attr(stmt, "toDate", "reportDate", "fromDate"),
+        "as_of": as_of,
         "base_currency": base_ccy,
         "is_mock": False,
         "nav": nav,
