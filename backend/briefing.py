@@ -39,6 +39,7 @@ from typing import Any
 from anthropic import AsyncAnthropic
 
 import ibkr_flex
+from news_context import fetch_recent_news
 from tools.market import get_company_news, get_macro_snapshot
 
 log = logging.getLogger(__name__)
@@ -204,16 +205,16 @@ async def gather_market_context(snapshot: dict) -> dict:
     Best-effort — a failure here degrades the brief (no news / no macro) but
     never aborts it.
 
-    TRUST GUARD (real-run fix): a *live* brief must never present mock context as
-    real (trust #1 "no number without a source" / #5 "no hallucinated data"). The
-    macro snapshot (`get_macro_snapshot`) and news (`get_company_news`) are still
-    mock-only today — they always return `is_mock: True` — so for a real holdings
-    snapshot we DROP any context layer that comes back mock, rather than letting
-    Claude quote fabricated futures/VIX/Fed-events or invented headlines in a
-    message sent to a real user. When the whole brief is a labelled mock demo
-    (`snapshot.is_mock`), mock context is fine — the output carries `is_mock`.
-    Real macro/news wiring (yfinance / web search / FMP) is a later, separate
-    market-context task; until it lands, a live brief is honestly portfolio-only.
+    TRUST GUARD: a *live* brief must never present mock context as real (trust #1
+    "no number without a source" / #5 "no hallucinated data").
+      • News (the "why it moved" layer) — for a LIVE snapshot we fetch REAL
+        per-ticker headlines via `fetch_recent_news` (yfinance), so Claude grounds
+        causes in actual reporting instead of inventing them. For a labelled mock
+        DEMO (`snapshot.is_mock`) we use the deterministic `get_company_news` mock.
+      • Macro (the "what it means" layer) — `get_macro_snapshot` is still
+        mock-only (no real futures/VIX/yields source wired yet), so we DROP it
+        from a live brief rather than quote fabricated figures, and only include
+        it in a mock demo. Wiring real macro is the next market-context task.
     """
     ctx: dict[str, Any] = {"macro": {}, "news_by_ticker": {}}
     allow_mock = bool(snapshot.get("is_mock"))
@@ -222,6 +223,7 @@ async def gather_market_context(snapshot: dict) -> dict:
         # Include the layer only if it's real, or if the whole brief is a demo.
         return bool(result) and (allow_mock or not result.get("is_mock"))
 
+    # Macro: mock-only today → kept for a demo, suppressed on a live brief.
     try:
         macro = await get_macro_snapshot({}, "system")
         if _real_enough(macro):
@@ -237,7 +239,12 @@ async def gather_market_context(snapshot: dict) -> dict:
     tickers = [p["symbol"] for p in movers[:_TOP_MOVERS] if p.get("symbol")]
     if tickers:
         try:
-            res = await get_company_news({"tickers": tickers, "limit": 2}, "system")
+            # Live → real yfinance headlines; demo → deterministic mock tool.
+            res = (
+                await get_company_news({"tickers": tickers, "limit": 2}, "system")
+                if allow_mock
+                else await fetch_recent_news(tickers, limit=2)
+            )
             if _real_enough(res):
                 ctx["news_by_ticker"] = res.get("news_by_ticker", {})
         except Exception as e:  # noqa: BLE001
