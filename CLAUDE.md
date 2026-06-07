@@ -2,6 +2,9 @@
 
 **Read this first at the start of every session.** This file is the source of truth for architectural decisions. Don't re-derive these choices in conversation — they're settled until SCOPE.md says otherwise.
 
+> ## ⚠️ ACTIVE PIVOT (2026-06-05) — read before assuming the chat-app architecture below is current
+> The product described in this file (agent-first chat brokerage) is **PAUSED**. The active track is a pre-launch **IBKR + WhatsApp waitlist briefing** product: connect Interactive Brokers via a one-time **Flex token** → daily **WhatsApp** narrative macro briefing (Claude generates, Twilio delivers). Reuses this repo's FastAPI backend + Supabase + the `morning_brief` generation; does **not** use the phone-chat UI, TradingView MCP, or (for the briefing) Alpaca. **Alpaca stays** for now; **IBKR Flex is added for holdings reads** (execution swap Alpaca→IBKR = a separate later step). New stack pieces: **IBKR Flex Web Service** (read-only XML holdings/NAV) + **Twilio WhatsApp** (system-side scheduled send — *never* an agent tool, per trust principle / threat 1). Full rationale, reuse-map, caveats, and staged plan: **`self_management/DECISION_pivot_waitlist.md`**; active checklist: top of `self_management/PRIORITIES.md`. The architecture below remains the source of truth for the *paused* chat MVP.
+
 ## What this product is
 
 An agent-first mobile brokerage. The entire UI collapses into one persistent chat bar. Every action is a prompt — research, trade execution, charting, alerts, portfolio risk — surfaced as generative widgets that the user can pin to a personalised dashboard.

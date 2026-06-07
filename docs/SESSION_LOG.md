@@ -759,3 +759,65 @@ Proposal 029 (TA degraded-source label) applied verbatim to `backend/tools/techn
 This also completes the 2026-06-05 TradingView-limitation documentation (README "Talk-to-your-charts" subsection + `.env.example` + CLAUDE.md Charts row): live charts require BOTH `USE_MOCK_TA=0` AND TV Desktop open on `:9222` (`open -a "TradingView" --args --remote-debugging-port=9222`), else the card degrades (now honestly labelled).
 
 **P5 status:** the Analytics + UX slice (027 + 028) plus the 029 source-fidelity fix are all applied & verified. Remaining P5 = the security-hardening track (rate-limit + Supabase-backed token budget, daily-trade cap, DOMPurify, CSP/HSTS, dep audit) and proposal 030 (switchable per-user Alpaca routing). Proposal 031 (dead OrderTicket/Tracker buttons + events) shelved.
+
+---
+
+## 2026-06-05 · 030 drafted — switchable Alpaca account routing (MEDIUM-3)
+
+Drafted `proposed_changes/030-switchable-alpaca-accounts/` (the renumbered MEDIUM-3). Makes Alpaca account routing switchable behind `ALPACA_ACCOUNT_MODE`, **default `shared` = today's behavior verbatim** (a no-op default — the verified shared path is untouched until flipped):
+- `shared` → the env `ALPACA_API_KEY`/SECRET account (as today).
+- `per_user` → each user's own linked Alpaca **paper Trading-API** creds (the chosen mechanism — no Broker API, no Alpaca application), stored on their RLS-protected `user_profiles` row, linked via `POST /api/alpaca/link`.
+
+**Architecture decision (the load-bearing bit):** tool callables get only `user_id`, not the JWT, but `user_profiles` RLS needs the JWT. Resolved with a **request-scoped `contextvars.ContextVar[AuthCtx]`** set in `main.py` around the agent/portfolio run; the new `backend/alpaca_accounts.py` resolver reads the token from it and queries creds **under the user JWT** (`db.get_alpaca_creds`) — RLS stays the guard, **no service key** (honors the P4.2 user-JWT-only locked decision). Rejected alternatives: service-role read (deviates from the locked decision) and threading the token through ~15 tool signatures (too invasive).
+
+**Surface:** new `alpaca_accounts.py` (`account_mode`/`alpaca_enabled`/`resolve_trading_client`/`AlpacaAccountError` + contextvar helpers); the 4 client constructions (`execution.py` ×3, `portfolio.py` ×1) reroute through `resolve_trading_client(user_id)`; `db.py` gains `get_/set_alpaca_creds` (user-JWT); `main.py` gains the contextvar wrap + `POST /api/alpaca/link` + `GET /api/alpaca/status` + `/healthz.alpaca_account_mode`; `user_profiles` gains `alpaca_api_key`/`alpaca_api_secret` (schema.sql + `migration_030_alpaca_creds.sql`); `.env.example` gains `ALPACA_ACCOUNT_MODE`. No new dependency → no `uv sync`.
+
+**Verified offline:** `py_compile` ✓ on all backend files; new `scripts/test_P5_030_alpaca_accounts.py` **19/19** (stubs `db` + `alpaca`, exercises account_mode/alpaca_enabled/shared-creds/per_user-no-token/unlinked/linked/client-build/default-shared); diffs vs live = only the targeted edits (default-`shared` path byte-for-byte unchanged).
+
+**Known limits (documented in the README, not blockers):** plaintext paper creds at rest (RLS-guarded row; encrypt-at-rest is a later hardening pass — paper-only, low blast radius); trade audit log (INFO-2) deferred to a follow-up; `per_user`+unlinked returns an honest `alpaca_account_not_linked` (no shared/mock leak). **Draft-time uncertainty (the 002/006/025 pattern):** contextvar propagation through `EventSourceResponse`'s streamed generator — set *inside* `event_stream` (the reliable placement); documented one-line fallback is a service-role-scoped read if a first real `per_user` run shows the resolver seeing `None`. **Apply note:** packaged as full copies for the new module + tools + schema + test, and precise diffs for `main.py`/`db.py`/`.env.example`; run `migration_030_alpaca_creds.sql` before enabling `per_user`.
+
+**P5 status:** Analytics+UX (027/028) + 029 applied & verified; **030 drafted, awaiting apply**. Remaining P5 = the rest of the security-hardening track (rate-limit + Supabase-backed token budget, daily-trade cap, DOMPurify, CSP/HSTS, dep audit). Proposal 031 (dead-button wiring) shelved.
+
+---
+
+## 2026-06-05 · STRATEGIC PIVOT — IBKR + WhatsApp waitlist briefing; chat MVP paused; 030 paused
+
+Nicholas pivoted the project to a **pre-launch waitlist product**: land → connect Interactive Brokers via a one-time **Flex token** → every morning a **WhatsApp** narrative macro briefing (what moved / why / what it means), Claude-generated, Twilio-delivered. A bridge between broker and phone; validates demand before the full agent-chat brokerage.
+
+**Decisions (asked + locked):**
+- **Direction = PIVOT** — the agent-chat brokerage MVP (P5 security / P6 deploy) is **PAUSED** (kept, not abandoned).
+- **Alpaca stays for now** while we add **IBKR Flex for holdings reads**; **swapping execution Alpaca→IBKR is a separate later step** (heavy — IBKR Client Portal/TWS API, not Flex).
+- **Reuse this repo** (FastAPI + Supabase + the `morning_brief` generation + Langfuse + PostHog).
+- **Proposal 030 (switchable Alpaca routing) PAUSED** — deprioritised; draft stays ready.
+
+**Two technical realities surfaced (so the framing is accurate):** (1) **IBKR Flex Web Service is read-only** — token+queryID → 2-step `SendRequest`/`GetStatement` → XML holdings/NAV (EOD/report-style; great for a morning brief; *cannot trade*). So Flex replaces the holdings-READ only, not execution. (2) **Twilio WhatsApp proactive/scheduled sends are business-initiated** → production needs a registered WhatsApp Business sender + approved **templates** (a long narrative doesn't fit; send a short templated line + link), but the **Sandbox** covers a small opted-in validation cohort. WhatsApp send stays a **system cron job, never an agent tool** (threat 1).
+
+**Captured (this is a deviation → written down first, per CLAUDE.md):**
+- New **`self_management/DECISION_pivot_waitlist.md`** — full rationale, reuse-map, caveats, security (Flex token = sensitive real-account creds → encrypt at rest), and the staged plan **W1–W6** (W1 IBKR Flex connector, W2 briefing generator, W3 WhatsApp delivery, W4 storage+connect flow, W5 scheduler, W6 launch hardening) + the deferred execution swap.
+- **Pivot banners** added atop `PRIORITIES.md` (with the active W-checklist), `CLAUDE.md`, and `CONTEXT_TRANSFER.md`; 030 marked PAUSED in `STATUS.md` + `PRIORITIES.md`.
+
+**Build order (prove the riskiest externals first, per the 002/006/025 lesson):** W1 (can we read a user's IBKR holdings?) is the suggested first build — biggest unknown, gates everything; W3 (can we deliver via WhatsApp?) close second. No waitlist code written yet — awaiting go-ahead on W1.
+
+**Kept, no rollback:** 027/028/029 (applied). PostHog (027) is reused for the waitlist conversion funnel. P7-NOTIFY backlog idea is effectively superseded (it became the product).
+
+---
+
+## 2026-06-05 · W1 drafted — IBKR Flex connector (pivot, read-half of the bridge)
+
+First build of the waitlist pivot. Drafted `proposed_changes/W1-ibkr-flex-connector/` — a read-only IBKR **Flex Web Service** client, mirroring `fmp_client.py`'s mock-first external-provider shape.
+
+**Files:** `backend/ibkr_flex.py` (2-step `SendRequest`→`GetStatement` with 1019 "in progress" poll/backoff; defensive `parse_flex_statement` merging Open Positions + MTM per-position day-P&L + instrument names by symbol, plus NAV/ChangeInNAV/MTD-YTD/FX; `IBKRFlexError` with codes; `ibkr_flex_enabled()`; mock-first `get_portfolio_snapshot()`), `backend/data/mock_flex_statement.xml` fixture, `scripts/ibkr_flex_probe.py` (live first-real-run — dumps raw XML to `/tmp/ibkr_flex_raw.xml`), `scripts/test_W1_ibkr_flex.py`, additive `.env.example` block (with the Flex Query setup: Open Positions + NAV + MTM essential; XML / Last Business Day; base-currency P&L on; currency rates yes; audit no). No new dependency (httpx + stdlib xml.etree).
+
+**Design choices:** W1 is ONLY the connector — **not** an agent tool (briefing is a system job, threat 1), and not W2–W5. Credentials are **params** on `fetch_flex_statement(token, query_id)` so W4's per-user encrypted-token store plugs in with no refactor. Errors surfaced, no silent mock fallback (the codebase rule).
+
+**Verified offline: 26/26.** A real bug was caught during verification and fixed: the **ElementTree "childless element is falsy" gotcha** — `eq = _find(a) or _find(b)` picked the wrong element when the first match was a leaf (attributes only, no children), so NAV total + MTD/YTD parsed as None. Fixed by branching on `is None` instead of `or` for the three multi-spelling element lookups (NAV / MTD-YTD / Realized-Unrealized). Good catch-by-test; documented inline.
+
+**Known unknown (expected follow-up):** exact IBKR tag/attribute names vary by Flex version. The parser is deliberately tolerant (`_attr(el, *aliases)`, namespace-strip, audible `log.info` on missing sections) and the fixture is a best-effort guess. **Next: run `scripts/ibkr_flex_probe.py` with the acquired token+query id** → reconcile any attr-name gaps + the fixture against the real statement (same verify-against-the-live-dependency pattern as FMP fields 006/009 and the Mem0 v3 API 026). Then W3 (WhatsApp delivery) or W2 (briefing generator).
+
+## 2026-06-05 · W1 real-run fix #1 — GetStatement host fallback (gdcdyn → ndcdyn)
+
+First live probe of the IBKR Flex connector (W1 was applied to live). **The token + query ID work** — SendRequest (against `ndcdyn.interactivebrokers.com`) returned a real ReferenceCode. But step 2 failed: IBKR's SendRequest `<Url>` pointed at **`gdcdyn.interactivebrokers.com`**, which **doesn't resolve** on this machine (`httpx.ConnectError: [Errno 8] nodename nor servname` — DNS EAI_NONAME), even though the `ndcdyn` host SendRequest used is fine.
+
+**Fix (in the W1 proposal):** `_http_get` now tags DNS/TCP failures `ibkr_flex_connect_error`; `_get_statement` tries the returned `<Url>` first and, on a connect error, **falls back to GetStatement on the same host/service as SendRequest** (`_GETSTATEMENT_FALLBACK` = ndcdyn …/FlexWebService/GetStatement, confirmed reachable) via `_candidate_get_urls`. Faithful (uses IBKR's Url when reachable) + resilient. Offline test **27/27** (added a host-fallback case). Changed files: `backend/ibkr_flex.py` + `scripts/test_W1_ibkr_flex.py`; probe/fixture unchanged.
+
+**Re-sync needed:** W1 was applied before this fix, so live `backend/ibkr_flex.py` must be re-copied from the proposal, then re-run the probe. **Still pending:** the statement actually downloading + parsing → only then can we do the attr-name reconciliation (the original "known unknown"; the run hasn't reached the XML yet).
