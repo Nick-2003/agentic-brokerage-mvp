@@ -74,7 +74,10 @@ async def main() -> None:
     # ---- gather_market_context: LIVE → real news + real macro (both stubbed) ----
     # `snap` is the raw parsed fixture (is_mock False) → a live snapshot. News + macro
     # come from the real fetchers — stub both so the test stays offline.
+    _news_call: dict = {}
+
     async def _fake_real_news(tickers, limit=2, since=None):  # noqa: ANN001
+        _news_call["since"] = since  # capture the recency cutoff the briefing passes
         return {
             "news_by_ticker": {
                 "NVDA": [{"headline": "Real NVDA headline", "source": "Reuters",
@@ -100,6 +103,8 @@ async def main() -> None:
     check("context(live): real macro used (indicators list)",
           isinstance(ctx_live["macro"].get("indicators"), list) and bool(ctx_live["macro"]["indicators"]))
     check("context(live): real news used (not mock)", "NVDA" in ctx_live["news_by_ticker"])
+    # Recency cap: news fetched with since = as_of (2026-06-05) − _NEWS_MAX_AGE_DAYS (2).
+    check("context(live): news capped to as_of − N days", _news_call.get("since") == "2026-06-03")
     f_live = br.compute_brief_facts(snap, ctx_live)
     check("facts(live): macro normalised to [{label,display}]",
           isinstance(f_live["macro"], list) and f_live["macro"][0]["display"] == "VIX 21.51 (+39.8%)")
