@@ -63,6 +63,15 @@ auth = [
 memory = [
     "mem0ai>=2.0.0,<3.0.0",
 ]
+# W3 (pivot) — WhatsApp delivery of the daily briefing via Twilio (backend/whatsapp.py).
+# OPTIONAL like `memory`: whatsapp.py lazy-imports `twilio` only on the real-send
+# path and LOGS instead (mock mode) when USE_MOCK_WHATSAPP=1 or creds are absent,
+# so the default install / chat backend boots without it. Enable real sends with:
+#     uv sync --group whatsapp     (then set TWILIO_* in .env, USE_MOCK_WHATSAPP unset)
+# The send is system-side (the W5 cron), NEVER an agent tool (SECURITY threat 1).
+whatsapp = [
+    "twilio>=9.0.0",
+]
 dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
