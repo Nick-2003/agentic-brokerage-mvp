@@ -41,9 +41,11 @@ from sse_starlette.sse import EventSourceResponse
 load_dotenv()
 
 # Import agent AFTER load_dotenv so module-level env reads work
+import connections  # noqa: E402  (W4 — connect/waitlist storage diagnostics)
 import db  # noqa: E402
 import memory  # noqa: E402
 import observability  # noqa: E402
+import waitlist_api  # noqa: E402  (W4 — IBKR connect + waitlist router)
 from agent import MODEL, run_agent  # noqa: E402
 from auth import AuthCtx, auth_configured, require_auth, resolve_auth  # noqa: E402
 from tools import TOOL_REGISTRY  # noqa: E402
@@ -66,6 +68,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# W4 (pivot) — IBKR connect + waitlist routes (POST /api/ibkr/connect, etc.).
+app.include_router(waitlist_api.router)
 
 
 # ---------------------------------------------------------------------------
@@ -97,6 +102,8 @@ async def healthz() -> dict[str, Any]:
         "langfuse_configured": observability.langfuse_configured(),
         # P4.3 memory diagnostics.
         "memory_configured": memory.memory_configured(),
+        # W4 connect/waitlist diagnostics (Supabase + Flex-token encryption ready).
+        "connect_storage_configured": connections.connect_storage_configured(),
     }
 
 
