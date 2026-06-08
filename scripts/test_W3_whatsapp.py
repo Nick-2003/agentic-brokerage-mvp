@@ -142,6 +142,18 @@ async def main() -> None:
     except wa.WhatsAppError as e:
         check("real send: failure → whatsapp_send_failed", e.code == "whatsapp_send_failed")
 
+    # ---- twilio not installed → distinct, actionable error ----
+    def _raise_import(sid, token):  # noqa: ANN001
+        raise ModuleNotFoundError("No module named 'twilio'")
+
+    wa._make_client = _raise_import  # type: ignore[assignment]
+    try:
+        await wa.send_whatsapp("+85291234567", "body")
+        check("real send: missing twilio raises", False)
+    except wa.WhatsAppError as e:
+        check("real send: missing twilio → whatsapp_twilio_not_installed",
+              e.code == "whatsapp_twilio_not_installed")
+
     # ---- send_briefing convenience ----
     wa._make_client = lambda sid, token: _FakeClient(sid, token)  # type: ignore[assignment]
     rec = await wa.send_briefing(
