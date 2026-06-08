@@ -85,7 +85,7 @@ async def get_ibkr_connection(auth: AuthCtx = Depends(resolve_auth)) -> dict:
 @router.post("/api/ibkr/opt-in")
 async def set_ibkr_opt_in(req: OptInRequest, auth: AuthCtx = Depends(resolve_auth)) -> dict:
     user_jwt = _require_user(auth)
-    row = await connections.set_opt_in(user_jwt, req.opt_in)
+    row = await connections.set_opt_in(user_jwt, auth.user_id, req.opt_in)
     if row is None:
         raise HTTPException(status_code=404, detail="no connection to update")
     return {"ok": True, "connection": row}
