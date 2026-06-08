@@ -121,6 +121,15 @@ async def send_whatsapp(to: str, body: str) -> dict[str, Any]:
         msg = await asyncio.to_thread(_send)
     except WhatsAppError:
         raise
+    except ImportError as e:
+        # Creds are set (we're past the mock gate) but the optional `twilio`
+        # group isn't installed — distinguish this from a Twilio-side failure so
+        # the operator gets the actionable fix, not a buried ModuleNotFoundError.
+        raise WhatsAppError(
+            "twilio not installed — run `uv sync --group whatsapp` (or set "
+            "USE_MOCK_WHATSAPP=1 to log instead of send)",
+            code="whatsapp_twilio_not_installed",
+        ) from e
     except Exception as e:  # noqa: BLE001 — wrap any Twilio/transport error
         raise WhatsAppError(f"Twilio send failed: {e}") from e
     return {
