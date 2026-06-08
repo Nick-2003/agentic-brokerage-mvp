@@ -32,7 +32,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +50,10 @@ _PROMPT = Path(__file__).parent / "prompts" / "briefing_system.md"
 _TOP_MOVERS = int(os.getenv("BRIEFING_TOP_MOVERS", "4"))
 # WhatsApp soft length budget (Twilio caps a single message at 1600 chars).
 _MAX_CHARS = int(os.getenv("BRIEFING_MAX_CHARS", "1500"))
+# Headline freshness window (days), anchored to the statement's as_of date — only
+# news at/after (as_of − this) is offered to the brief, so a stale headline can't
+# be cited as a cause for today's move. See _news_since().
+_NEWS_MAX_AGE_DAYS = int(os.getenv("BRIEFING_NEWS_MAX_AGE_DAYS", "2"))
 
 
 class BriefingError(Exception):
@@ -232,6 +236,27 @@ def compute_brief_facts(snapshot: dict, market_context: dict | None = None) -> d
 
 # --- market context ------------------------------------------------------------
 
+def _news_since(as_of: str | None) -> str:
+    """ISO date cutoff for the headline recency cap: `(as_of − _NEWS_MAX_AGE_DAYS)`.
+
+    Anchored to the statement's `as_of` (the day the brief is *about*), NOT
+    wall-clock now — so replaying a brief days later doesn't drop the news that
+    actually explains its moves, and tests are deterministic. Falls back to
+    `now − N days` if `as_of` is missing/unparseable (never crash on a bad date).
+    Returned as `YYYY-MM-DD`; the date-only string compares correctly against the
+    ISO-8601 `ts` values in `fetch_recent_news`'s lexicographic `since` filter.
+    """
+    anchor: datetime | None = None
+    if as_of:
+        try:
+            anchor = datetime.strptime(as_of[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            anchor = None
+    if anchor is None:
+        anchor = datetime.now(timezone.utc)
+    return (anchor - timedelta(days=_NEWS_MAX_AGE_DAYS)).strftime("%Y-%m-%d")
+
+
 async def gather_market_context(snapshot: dict) -> dict:
     """The "why it moved / what it means" layer: macro snapshot + headlines for
     the snapshot's biggest movers. Reuses the chat product's market tools.
@@ -275,11 +300,15 @@ async def gather_market_context(snapshot: dict) -> dict:
     tickers = [p["symbol"] for p in movers[:_TOP_MOVERS] if p.get("symbol")]
     if tickers:
         try:
-            # Live → real yfinance headlines; demo → deterministic mock tool.
+            # Live → real yfinance headlines, capped to fresh news (anchored to
+            # as_of) so a stale headline can't be cited as today's cause; demo →
+            # deterministic mock tool (timestamps fresh-by-construction → no cap).
             res = (
                 await get_company_news({"tickers": tickers, "limit": 2}, "system")
                 if allow_mock
-                else await fetch_recent_news(tickers, limit=2)
+                else await fetch_recent_news(
+                    tickers, limit=2, since=_news_since(snapshot.get("as_of"))
+                )
             )
             if _real_enough(res):
                 ctx["news_by_ticker"] = res.get("news_by_ticker", {})
