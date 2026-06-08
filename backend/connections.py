@@ -18,13 +18,17 @@ Tables: `backend/db/schema_waitlist.sql` (run once in Supabase).
 """
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 
+from postgrest.types import ReturnMethod
 from supabase import AsyncClient, acreate_client
 
 import token_crypto
 from db import _supabase_anon_key, _supabase_url, _client_for_user  # reuse P4.2 config/clients
+
+log = logging.getLogger(__name__)
 
 
 def _service_key() -> str:
@@ -101,10 +105,20 @@ async def get_my_connection(user_jwt: str) -> dict[str, Any] | None:
     return res.data[0] if res.data else None
 
 
-async def set_opt_in(user_jwt: str, opt_in: bool) -> dict[str, Any] | None:
-    """Flip this user's opt-in (the in-app unsubscribe; STOP-webhook handling is W6)."""
+async def set_opt_in(user_jwt: str, user_id: str, opt_in: bool) -> dict[str, Any] | None:
+    """Flip this user's opt-in (the in-app unsubscribe; STOP-webhook handling is W6).
+
+    The `.eq("user_id", …)` filter is required: PostgREST refuses an unfiltered
+    UPDATE (mass-update guard) — RLS alone scopes the rows but PostgREST still
+    wants an explicit filter. (Real-run fix: a bare update 500'd.)
+    """
     c = await _client_for_user(user_jwt)
-    res = await c.table("ibkr_connections").update({"opt_in": opt_in}).execute()
+    res = (
+        await c.table("ibkr_connections")
+        .update({"opt_in": opt_in})
+        .eq("user_id", user_id)
+        .execute()
+    )
     return _public_view(res.data[0]) if res.data else None
 
 
@@ -168,12 +182,24 @@ async def log_delivery_admin(
 
 async def add_waitlist_signup(email: str, *, source: str | None = None) -> bool:
     """Record an email on the waitlist (idempotent on lower(email)). Uses the
-    anon key — the RLS policy allows insert-only (no read/harvest)."""
+    anon key — the RLS policy allows insert-only (no read/harvest).
+
+    `returning=minimal` is REQUIRED here: the table has an INSERT policy but NO
+    SELECT policy for anon (deliberate — no list harvest), so supabase-py's default
+    `return=representation` would do a post-insert SELECT that RLS denies and the
+    whole call errors. Minimal skips that read. (Real-run fix: waitlist returned
+    `{"ok": false}` for exactly this reason.) A duplicate email (unique index,
+    SQLSTATE 23505) is treated as idempotent success.
+    """
     client = await acreate_client(_supabase_url(), _supabase_anon_key())
     try:
         await client.table("waitlist_signups").insert(
-            {"email": email.strip().lower(), "source": source}
+            {"email": email.strip().lower(), "source": source},
+            returning=ReturnMethod.minimal,
         ).execute()
         return True
-    except Exception:  # noqa: BLE001 — duplicate email (unique index) or transient
+    except Exception as e:  # noqa: BLE001
+        if "23505" in str(e) or "duplicate" in str(e).lower():
+            return True  # already on the list — idempotent
+        log.info("waitlist signup failed: %s", e)
         return False

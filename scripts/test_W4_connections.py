@@ -34,6 +34,7 @@ os.environ.setdefault("SUPABASE_ANON_KEY", "test-anon-key")
 os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
 
 import connections as conn  # noqa: E402
+from postgrest.types import ReturnMethod  # noqa: E402
 
 _PASS = 0
 _FAIL = 0
@@ -65,9 +66,9 @@ class _FakeTable:
         self.store.setdefault("upserts", []).append((self.name, row))
         return self
 
-    def insert(self, row):
+    def insert(self, row, **kwargs):
         self._op = ("insert", row)
-        self.store.setdefault("inserts", []).append((self.name, row))
+        self.store.setdefault("inserts", []).append((self.name, row, kwargs))
         return self
 
     def update(self, row):
@@ -96,6 +97,8 @@ class _FakeTable:
         if op == "upsert":
             return _Result([{**self._op[1], "created_at": "t", "updated_at": "t"}])
         if op == "update":
+            self.store.setdefault("updates", []).append(
+                (self.name, list(self._filters), self._op[1]))
             base = (self.store.get("rows", {}).get(self.name) or [{}])[0]
             return _Result([{**base, **self._op[1]}])
         if op == "insert":
@@ -214,12 +217,46 @@ async def main() -> None:
     check("log: account/as_of recorded", logged.get("account_id") == "U19883362" and logged.get("as_of") == "2026-06-05")
     check("log: NO brief body fields", not any(k in logged for k in ("text", "body", "brief")))
 
-    # ---- waitlist: anon insert, lowercased ----
+    # ---- set_opt_in: filtered UPDATE by user_id (real-run fix: bare update 500'd) ----
+    store["rows"]["ibkr_connections"] = [
+        {"user_id": "user-uuid-1", "opt_in": True, "whatsapp_number": "+85291234567", "status": "active"}
+    ]
+    optrow = await conn.set_opt_in("user-jwt", "user-uuid-1", False)
+    upd = store["updates"][-1]
+    check("opt-in: UPDATE filtered by user_id", ("user_id", "user-uuid-1") in upd[1])
+    check("opt-in: sets opt_in False", upd[2].get("opt_in") is False)
+    check("opt-in: returns token-free view",
+          optrow is not None and "flex_token_encrypted" not in optrow)
+
+    # ---- waitlist: anon insert, lowercased, returning=minimal (real-run fix) ----
     ok = await conn.add_waitlist_signup("Test@Example.COM", source="landing")
-    wl = dict(store["inserts"][-1][1])
+    wl_name, wl_row, wl_kw = store["inserts"][-1]
     check("waitlist: returns True", ok is True)
-    check("waitlist: email lowercased", wl.get("email") == "test@example.com")
-    check("waitlist: used anon key (not service)", store.get("waitlist_key") != os.getenv("SUPABASE_SERVICE_KEY"))
+    check("waitlist: table waitlist_signups", wl_name == "waitlist_signups")
+    check("waitlist: email lowercased", wl_row.get("email") == "test@example.com")
+    check("waitlist: insert uses returning=minimal (no RLS select-after-insert)",
+          wl_kw.get("returning") == ReturnMethod.minimal)
+    check("waitlist: used anon key (not service)",
+          store.get("waitlist_key") != os.getenv("SUPABASE_SERVICE_KEY"))
+
+    # duplicate email (unique-violation 23505) → idempotent success
+    class _DupTable:
+        def insert(self, row, **kw):  # noqa: ANN001
+            return self
+
+        async def execute(self):
+            raise Exception("duplicate key value violates unique constraint (SQLSTATE 23505)")
+
+    class _DupClient:
+        def table(self, name):  # noqa: ANN001
+            return _DupTable()
+
+    async def _fake_acreate_dup(url, key):  # noqa: ANN001
+        return _DupClient()
+
+    conn.acreate_client = _fake_acreate_dup  # type: ignore[assignment]
+    check("waitlist: duplicate (23505) → idempotent True",
+          await conn.add_waitlist_signup("dup@example.com") is True)
 
 
 if __name__ == "__main__":
