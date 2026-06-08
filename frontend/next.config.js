@@ -16,6 +16,9 @@ const nextConfig = {
       { source: '/api/healthz', destination: `${backend}/healthz` },
       { source: '/api/portfolio', destination: `${backend}/api/portfolio` },
       { source: '/api/mock-chart/:path*', destination: `${backend}/api/mock-chart/:path*` },
+      // W4 (pivot) — connect/waitlist endpoints.
+      { source: '/api/waitlist', destination: `${backend}/api/waitlist` },
+      { source: '/api/ibkr/:path*', destination: `${backend}/api/ibkr/:path*` },
     ];
   },
 };
