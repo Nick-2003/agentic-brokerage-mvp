@@ -16,6 +16,13 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
+import {
+  trackBriefingOptInChanged,
+  trackConnectCompleted,
+  trackConnectFailed,
+  trackConnectStarted,
+  trackWaitlistJoined,
+} from '@/lib/analytics';
 import { authConfigured, getAccessToken, getSupabase, signOut } from '@/lib/supabase';
 import {
   connectIbkr,
@@ -161,7 +168,10 @@ function WaitlistCard() {
     setBusy(true);
     const ok = await joinWaitlist(addr);
     setBusy(false);
-    if (ok) setDone(true);
+    if (ok) {
+      setDone(true);
+      trackWaitlistJoined('connect-page'); // PII-safe: no email sent
+    }
   }
 
   return (
@@ -273,7 +283,10 @@ function ConnectionCard({
     setBusy(true);
     const updated = await setOptIn(token, !conn.opt_in);
     setBusy(false);
-    if (updated) onChanged(updated);
+    if (updated) {
+      onChanged(updated);
+      trackBriefingOptInChanged(updated.opt_in);
+    }
   }
 
   return (
@@ -346,6 +359,12 @@ function ConnectForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Funnel "connect" step — only a first-time connect (not an Update of an
+  // existing connection), fired once when the form is reached.
+  useEffect(() => {
+    if (!existing) trackConnectStarted();
+  }, [existing]);
+
   const waOk = E164.test(whatsapp.trim());
   const canSubmit = !!token && flexToken.trim().length >= 8 && queryId.trim() && waOk && optIn;
 
@@ -360,8 +379,13 @@ function ConnectForm({
       opt_in: optIn,
     });
     setBusy(false);
-    if (res.ok && res.connection) onConnected(res.connection);
-    else setError(res.error || 'Could not connect');
+    if (res.ok && res.connection) {
+      onConnected(res.connection);
+      trackConnectCompleted();
+    } else {
+      setError(res.error || 'Could not connect');
+      trackConnectFailed(res.error || 'unknown');
+    }
   }
 
   return (
