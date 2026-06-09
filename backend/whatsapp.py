@@ -43,7 +43,7 @@ _E164 = re.compile(r"^\+\d{6,15}$")
 # channels; 63024 = WhatsApp recipient can't receive. Confirm/extend on the first
 # real opted-out send (verify-against-live-dependency). Configurable.
 _OPTED_OUT_CODES = {
-    c.strip() for c in os.getenv("TWILIO_OPTED_OUT_CODES", "21610,63024").split(",") if c.strip()
+    c.strip() for c in os.getenv("TWILIO_OPTED_OUT_CODES", "21610,63024,63015").split(",") if c.strip()
 }
 # Error codes whose retry is pointless (permanent) — the W5 scheduler reads
 # `WhatsAppError.retryable` to skip backoff on these.
@@ -134,9 +134,14 @@ async def send_whatsapp(to: str, body: str) -> dict[str, Any]:
     from_addr = _normalize_addr(frm)
     try:
         def _send():  # runs in a thread
-            return _make_client(sid, token).messages.create(
-                from_=from_addr, to=to_addr, body=body
-            )
+            kwargs: dict[str, Any] = {"from_": from_addr, "to": to_addr, "body": body}
+            # Wire the delivery-status callback so an async opted-out/blocked result
+            # (e.g. WhatsApp 63015/63024 — Twilio swallows the STOP keyword but blocks
+            # the number) reaches POST /api/twilio/status, which flips opt_in off.
+            cb = os.getenv("TWILIO_STATUS_CALLBACK_URL", "").strip()
+            if cb and not cb.endswith("REPLACE"):
+                kwargs["status_callback"] = cb
+            return _make_client(sid, token).messages.create(**kwargs)
 
         msg = await asyncio.to_thread(_send)
     except WhatsAppError:
