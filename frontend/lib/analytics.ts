@@ -30,6 +30,23 @@ export const trackUserSignedUp = (source: string, method: string) =>
 export const trackUserReturned = (daysSinceFirstSeen: number, sessionNumber: number) =>
   capture('user_returned', { days_since_first_seen: daysSinceFirstSeen, session_number: sessionNumber });
 
+// ── waitlist / connect funnel (pivot — W6.2) ──
+// The land → join → connect funnel for the briefing product. PostHog's auto
+// `$pageview` on /connect is "land"; these are the steps after. PII-safe: the
+// waitlist email is NEVER sent as a property — only the event + a source label.
+export const trackWaitlistJoined = (source: string) =>
+  capture('waitlist_joined', { source });
+
+export const trackConnectStarted = () => capture('connect_started');
+
+export const trackConnectCompleted = () => capture('connect_completed');
+
+export const trackConnectFailed = (reason: string) =>
+  capture('connect_failed', { reason });
+
+export const trackBriefingOptInChanged = (optIn: boolean) =>
+  capture('briefing_opt_in_changed', { opt_in: optIn });
+
 // ── activation funnel ──
 export const trackChatSessionStarted = () => capture('chat_session_started');
 
