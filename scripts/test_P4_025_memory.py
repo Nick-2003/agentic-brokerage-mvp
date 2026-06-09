@@ -8,10 +8,6 @@ normalisation, the bounded block format, failure-tolerance, and — the one that
 matters most — that every ``search``/``add`` is scoped by exactly the
 ``user_id`` the caller passed, never a substituted/spoofed value.
 
-Run pre-apply (against the proposed copy — no apply needed):
-    backend/.venv/bin/python \
-        proposed_changes/025-mem0-memory/scripts/test_P4_025_memory.py
-
 Run post-apply (against the live backend):
     backend/.venv/bin/python scripts/test_P4_025_memory.py
 """

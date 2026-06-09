@@ -8,10 +8,6 @@ policy — both still pass against the 015 auth.py).
 
 Run (after applying 015, from repo root):
     backend/.venv/bin/python scripts/test_P4_015_jwks.py
-
-Pre-apply (against the proposed copy):
-    PYTHONPATH=proposed_changes/015-jwks-asymmetric-jwt/backend \
-        backend/.venv/bin/python proposed_changes/015-jwks-asymmetric-jwt/scripts/test_P4_015_jwks.py
 """
 
 from __future__ import annotations

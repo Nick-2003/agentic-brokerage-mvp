@@ -46,6 +46,7 @@ import db  # noqa: E402
 import memory  # noqa: E402
 import observability  # noqa: E402
 import waitlist_api  # noqa: E402  (W4 — IBKR connect + waitlist router)
+import webhooks  # noqa: E402  (W6 — Twilio inbound STOP/START webhook)
 from agent import MODEL, run_agent  # noqa: E402
 from auth import AuthCtx, auth_configured, require_auth, resolve_auth  # noqa: E402
 from tools import TOOL_REGISTRY  # noqa: E402
@@ -71,6 +72,8 @@ app.add_middleware(
 
 # W4 (pivot) — IBKR connect + waitlist routes (POST /api/ibkr/connect, etc.).
 app.include_router(waitlist_api.router)
+# W6 (pivot) — Twilio inbound STOP/START webhook (POST /api/twilio/inbound).
+app.include_router(webhooks.router)
 
 
 # ---------------------------------------------------------------------------

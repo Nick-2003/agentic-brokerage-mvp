@@ -10,9 +10,6 @@ the helpers + serialisation pattern.
 
 Run (after applying 024):
     backend/.venv/bin/python scripts/test_P1_024_screenshot_context.py
-
-Pre-apply:
-    backend/.venv/bin/python proposed_changes/024-llm-context-screenshot-strip/scripts/test_P1_024_screenshot_context.py
 """
 
 from __future__ import annotations
@@ -33,7 +30,7 @@ def _find_repo_root() -> Path:
 
 _REPO_ROOT = _find_repo_root()
 _LIVE_BACKEND = _REPO_ROOT / "backend"
-_PROPOSED = _REPO_ROOT / "proposed_changes/024-llm-context-screenshot-strip/backend/agent.py"
+_PROPOSED = _REPO_ROOT / "backend/agent.py"
 
 # Stage the proposed agent.py over a temp copy of the live backend so the
 # package-relative imports (`from observability import …`, `from tools import …`)
