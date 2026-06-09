@@ -18,13 +18,13 @@ COPY pyproject.toml ./
 COPY uv.lock* ./
 
 # Install deps without the project itself (faster rebuilds when only code changes)
-RUN uv sync --frozen --no-install-project --no-dev 2>/dev/null || uv sync --no-install-project --no-dev
+RUN uv sync --frozen --no-install-project --no-dev 2>/dev/null --group whatsapp --group memory || uv sync --no-install-project --no-dev --group whatsapp --group memory
 
 # Copy source
 COPY . .
 
 # Install the project (no-op if pyproject was already installed)
-RUN uv sync --frozen --no-dev 2>/dev/null || uv sync --no-dev
+RUN uv sync --frozen --no-dev 2>/dev/null --group whatsapp --group memory || uv sync --no-dev --group whatsapp --group memory
 
 # Railway sets PORT; default to 8000 for local docker run
 ENV PORT=8000

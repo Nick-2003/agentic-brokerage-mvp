@@ -90,6 +90,14 @@ def main() -> None:
     post({"From": "whatsapp:+85291234567", "Body": "hello there"})
     check("dev: unknown body → no opt_in change", CALLS == [])
 
+    # W6.1b — PAUSE/RESUME (the keywords Twilio actually forwards to the webhook).
+    CALLS.clear()
+    post({"From": "whatsapp:+85291234567", "Body": "PAUSE"})
+    check("dev: PAUSE → opt_in False", CALLS == [("+85291234567", False)])
+    CALLS.clear()
+    post({"From": "whatsapp:+85291234567", "Body": "Resume"})
+    check("dev: RESUME (any case) → opt_in True", CALLS == [("+85291234567", True)])
+
     CALLS.clear()
     post({"From": "", "Body": "STOP"})
     check("dev: no From → no-op", CALLS == [])

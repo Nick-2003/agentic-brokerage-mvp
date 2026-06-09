@@ -28,9 +28,17 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["webhooks"])
 
-# Inbound keywords → opt-in state. (Twilio's own STOP set, lowercased.)
-_STOP_WORDS = {"stop", "stopall", "unsubscribe", "cancel", "end", "quit"}
-_START_WORDS = {"start", "yes", "unstop", "resume"}
+# Inbound keywords → opt-in state, lowercased.
+#   STOP/START family: Twilio's reserved Advanced-Opt-Out words. Twilio INTERCEPTS
+#     these (blocks delivery + auto-replies) and does NOT forward them to this
+#     webhook on the Sandbox / a Messaging Service with opt-out on — so they only
+#     reach us where opt-out is disabled. Kept for that path.
+#   PAUSE/RESUME: NON-reserved → Twilio FORWARDS them, so this is the in-WhatsApp
+#     control users can actually trigger today (verified: PAUSE reached the webhook).
+# The real reserved STOP is mirrored on the SEND side instead (Twilio swallows the
+# keyword but blocks the number) — see whatsapp.send_whatsapp opted-out detection.
+_STOP_WORDS = {"stop", "stopall", "unsubscribe", "cancel", "end", "quit", "pause"}
+_START_WORDS = {"start", "yes", "unstop", "resume", "unpause", "go"}
 
 _EMPTY_TWIML = "<?xml version='1.0' encoding='UTF-8'?><Response></Response>"
 
