@@ -19,6 +19,8 @@ const nextConfig = {
       // W4 (pivot) — connect/waitlist endpoints.
       { source: '/api/waitlist', destination: `${backend}/api/waitlist` },
       { source: '/api/ibkr/:path*', destination: `${backend}/api/ibkr/:path*` },
+      // W6.3 (pivot) — public brief permalink.
+      { source: '/api/brief/:token', destination: `${backend}/api/brief/:token` },
     ];
   },
 };
