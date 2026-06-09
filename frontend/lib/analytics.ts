@@ -9,6 +9,19 @@ import posthog from 'posthog-js';
 
 let initialized = false;
 
+// SECURITY (W6.2b): the Supabase magic-link redirect lands with the session in the
+// URL — `…/connect#access_token=…&refresh_token=…` (implicit flow) or `?code=…`
+// (PKCE). PostHog's auto-pageview records the full URL, so without this those
+// CREDENTIALS (incl. the long-lived refresh_token) would be sent to PostHog —
+// observed live. `scrubUrl` drops the fragment and redacts auth query params; it's
+// applied to every event's URL props via `sanitize_properties` below.
+const _AUTH_QS = /([?&](?:access_token|refresh_token|code|token|id_token|provider_token|expires_at|expires_in)=)[^&#]*/gi;
+
+export function scrubUrl(u: unknown): unknown {
+  if (typeof u !== 'string' || !u) return u;
+  return u.split('#')[0].replace(_AUTH_QS, '$1[redacted]'); // drop fragment; redact auth query
+}
+
 export function initAnalytics() {
   if (initialized) return;
   if (typeof window === 'undefined') return;
@@ -19,6 +32,13 @@ export function initAnalytics() {
     api_host: host,
     capture_pageview: true,
     persistence: 'localStorage',
+    // Strip auth tokens out of any URL property before it leaves the browser.
+    sanitize_properties: (props) => {
+      for (const k of ['$current_url', '$referrer', '$pathname', '$initial_current_url']) {
+        if (k in props) props[k] = scrubUrl(props[k]);
+      }
+      return props;
+    },
   });
   initialized = true;
 }

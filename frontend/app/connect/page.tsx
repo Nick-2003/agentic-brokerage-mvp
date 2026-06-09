@@ -40,11 +40,19 @@ export default function ConnectPage() {
   const [token, setToken] = useState<string | null>(null);
   const [conn, setConn] = useState<Connection | null>(null);
   const [editing, setEditing] = useState(false);
+  // Has the connection lookup finished? Gates the connect UI so `ConnectForm`
+  // (and its `connect_started` event) never renders during the load race — i.e.
+  // it won't fire for an ALREADY-connected user before getConnection() resolves.
+  const [connLoaded, setConnLoaded] = useState(false);
 
   const loadConnection = useCallback(async () => {
     const t = await getAccessToken();
     setToken(t);
-    if (t) setConn(await getConnection(t));
+    try {
+      setConn(t ? await getConnection(t) : null);
+    } finally {
+      setConnLoaded(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -64,6 +72,7 @@ export default function ConnectPage() {
       else {
         setToken(null);
         setConn(null);
+        setConnLoaded(false);
       }
     });
     return () => {
@@ -103,6 +112,10 @@ export default function ConnectPage() {
           </Card>
         ) : !session ? (
           <SignInCard />
+        ) : !connLoaded ? (
+          <Card>
+            <p className="text-[13px] text-text-3">Loading your connection…</p>
+          </Card>
         ) : conn && !editing ? (
           <ConnectionCard
             conn={conn}
