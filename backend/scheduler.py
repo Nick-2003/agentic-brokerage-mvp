@@ -30,6 +30,7 @@ from typing import Any
 
 import briefing
 import connections
+import published_briefs
 import whatsapp
 
 log = logging.getLogger(__name__)
@@ -38,6 +39,9 @@ log = logging.getLogger(__name__)
 _RETRY_DELAYS = [int(x) for x in os.getenv("BRIEFING_RETRY_DELAYS", "3,8").split(",") if x.strip()]
 # Cost ceiling: max users (≈ max Claude calls) per run.
 _MAX_USERS = int(os.getenv("BRIEFING_MAX_USERS_PER_RUN", "100"))
+# W6.3 — publish each brief to a web permalink and append the link to the message.
+# Best-effort: a publish failure never blocks the send (we just send without a link).
+_PUBLISH = os.getenv("PUBLISH_BRIEFS", "1") != "0"
 
 
 async def _with_retries(factory, *, label: str):
@@ -77,11 +81,29 @@ async def _process_one(c: dict, *, dry_run: bool) -> dict:
     base = {"user_id": uid, "account_id": brief.get("account_id"), "as_of": brief.get("as_of")}
     if dry_run:
         return {**base, "status": "built", "chars": len(brief.get("text") or "")}
-    send = await _with_retries(lambda: whatsapp.send_briefing(brief, to), label=f"send:{uid}")
+
+    # W6.3 — publish the brief to a web permalink (best-effort) + append the link
+    # to the outgoing message. The STORED body is the original brief (no link line).
+    text = brief.get("text") or ""
+    permalink: str | None = None
+    if _PUBLISH:
+        try:
+            pub = await published_briefs.publish_brief(
+                uid, text, account_id=brief.get("account_id"), as_of=brief.get("as_of")
+            )
+            permalink = pub["permalink"]
+        except Exception as e:  # noqa: BLE001 — never block the send on a publish failure
+            log.warning("publish_brief failed for %s: %s", uid, e)
+    send_brief = brief
+    if permalink:
+        send_brief = {**brief, "text": f"{text}\n\n📄 View this brief on the web: {permalink}"}
+
+    send = await _with_retries(lambda: whatsapp.send_briefing(send_brief, to), label=f"send:{uid}")
     status = send.get("status") or "sent"
     await _safe_log(uid, status=status, account_id=brief.get("account_id"),
                     as_of=brief.get("as_of"), provider_id=send.get("sid"))
-    return {**base, "status": status, "sid": send.get("sid"), "is_mock": send.get("is_mock")}
+    return {**base, "status": status, "sid": send.get("sid"),
+            "is_mock": send.get("is_mock"), "permalink": permalink}
 
 
 async def run_daily_briefings(*, dry_run: bool = False, max_users: int | None = None) -> dict:

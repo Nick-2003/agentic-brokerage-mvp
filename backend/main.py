@@ -41,6 +41,7 @@ from sse_starlette.sse import EventSourceResponse
 load_dotenv()
 
 # Import agent AFTER load_dotenv so module-level env reads work
+import brief_api  # noqa: E402  (W6.3 — public brief permalink GET /api/brief/{token})
 import connections  # noqa: E402  (W4 — connect/waitlist storage diagnostics)
 import db  # noqa: E402
 import memory  # noqa: E402
@@ -74,6 +75,8 @@ app.add_middleware(
 app.include_router(waitlist_api.router)
 # W6 (pivot) — Twilio inbound STOP/START webhook (POST /api/twilio/inbound).
 app.include_router(webhooks.router)
+# W6.3 (pivot) — public brief permalink (GET /api/brief/{token}).
+app.include_router(brief_api.router)
 
 
 # ---------------------------------------------------------------------------
