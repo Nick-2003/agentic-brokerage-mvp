@@ -48,6 +48,9 @@ async def _with_retries(factory, *, label: str):
             return await factory()
         except Exception as e:  # noqa: BLE001 — transient build/send errors
             last = e
+            # Don't burn the backoff on a permanent failure (bad number, opted-out).
+            if not getattr(e, "retryable", True):
+                raise
             if i < len(_RETRY_DELAYS):
                 log.info("retry %s in %ss after: %s", label, _RETRY_DELAYS[i], e)
                 await asyncio.sleep(_RETRY_DELAYS[i])
@@ -111,6 +114,21 @@ async def run_daily_briefings(*, dry_run: bool = False, max_users: int | None = 
             summary["built" if r["status"] == "built" else "sent"] += 1
             summary["results"].append(r)
         except Exception as e:  # noqa: BLE001 — isolate this user; keep going
+            # Recipient opted out (texted STOP) → mirror it: flip opt_in off so
+            # this is the last attempt, and count it as skipped (not a failure).
+            if isinstance(e, whatsapp.WhatsAppError) and e.code == "whatsapp_recipient_opted_out":
+                num = c.get("whatsapp_number")
+                if num:
+                    try:
+                        await connections.set_opt_in_by_whatsapp(num, False)
+                    except Exception as flip_err:  # noqa: BLE001
+                        log.warning("opt-out flip failed for %s: %s", uid, flip_err)
+                summary["skipped"] += 1
+                summary["results"].append({"user_id": uid, "status": "opted_out"})
+                if not dry_run:
+                    await _safe_log(uid, status="skipped", error="recipient_opted_out")
+                log.info("recipient opted out, opt_in flipped off: %s", uid)
+                continue
             summary["failed"] += 1
             summary["results"].append({"user_id": uid, "status": "failed", "error": str(e)[:300]})
             if not dry_run:

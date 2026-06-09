@@ -37,12 +37,32 @@ log = logging.getLogger(__name__)
 _MAX_BODY = 1600
 _E164 = re.compile(r"^\+\d{6,15}$")
 
+# Twilio error codes that mean "recipient has opted out / is blocked" — the user
+# texted STOP (Twilio intercepts the keyword + blocks the number, so we learn of
+# it HERE on the send, not via the inbound webhook). 21610 = opted-out across
+# channels; 63024 = WhatsApp recipient can't receive. Confirm/extend on the first
+# real opted-out send (verify-against-live-dependency). Configurable.
+_OPTED_OUT_CODES = {
+    c.strip() for c in os.getenv("TWILIO_OPTED_OUT_CODES", "21610,63024").split(",") if c.strip()
+}
+# Error codes whose retry is pointless (permanent) — the W5 scheduler reads
+# `WhatsAppError.retryable` to skip backoff on these.
+_NON_RETRYABLE_CODES = {
+    "whatsapp_bad_recipient", "whatsapp_empty_body", "whatsapp_body_too_long",
+    "whatsapp_twilio_not_installed", "whatsapp_recipient_opted_out",
+}
+
 
 class WhatsAppError(Exception):
-    """Any WhatsApp send/validation failure. Surfaced to W5 for retry/logging."""
+    """Any WhatsApp send/validation failure. Surfaced to W5 for retry/logging.
+
+    `retryable` is False for permanent failures (bad number, opted-out, …) so the
+    scheduler doesn't waste its backoff budget re-attempting them.
+    """
 
     def __init__(self, message: str, code: str = "whatsapp_send_failed") -> None:
         self.code = code
+        self.retryable = code not in _NON_RETRYABLE_CODES
         super().__init__(message)
 
 
@@ -131,6 +151,16 @@ async def send_whatsapp(to: str, body: str) -> dict[str, Any]:
             code="whatsapp_twilio_not_installed",
         ) from e
     except Exception as e:  # noqa: BLE001 — wrap any Twilio/transport error
+        # Recipient opted out (texted STOP — Twilio intercepted the keyword + now
+        # blocks the number). This is how we LEARN of a STOP (the webhook never
+        # sees it). Distinct, non-retryable code so W5 flips opt_in instead of
+        # retrying. Match by Twilio error code or message text (defensive).
+        code = str(getattr(e, "code", "") or "")
+        low = str(e).lower()
+        if code in _OPTED_OUT_CODES or "opted out" in low or "unsubscrib" in low:
+            raise WhatsAppError(
+                f"recipient opted out: {e}", code="whatsapp_recipient_opted_out"
+            ) from e
         raise WhatsAppError(f"Twilio send failed: {e}") from e
     return {
         "is_mock": False,
