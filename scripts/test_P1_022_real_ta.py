@@ -16,10 +16,6 @@ contract that:
 
 Run (after applying 022, from repo root):
     backend/.venv/bin/python scripts/test_P1_022_real_ta.py
-
-Pre-apply (against the proposed copy):
-    PYTHONPATH=proposed_changes/022-real-mode-ta-fallbacks/backend:backend \
-        backend/.venv/bin/python proposed_changes/022-real-mode-ta-fallbacks/scripts/test_P1_022_real_ta.py
 """
 
 from __future__ import annotations
@@ -52,7 +48,7 @@ _REPO_ROOT = _find_repo_root()
 # resolve, while the OTHER tools modules + mcp_client come from the live tree.
 _LIVE_BACKEND = _REPO_ROOT / "backend"
 _PROPOSED_TECH = (
-    _REPO_ROOT / "proposed_changes/022-real-mode-ta-fallbacks/backend/tools/technicals.py"
+    _REPO_ROOT / "backend/tools/technicals.py"
 )
 
 _TMP = Path(tempfile.mkdtemp(prefix="ta022_"))

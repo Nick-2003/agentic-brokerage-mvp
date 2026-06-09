@@ -9,9 +9,6 @@ sub-call shapes.
 
 Run (after applying 023):
     backend/.venv/bin/python scripts/test_P1_023_tv_mcp_parser.py
-
-Pre-apply:
-    backend/.venv/bin/python proposed_changes/023-tv-mcp-real-shapes/scripts/test_P1_023_tv_mcp_parser.py
 """
 
 from __future__ import annotations
@@ -37,7 +34,7 @@ def _find_repo_root() -> Path:
 _REPO_ROOT = _find_repo_root()
 _LIVE_BACKEND = _REPO_ROOT / "backend"
 _PROPOSED_TECH = (
-    _REPO_ROOT / "proposed_changes/023-tv-mcp-real-shapes/backend/tools/technicals.py"
+    _REPO_ROOT / "backend/tools/technicals.py"
 )
 
 # Stage the proposed file over a temp copy of the live tools/ package so the

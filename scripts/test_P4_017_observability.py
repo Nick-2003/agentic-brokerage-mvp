@@ -9,10 +9,6 @@ agent loop integration is shape-safe (a fake tracer is exercised against
 
 Run (after applying 017, from repo root):
     backend/.venv/bin/python scripts/test_P4_017_observability.py
-
-Pre-apply (against the proposed copy):
-    PYTHONPATH=proposed_changes/017-langfuse-observability/backend \
-        backend/.venv/bin/python proposed_changes/017-langfuse-observability/scripts/test_P4_017_observability.py
 """
 
 from __future__ import annotations

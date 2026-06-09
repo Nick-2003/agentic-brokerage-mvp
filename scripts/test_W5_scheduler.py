@@ -5,7 +5,7 @@ Covers: happy path + delivery logging, per-user failure isolation (build & send)
 tokenless/decrypt-failed skip, retry-then-succeed + retry-exhausted, dry-run
 (build only, no send/log), and the cost cap.
 
-    backend/.venv/bin/python proposed_changes/W5-scheduler/scripts/test_W5_scheduler.py
+    backend/.venv/bin/python scripts/test_W5_scheduler.py
 """
 from __future__ import annotations
 

@@ -1,7 +1,6 @@
 """Offline test for W1 — IBKR Flex connector. Fully offline (stubs `_http_get`).
 
-    backend/.venv/bin/python proposed_changes/W1-ibkr-flex-connector/scripts/test_W1_ibkr_flex.py
-    # (or, once applied:  backend/.venv/bin/python scripts/test_W1_ibkr_flex.py)
+    backend/.venv/bin/python scripts/test_W1_ibkr_flex.py
 """
 
 from __future__ import annotations

@@ -13,9 +13,6 @@ applied schema).
 Run (after applying 016, from repo root):
     backend/.venv/bin/python scripts/test_P4_016_persistence.py
 
-Pre-apply (against the proposed copy):
-    PYTHONPATH=proposed_changes/016-supabase-persistence-rls/backend \
-        backend/.venv/bin/python proposed_changes/016-supabase-persistence-rls/scripts/test_P4_016_persistence.py
 """
 
 from __future__ import annotations

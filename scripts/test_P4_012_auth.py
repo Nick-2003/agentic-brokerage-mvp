@@ -7,10 +7,6 @@ and asserts verification + the REQUIRE_AUTH policy behave correctly.
 
 Run (after applying 012, from repo root):
     backend/.venv/bin/python scripts/test_P4_012_auth.py
-
-While drafting (before apply), point it at the proposed auth.py:
-    PYTHONPATH=proposed_changes/012-supabase-magic-link-auth/backend \
-        backend/.venv/bin/python proposed_changes/012-supabase-magic-link-auth/scripts/test_P4_012_auth.py
 """
 
 from __future__ import annotations

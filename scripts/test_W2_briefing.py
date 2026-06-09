@@ -4,8 +4,7 @@ Covers: facts computation (base-ccy P&L, mover ordering, %s), the mock template
 render, the mock-gate truth table, the real-LLM plumbing with a stubbed client,
 and build_briefing() end-to-end over the W1 mock fixture.
 
-    backend/.venv/bin/python proposed_changes/W2-briefing-generator/scripts/test_W2_briefing.py
-    # (or, once applied:  backend/.venv/bin/python scripts/test_W2_briefing.py)
+    backend/.venv/bin/python scripts/test_W2_briefing.py
 """
 from __future__ import annotations
 

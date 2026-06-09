@@ -5,8 +5,7 @@ secret). Proves encryption-at-rest, the token never leaving via user reads, the
 RLS-vs-service-key split (by which client builder each function uses), the cron
 read decrypting + filtering, and crypto round-trip / fail-closed.
 
-    backend/.venv/bin/python proposed_changes/W4-storage-connect/scripts/test_W4_connections.py
-    # (or, once applied:  backend/.venv/bin/python scripts/test_W4_connections.py)
+    backend/.venv/bin/python scripts/test_W4_connections.py
 """
 from __future__ import annotations
 

@@ -1,8 +1,7 @@
 """Offline test for W3 — WhatsApp delivery. Fully offline; does NOT require the
 `twilio` package (the real path is reached only via a stubbed `_make_client`).
 
-    backend/.venv/bin/python proposed_changes/W3-whatsapp-delivery/scripts/test_W3_whatsapp.py
-    # (or, once applied:  backend/.venv/bin/python scripts/test_W3_whatsapp.py)
+    backend/.venv/bin/python scripts/test_W3_whatsapp.py
 """
 from __future__ import annotations
 

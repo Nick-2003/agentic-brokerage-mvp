@@ -126,6 +126,24 @@ async def set_opt_in(user_jwt: str, user_id: str, opt_in: bool) -> dict[str, Any
 # System-facing (W5 cron) — service key, bypasses RLS. Decrypts the token.
 # ---------------------------------------------------------------------------
 
+async def set_opt_in_by_whatsapp(whatsapp_number: str, opt_in: bool) -> int:
+    """Flip opt_in for every connection on a WhatsApp number. SERVICE KEY — used
+    by the inbound STOP/START webhook (W6), which has no user JWT (Twilio calls
+    it; the number is the identity). Returns the number of rows updated.
+
+    `.eq("whatsapp_number", …)` is required (PostgREST mass-update guard). Honors
+    STOP regardless of which user owns the number (one phone, one consent state).
+    """
+    c = await _admin_client()
+    res = (
+        await c.table("ibkr_connections")
+        .update({"opt_in": opt_in})
+        .eq("whatsapp_number", whatsapp_number)
+        .execute()
+    )
+    return len(res.data or [])
+
+
 async def list_active_connections_admin() -> list[dict[str, Any]]:
     """Every opted-in, active connection WITH the decrypted Flex token + query id —
     what the W5 cron iterates to fetch holdings (W1) and send (W3). SERVICE KEY.
