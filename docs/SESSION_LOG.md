@@ -927,3 +927,33 @@ Acted on the prior session's "next decision": drafted **`proposed_changes/P6-dep
 **Decisions/notes:** P6 is **operator-applied** — the actual cloud steps (create services, set secrets, point Twilio) need Nicholas's accounts; my deliverable is the apply-ready configs + runbook. Cron exits 0 even on per-user failures (monitor `briefing_deliveries` for `failed`); richer exit-code alerting would need `scripts/` added to a cron image — noted, not done.
 
 **Next:** **W6.5 per-user cost caps** is the recommended next *build* (small, unblocked, offline-testable — adds daily-send idempotency so a cron misfire/retry can't double-bill a user, on top of the coarse `BRIEFING_MAX_USERS_PER_RUN`). **W6.4** (Business sender + templates) stays **Meta-gated** — start verification in parallel; it slots in post-deploy with only Twilio config + a template-SID env, no topology change.
+
+---
+
+## 2026-06-10 (later) · P6 DEPLOYED LIVE — the whole pivot loop runs in production 🎯
+
+The deploy went all the way: Nicholas applied the P6 proposal and stood up **Railway (backend web + briefing cron) + Vercel (frontend) + Supabase**, and the full `land → connect IBKR → daily WhatsApp brief` loop now runs against real cloud infra. Every failure surfaced **only on the live deploy** (builds/images were always fine) — the same "verify against the live dependency" lesson as 002/006/025, now applied to infra. Six real-run fixes, each diagnosed from the actual logs Nicholas pasted:
+
+**Backend (Railway web service) — two boot crashes, both `Network › Healthcheck` "service unavailable":**
+1. **No writable HOME.** `useradd` ran without `--create-home`, so `/home/app` didn't exist → `uv run` couldn't create its cache under `$HOME/.cache/uv` → crash before binding the port. Fix in `Dockerfile`: `useradd --create-home` + `ENV UV_NO_CACHE=1` (the venv is fully built at image time, so the runtime cache is pure liability).
+2. **Unexpanded `${PORT}`.** `railway.json`'s `startCommand` overrides the Dockerfile `CMD`, and Railway runs the override in **exec form (no shell)** → `--port ${PORT:-8000}` reached uvicorn as the literal string → `invalid integer` crash. Fix: **drop `startCommand` from `railway.json`** so the Dockerfile `CMD` (`["sh","-c", …]`, which expands `$PORT`) runs. Backend then live — `Uvicorn running on 0.0.0.0:8080`, `/healthz 200` (all flags true; Railway injected `PORT=8080`).
+
+**Frontend (Vercel) — one build failure:**
+3. **Scheme-less `NEXT_PUBLIC_API_URL`.** `next build` failed `Error: Invalid rewrites found` — `next.config.js` interpolates the env var into rewrite destinations, and a bare host (`…railway.app`, no `https://`) violates Next's `/`-or-`http(s)://` rule. Fix: set the Vercel var to `https://…` **and** harden `next.config.js` (real-run fix #3) to auto-prepend `https://` + strip a trailing slash so it can't recur. Also required **Root Directory = `frontend`** (no root `package.json`) + **Node 22**. Frontend then live — `/connect` + `/` return 200.
+
+**Supabase + auth — two config gotchas (no code change):**
+4. **"Invalid API key" red herring.** My first validation test (`curl /rest/v1/` with the anon key) was wrong — that root endpoint is **`service_role`-only**, so a *valid* anon key returns "Invalid API key / only service_role" there. Corrected test: `GET /auth/v1/settings` with the anon key (→ 200 = valid). The anon key was fine all along; the swagger dump also confirmed all 8 tables migrated.
+5. **Magic link redirected to `localhost:3000`.** Supabase **Site URL** was still `http://localhost:3000`, and the code's requested `emailRedirectTo: window.location.href` (the Vercel `/connect`) **wasn't in the Redirect URLs allow-list** → Supabase silently fell back to the Site URL. Fix (Auth → URL Configuration): Site URL = the Vercel origin + add `<vercel>/**` to Redirect URLs (kept `localhost:3000/**` for dev). Sign-in then worked.
+
+**Cron + delivery:**
+6. **WhatsApp "queued" but never delivered.** A manual run (`scripts/run_briefings.py --max-users 1`) reported `sent:1`, real Twilio `sid`, `is_mock:false` — the whole pipeline (IBKR fetch → Claude brief → Twilio accept) worked. But `queued` is the *creation* status; delivery is async and silently failed on the **Sandbox 24-hour window** (freeform only within 24 h of the recipient's last inbound). Re-sending `join <phrase>` to the sandbox reopened it → the brief landed on the phone. (This window limit is exactly what W6.4 templates remove.)
+
+Also clarified, not bugs: Railway **cron runs only on its UTC schedule** (no "Run now"; config-as-code overrides the dashboard schedule; a redeploy doesn't fire it) — manual test via local run / near-future `cronSchedule` / `railway run`; and the **public domain is generated** (Settings → Networking), it isn't auto-assigned, and serves only once a deploy is healthy.
+
+**Decisions/notes:**
+- **Locked split confirmed in practice:** Railway = backend web + cron (2nd service, `python -m scheduler`, **no public trigger endpoint** — threat 1); Vercel = frontend. Not an either/or.
+- **`/healthz` `*_configured` flags are presence checks, not validity** — a present-but-wrong key passes health and fails at runtime (bit us on the Supabase key hunt).
+- All six fixes folded into the `proposed_changes/P6-deploy/` proposal (`Dockerfile`, `railway.json`, `next.config.js` are now edits, not "verified unchanged"); `docs/DEPLOY.md` gained a full **Troubleshooting** section (each gotcha above), a corrected anon-key validation test, the "generate the domain" step, and the cron-trigger methods. `STATUS.md` row marked **✅ STACK LIVE**.
+- **Local-run caveat that mattered:** the manual run only picks up a connection made via the deployed site if local `.env` shares the same Supabase project **and the same `FLEX_TOKEN_ENC_KEY`** (else the row is undecryptable → skipped). And the local run's permalink is `localhost` because local `PUBLIC_BASE_URL` is localhost — the Railway cron uses the Vercel origin.
+
+**Status: P6 fully deployed & live-verified end-to-end.** A real IBKR portfolio → Claude narrative → WhatsApp delivery, for a user who self-onboarded through the deployed `/connect`. **Next:** **W6.5 per-user cost caps** (daily-send idempotency — recommended next build); **W6.4** Business sender + templates (Meta-gated, removes the 24 h window); and operator polish (set the Railway cron's `PUBLIC_BASE_URL` to the Vercel origin; point Twilio webhook/status URLs at the Railway backend).
