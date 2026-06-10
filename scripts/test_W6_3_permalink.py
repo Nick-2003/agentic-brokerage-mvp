@@ -3,7 +3,7 @@ offline (stubbed Supabase admin client; no DB). Covers publish (token + payload)
 get (hit / miss / EXPIRED), the public GET /api/brief/{token} (200 / 404), and the
 scheduler publishing + appending the permalink to the sent body.
 
-    backend/.venv/bin/python proposed_changes/W6.3-permalink/scripts/test_W6_3_permalink.py
+    backend/.venv/bin/python scripts/test_W6_3_permalink.py
 """
 from __future__ import annotations
 
