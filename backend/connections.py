@@ -171,6 +171,31 @@ async def list_active_connections_admin() -> list[dict[str, Any]]:
     return out
 
 
+async def already_delivered_since_admin(user_id: str, *, since_iso: str) -> bool:
+    """True if this user already has a *successful* briefing delivery
+    (status ``sent``/``queued``) logged at or after ``since_iso`` (ISO-8601 UTC).
+
+    The W6.5 cost-cap idempotency probe — the scheduler calls it *before* building
+    a brief, so a cron misfire / retry / double-run skips the user instead of
+    re-spending an IBKR fetch + a Claude call + a duplicate WhatsApp message.
+
+    Counts ONLY ``sent``/``queued`` — a prior ``failed``/``skipped`` must not block
+    a genuine retry. ``limit(1)`` keeps it a presence check. SERVICE KEY (same admin
+    access model as ``log_delivery_admin``; never run from a user request).
+    """
+    c = await _admin_client()
+    res = (
+        await c.table("briefing_deliveries")
+        .select("id")
+        .eq("user_id", user_id)
+        .in_("status", ["sent", "queued"])
+        .gte("created_at", since_iso)
+        .limit(1)
+        .execute()
+    )
+    return bool(res.data)
+
+
 async def log_delivery_admin(
     user_id: str,
     *,

@@ -44,10 +44,14 @@ async def main() -> int:
     ap = argparse.ArgumentParser(description="Run the daily WhatsApp briefing job.")
     ap.add_argument("--dry-run", action="store_true", help="build briefs but DON'T send or log")
     ap.add_argument("--max-users", type=int, default=None, help="cap users this run (cost ceiling)")
+    ap.add_argument("--force", action="store_true",
+                    help="bypass the W6.5 resend-window guard (intentional re-send / manual test)")
     args = ap.parse_args()
 
     try:
-        summary = await scheduler.run_daily_briefings(dry_run=args.dry_run, max_users=args.max_users)
+        summary = await scheduler.run_daily_briefings(
+            dry_run=args.dry_run, max_users=args.max_users, force=args.force
+        )
     except Exception as e:  # noqa: BLE001 — couldn't even read the connection list
         print(f"run aborted: {type(e).__name__}: {e}", file=sys.stderr)
         return 1

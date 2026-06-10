@@ -957,3 +957,15 @@ Also clarified, not bugs: Railway **cron runs only on its UTC schedule** (no "Ru
 - **Local-run caveat that mattered:** the manual run only picks up a connection made via the deployed site if local `.env` shares the same Supabase project **and the same `FLEX_TOKEN_ENC_KEY`** (else the row is undecryptable → skipped). And the local run's permalink is `localhost` because local `PUBLIC_BASE_URL` is localhost — the Railway cron uses the Vercel origin.
 
 **Status: P6 fully deployed & live-verified end-to-end.** A real IBKR portfolio → Claude narrative → WhatsApp delivery, for a user who self-onboarded through the deployed `/connect`. **Next:** **W6.5 per-user cost caps** (daily-send idempotency — recommended next build); **W6.4** Business sender + templates (Meta-gated, removes the 24 h window); and operator polish (set the Railway cron's `PUBLIC_BASE_URL` to the Vercel origin; point Twilio webhook/status URLs at the Railway backend).
+
+---
+
+## 2026-06-10 (later still) · W6.5 — per-user cost caps (daily-send idempotency)
+
+Drafted `proposed_changes/W6.5-cost-caps/` — the recommended post-deploy build. Closes the gap the live P6 run exposed: `BRIEFING_MAX_USERS_PER_RUN` only caps *per run*, so a second run in a day (a manual test + the scheduled cron, or an operator re-running `run_briefings.py`) would re-spend an IBKR fetch + a Claude call **and** double-message the user.
+
+**What:** new `connections.already_delivered_since_admin(user_id, since_iso)` — a service-key presence check on `briefing_deliveries` (`status ∈ {sent,queued}` only, so a prior `failed`/`skipped` never blocks a retry; `limit(1)`). `scheduler.run_daily_briefings` calls it **before building** each brief (via `_recently_delivered`, window = now − `BRIEFING_MIN_RESEND_HOURS`); a hit logs `skipped`/`already_sent_recently` and `continue`s — saving the fetch + Claude + send. `--force`/`force=` bypasses; `BRIEFING_DEDUP=0` disables; dry-run ignores it (it's for testing the build).
+
+**Design calls:** (1) **time-window, not calendar-day** — default **12 h** sits between a minutes-apart retry (caught) and the ~24 h next daily run (allowed), dodging the midnight-UTC edge a calendar-day key would have. (2) **Pre-build skip** (not post-build) — that's where the Claude cost is, so the guard runs before the fetch. (3) **Fail-open** — if the dedup probe errors, the send proceeds (a missed brief is worse than a rare duplicate), logged WARNING; matches the scheduler's isolate-and-continue posture. (4) **`sent`/`queued` only** in the count — a previously-failed delivery must still be retryable.
+
+**Verified:** offline **17/17** (skip-before-build, fresh-sends, dry-run-ignores, --force-bypasses, DEDUP=0-disables, probe-error-fail-open, query-wired-and-async). `py_compile` clean; live files untouched (proposal copies edited). Built the safe way — `cp` live files into the proposal, edit *those*, test resolves the proposal backend first (the multi-backend-on-`sys.path` pattern). **Apply:** `cp` the 4 files (no `uv sync`); live-verify by running `--max-users 1` twice (2nd → `skipped`). **Remaining W6:** W6.4 (Meta-gated templates) + operator polish from P6.
