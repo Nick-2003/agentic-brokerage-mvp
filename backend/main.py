@@ -46,6 +46,7 @@ import connections  # noqa: E402  (W4 — connect/waitlist storage diagnostics)
 import db  # noqa: E402
 import memory  # noqa: E402
 import observability  # noqa: E402
+import security  # noqa: E402  (W6.6 — rate limit + security headers)
 import waitlist_api  # noqa: E402  (W4 — IBKR connect + waitlist router)
 import webhooks  # noqa: E402  (W6 — Twilio inbound STOP/START webhook)
 from agent import MODEL, run_agent  # noqa: E402
@@ -70,6 +71,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# W6.6 — rate limit (per-IP, guards /api/* except the Twilio webhooks + /healthz)
+# + security headers. Pure-ASGI so it doesn't buffer/break the /api/chat SSE stream.
+# Added after CORS → outermost: rejects abusive requests before the app, and adds
+# headers on the way out without clobbering CORS's. No-ops with RATE_LIMIT_ENABLED=0.
+app.add_middleware(security.SecurityMiddleware)
 
 # W4 (pivot) — IBKR connect + waitlist routes (POST /api/ibkr/connect, etc.).
 app.include_router(waitlist_api.router)
