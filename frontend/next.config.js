@@ -1,6 +1,12 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // 032b: isomorphic-dompurify (the widget SafeHtml sanitizer) pulls in jsdom,
+  // whose runtime asset `default-stylesheet.css` doesn't survive Next's server
+  // bundling → the `/` prerender crashed with `ENOENT … default-stylesheet.css`.
+  // Mark them as external server packages so they're loaded from node_modules
+  // (where the asset lives) at build/prerender time instead of being bundled.
+  serverExternalPackages: ['isomorphic-dompurify', 'jsdom'],
   // Allow image domains for any chart screenshots we host on Supabase
   images: {
     remotePatterns: [
@@ -10,7 +16,12 @@ const nextConfig = {
   },
   // Proxy backend during local dev so we can use /api/* without CORS pain
   async rewrites() {
-    const backend = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    // 033: tolerate a scheme-less NEXT_PUBLIC_API_URL (e.g. "foo.up.railway.app",
+    // easy to paste from a Railway domain). Next requires rewrite destinations to
+    // start with `/`, `http://`, or `https://`; a bare host fails `next build` with
+    // "Error: Invalid rewrites found". Default to https:// + strip a trailing slash.
+    const raw = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    const backend = (/^https?:\/\//.test(raw) ? raw : `https://${raw}`).replace(/\/+$/, '');
     return [
       { source: '/api/chat', destination: `${backend}/api/chat` },
       { source: '/api/healthz', destination: `${backend}/healthz` },
