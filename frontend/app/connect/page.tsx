@@ -417,7 +417,7 @@ function ConnectForm({
           label="Flex query ID"
           value={queryId}
           onChange={(e) => setQueryId(e.target.value)}
-          placeholder="e.g. 1535270"
+          placeholder="e.g. 1234567"
           inputMode="numeric"
         />
         <Field
