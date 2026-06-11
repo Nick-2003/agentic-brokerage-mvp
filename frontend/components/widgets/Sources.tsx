@@ -1,3 +1,4 @@
+import DOMPurify from 'isomorphic-dompurify';
 import type { Source } from '@/lib/widgets';
 
 export function Sources({ sources }: { sources: Source[] }) {
@@ -23,20 +24,17 @@ export function Sources({ sources }: { sources: Source[] }) {
   );
 }
 
-// Shared safe HTML — allow ONLY the bare tags <strong>, </strong>, <em>, </em>.
-// Any tag carrying attributes (e.g. <strong onclick="...">) is stripped wholesale,
-// so event-handler XSS cannot ride in on an allowed tag name. Anything else is
-// stripped too. Stray angle-brackets in text are then escaped.
-//
-// Security note: the previous version used `\b` in the lookahead, which let
-// `<strong onclick="evil()">` survive because `strong\b` still matched. The `>`
-// terminator below requires the tag to be EXACTLY `<strong>` / `<em>` / closers.
+// Shared safe HTML for widget rich-text. P5 (032): the sanitizer is now the
+// industry-standard **DOMPurify** (isomorphic — works in the browser and during
+// any SSR/prerender) instead of a hand-rolled regex. Same strict allowlist as
+// before — ONLY the inline emphasis tags the widgets actually use, and NO
+// attributes — so e.g. `<strong onclick="…">` can't ride in on an allowed tag,
+// and `<script>`/`<img onerror>`/`javascript:` links are dropped. DOMPurify
+// handles the malformed-markup / mXSS edge cases a regex can't.
+const _SANITIZE = { ALLOWED_TAGS: ['strong', 'em'], ALLOWED_ATTR: [] };
+
 export function SafeHtml({ html, className }: { html: string; className?: string }) {
-  const cleaned = (html ?? '')
-    // Drop any tag that is not exactly <strong> </strong> <em> </em>
-    .replace(/<(?!\/?(?:strong|em)>)[^>]*>/gi, '')
-    // Escape any leftover lone '<' or '>' so they render as literal text
-    .replace(/<(?!\/?(?:strong|em)>)/gi, '&lt;');
+  const cleaned = DOMPurify.sanitize(html ?? '', _SANITIZE);
   return <span className={className} dangerouslySetInnerHTML={{ __html: cleaned }} />;
 }
 
