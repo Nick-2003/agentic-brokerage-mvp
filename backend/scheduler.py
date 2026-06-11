@@ -103,9 +103,11 @@ async def _process_one(c: dict, *, dry_run: bool) -> dict:
             permalink = pub["permalink"]
         except Exception as e:  # noqa: BLE001 — never block the send on a publish failure
             log.warning("publish_brief failed for %s: %s", uid, e)
-    send_brief = brief
+    # Pass the raw permalink through so W6.4's template path can use it as a
+    # variable; also append it to the freeform text for the Sandbox/no-template path.
+    send_brief = {**brief, "permalink": permalink}
     if permalink:
-        send_brief = {**brief, "text": f"{text}\n\n📄 View this brief on the web: {permalink}"}
+        send_brief["text"] = f"{text}\n\n📄 View this brief on the web: {permalink}"
 
     send = await _with_retries(lambda: whatsapp.send_briefing(send_brief, to), label=f"send:{uid}")
     status = send.get("status") or "sent"
