@@ -8,7 +8,7 @@ fetch / Claude / send); a fresh user sends normally; dry-run ignores the guard
 probe failing is FAIL-OPEN (send proceeds). Also asserts the new connections
 query is wired (awaitable, present).
 
-    backend/.venv/bin/python proposed_changes/W6.5-cost-caps/scripts/test_W6_5_cost_caps.py
+    backend/.venv/bin/python scripts/test_W6_5_cost_caps.py
 """
 from __future__ import annotations
 

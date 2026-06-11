@@ -14,10 +14,14 @@ Mock-first, same discipline as every other client:
   • real path → Twilio `messages.create`; failure raises `WhatsAppError` (no
     silent swallow — same rule as `IBKRFlexError` / `BriefingError`).
 
-Phase: this targets the Twilio **Sandbox** (freeform text to opted-in numbers —
-fine for the validation cohort and a ~700-char narrative). The production path
-(registered WhatsApp Business sender + approved templates for business-initiated
-sends outside the 24h window) is a W6 task; see `self_management/TWILIO_SETUP.md`.
+Phase: freeform text targets the Twilio **Sandbox** (opted-in numbers, ~700-char
+narrative). **W6.4** adds the production **template** path: when
+`TWILIO_BRIEF_TEMPLATE_SID` is set, `send_briefing` sends an approved Content
+template (a short hook + the W6.3 permalink as variables) instead of freeform —
+required for business-initiated sends outside the 24h window via a registered
+Business sender. The path is **flag-gated on the template SID's presence**: unset
+(Sandbox / today) → freeform exactly as before; set → template. The full narrative
+always lives at the permalink. See `self_management/WHATSAPP_BUSINESS_SENDER.md`.
 
 `twilio` is an OPTIONAL dep group (`uv sync --group whatsapp`) — mirrors the
 `memory` group so the default install / chat backend stays lean.
@@ -25,9 +29,11 @@ sends outside the 24h window) is a W6 task; see `self_management/TWILIO_SETUP.md
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
+from datetime import datetime
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -107,34 +113,58 @@ def _make_client(sid: str, token: str):  # noqa: ANN202 — twilio Client (lazy 
     return Client(sid, token)
 
 
-async def send_whatsapp(to: str, body: str) -> dict[str, Any]:
+async def send_whatsapp(
+    to: str,
+    body: str = "",
+    *,
+    content_sid: str | None = None,
+    content_variables: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Send (or, in mock mode, log) one WhatsApp message.
 
+    Two modes:
+      • **freeform** (default) — sends `body` (Sandbox / inside-24h).
+      • **template** (`content_sid` set, W6.4) — sends an approved Content template
+        with `content_variables`; `body` is unused (the approved template *is* the
+        content), so the empty/length checks are skipped. For business-initiated
+        sends outside the 24h window via a registered Business sender.
+
     Returns {is_mock, to, sid, status}. Raises `WhatsAppError` on a bad recipient,
-    empty body, or a real-path Twilio failure. The Twilio SDK is synchronous, so
-    the real send runs in a worker thread (`asyncio.to_thread`) to keep W5's async
-    loop unblocked.
+    an empty freeform body, or a real-path Twilio failure. The Twilio SDK is
+    synchronous, so the real send runs in a worker thread to keep W5's loop free.
     """
-    if not body or not body.strip():
-        raise WhatsAppError("refusing to send an empty body", code="whatsapp_empty_body")
     to_addr = _normalize_addr(to)
-    if len(body) > _MAX_BODY:
-        # Don't silently truncate financial content mid-number; fail loud so W5
-        # logs it. (The briefing is capped well under this upstream.)
-        raise WhatsAppError(
-            f"body {len(body)} chars exceeds WhatsApp's {_MAX_BODY} limit",
-            code="whatsapp_body_too_long",
-        )
+    template_mode = bool(content_sid)
+    if not template_mode:
+        if not body or not body.strip():
+            raise WhatsAppError("refusing to send an empty body", code="whatsapp_empty_body")
+        if len(body) > _MAX_BODY:
+            # Don't silently truncate financial content mid-number; fail loud so W5
+            # logs it. (The briefing is capped well under this upstream.)
+            raise WhatsAppError(
+                f"body {len(body)} chars exceeds WhatsApp's {_MAX_BODY} limit",
+                code="whatsapp_body_too_long",
+            )
 
     if whatsapp_mock_enabled():
-        log.info("WhatsApp (mock) → %s:\n%s", to_addr, body)
+        if template_mode:
+            log.info("WhatsApp (mock, template %s) → %s: vars=%s",
+                     content_sid, to_addr, content_variables or {})
+        else:
+            log.info("WhatsApp (mock) → %s:\n%s", to_addr, body)
         return {"is_mock": True, "to": to_addr, "sid": None, "status": "logged"}
 
     sid, token, frm = _creds()  # type: ignore[misc]  — not None when not mock
     from_addr = _normalize_addr(frm)
     try:
         def _send():  # runs in a thread
-            kwargs: dict[str, Any] = {"from_": from_addr, "to": to_addr, "body": body}
+            kwargs: dict[str, Any] = {"from_": from_addr, "to": to_addr}
+            if template_mode:
+                kwargs["content_sid"] = content_sid
+                if content_variables:
+                    kwargs["content_variables"] = json.dumps(content_variables)
+            else:
+                kwargs["body"] = body
             # Wire the delivery-status callback so an async opted-out/blocked result
             # (e.g. WhatsApp 63015/63024 — Twilio swallows the STOP keyword but blocks
             # the number) reaches POST /api/twilio/status, which flips opt_in off.
@@ -175,12 +205,41 @@ async def send_whatsapp(to: str, body: str) -> dict[str, Any]:
     }
 
 
+def _brief_template_sid() -> str | None:
+    """The approved Content template SID for the daily brief, or None. When set
+    (W6.4 / Business sender live), `send_briefing` sends the template instead of
+    freeform — the production path for proactive sends outside the 24h window."""
+    sid = os.getenv("TWILIO_BRIEF_TEMPLATE_SID", "").strip()
+    return sid if sid and not sid.endswith("REPLACE") else None
+
+
+def _fmt_as_of(s: str) -> str:
+    """`2026-06-09` → `09 Jun 2026` for the template's date variable; raw string
+    on any parse failure (never block a send on a date format)."""
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").strftime("%Y/%m/%d")
+    except Exception:  # noqa: BLE001
+        return s or ""
+
+
 async def send_briefing(briefing: dict, to: str) -> dict[str, Any]:
-    """Convenience for W5: send a W2 briefing dict's `text` and return a delivery
-    record (send result + the brief's account/as_of for the `briefing_deliveries`
-    log). Raises `WhatsAppError` if the brief has no text."""
-    text = (briefing or {}).get("text") or ""
-    if not text.strip():
-        raise WhatsAppError("briefing has no text to send", code="whatsapp_empty_body")
-    result = await send_whatsapp(to, text)
-    return {**result, "account_id": briefing.get("account_id"), "as_of": briefing.get("as_of")}
+    """Convenience for W5: send a W2 briefing dict and return a delivery record
+    (send result + the brief's account/as_of for the `briefing_deliveries` log).
+
+    **W6.4:** if a brief template is configured (`TWILIO_BRIEF_TEMPLATE_SID`) AND a
+    `permalink` is present, send the **approved template** (variables `{1}`=date,
+    `{2}`=permalink — the full narrative lives at the permalink). Otherwise send the
+    **freeform** `text` (Sandbox / today / inside-24h). Raises `WhatsAppError` if a
+    freeform brief has no text.
+    """
+    b = briefing or {}
+    tmpl, permalink = _brief_template_sid(), b.get("permalink")
+    if tmpl and permalink:
+        variables = {"1": _fmt_as_of(b.get("as_of") or ""), "2": permalink}
+        result = await send_whatsapp(to, content_sid=tmpl, content_variables=variables)
+    else:
+        text = b.get("text") or ""
+        if not text.strip():
+            raise WhatsAppError("briefing has no text to send", code="whatsapp_empty_body")
+        result = await send_whatsapp(to, text)
+    return {**result, "account_id": b.get("account_id"), "as_of": b.get("as_of")}
