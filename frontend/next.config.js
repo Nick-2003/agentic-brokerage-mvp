@@ -1,6 +1,12 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // 032b: isomorphic-dompurify (the widget SafeHtml sanitizer) pulls in jsdom,
+  // whose runtime asset `default-stylesheet.css` doesn't survive Next's server
+  // bundling → the `/` prerender crashed with `ENOENT … default-stylesheet.css`.
+  // Mark them as external server packages so they're loaded from node_modules
+  // (where the asset lives) at build/prerender time instead of being bundled.
+  serverExternalPackages: ['isomorphic-dompurify', 'jsdom'],
   // Allow image domains for any chart screenshots we host on Supabase
   images: {
     remotePatterns: [
