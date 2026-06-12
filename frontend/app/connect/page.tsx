@@ -137,8 +137,13 @@ export default function ConnectPage() {
           />
         )}
 
-        <p className="text-center text-[11px] text-[#f5f5f0] opacity-50 pb-6">
+        <p className="text-center text-[11px] text-[#f5f5f0] opacity-50">
           Your Flex token is read-only and stored encrypted. We never place trades.
+        </p>
+        <p className="text-center text-[11px] pb-6">
+          <a href="/" className="text-[#f5f5f0] opacity-60 underline underline-offset-2 hover:opacity-90">
+            ← Back to the app
+          </a>
         </p>
       </div>
     </main>
