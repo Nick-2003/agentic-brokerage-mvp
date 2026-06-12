@@ -260,6 +260,10 @@ async def run_agent(
     )
     messages: list[MessageParam] = [{"role": "user", "content": user_message}]
     iterations = 0
+    # P5 (034): accumulate this turn's LLM token usage across iterations so the
+    # `done` event can surface it for the per-user daily token budget.
+    total_input_tokens = 0
+    total_output_tokens = 0
     # Per-turn screenshot accounting (proposal 024). Maps `tool_use_id` → real
     # `data:image/png;base64,…` URL we stripped from the LLM-bound payload.
     # Restored into the terminal widget below.
@@ -285,6 +289,8 @@ async def run_agent(
 
             # Record the generation for this iteration (no-op when tracer is NOOP).
             usage = getattr(final_msg, "usage", None)
+            total_input_tokens += getattr(usage, "input_tokens", 0) or 0
+            total_output_tokens += getattr(usage, "output_tokens", 0) or 0
             tracer.record_generation(
                 name=f"anthropic.iter_{iterations}",
                 model=MODEL,
@@ -409,5 +415,11 @@ async def run_agent(
     elapsed_ms = int((time.monotonic() - start_time) * 1000)
     yield {
         "event": "done",
-        "data": {"elapsed_ms": elapsed_ms, "iterations": iterations},
+        "data": {
+            "elapsed_ms": elapsed_ms,
+            "iterations": iterations,
+            # P5 (034): turn token totals — consumed by the daily token budget.
+            "input_tokens": total_input_tokens,
+            "output_tokens": total_output_tokens,
+        },
     }
