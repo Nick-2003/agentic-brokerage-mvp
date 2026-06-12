@@ -1,19 +1,21 @@
 """get_portfolio tool — pulls the user's current positions and equity.
 
 Source is switchable via `PORTFOLIO_SOURCE` (039):
-  • `ibkr`  (DEFAULT) — read-only holdings/NAV from the IBKR Flex Web Service
-    (reuses `ibkr_flex.get_portfolio_snapshot`, the same connector behind the
-    WhatsApp brief). The main page shows the IBKR account; values are in the
-    account's BASE currency (e.g. HKD → `HK$`). Read-only — no trading.
+  • `ibkr`  (DEFAULT) — read-only holdings/NAV from the IBKR Flex Web Service.
+    **Per-user (040):** resolves the *authenticated* `user_id` → their own
+    `/connect` IBKR connection (decrypted Flex token, service key) and fetches
+    THEIR account. **A user who hasn't connected IBKR gets a nil portfolio** (no
+    fabricated demo number). Values are in the account's BASE currency
+    (e.g. HKD → `HK$`). Read-only — no trading.
   • `alpaca` — the legacy Alpaca paper path (kept, reversible).
 
 `get_portfolio` is the single source of truth for BOTH the agent's `morning_brief`
 and the Hero header (`GET /api/portfolio`), so flipping the source updates both.
 
-Mock-first either way: the IBKR path is mock-gated inside `ibkr_flex`
-(`USE_MOCK_IBKR=1` / no creds → the bundled fixture); the Alpaca path falls back to
-`MOCK_PORTFOLIO`. On a real-path failure we surface an `error` (never silently
-serve mock as if real) — same discipline as the rest of the codebase.
+Mock-first: a *connected* user's snapshot fetch is mock-gated inside `ibkr_flex`
+(`USE_MOCK_IBKR=1` → the bundled fixture); the Alpaca path falls back to
+`MOCK_PORTFOLIO`. A real-path failure surfaces an `error` over nil values (never
+silently serve mock/stale as if real) — same discipline as the rest of the codebase.
 """
 
 from __future__ import annotations
@@ -117,8 +119,10 @@ def portfolio_source() -> str:
 # data is end-of-day, not intraday — so caching the snapshot is both a latency win
 # (the Hero loads on every page open) and more correct than re-fetching. In-memory,
 # single-replica (same posture as 034's token budget / W6.6's rate limiter).
+# 040: keyed PER USER (`{user_id: {at, snap}}`) so one user's snapshot can't be
+# served to another.
 _CACHE_TTL_S = float(os.getenv("IBKR_PORTFOLIO_CACHE_TTL_S", "600"))  # 10 min
-_ibkr_cache: dict[str, Any] = {"at": 0.0, "snap": None}
+_ibkr_cache: dict[str, dict[str, Any]] = {}
 
 
 def _money_base(value: float | None, fx: float | None) -> float | None:
@@ -179,45 +183,77 @@ def _map_ibkr_snapshot(snap: dict) -> dict[str, Any]:
         "as_of": snap.get("as_of"),     # statement date — Flex isn't intraday
         "source": "ibkr",
         "read_only": True,              # no trading via Flex
+        "connected": True,              # 040: this user has an IBKR connection
         "is_paper": False,
         "is_mock": bool(snap.get("is_mock")),
         "positions": positions,
     }
 
 
-async def _ibkr_snapshot_cached() -> dict:
-    """The IBKR snapshot, cached for `_CACHE_TTL_S` (Flex is slow + end-of-day)."""
+def _nil_portfolio() -> dict[str, Any]:
+    """The 'no IBKR connection yet' portfolio — all values nil, no positions, so the
+    Hero shows nothing (not a fabricated demo number) and the agent says 'connect a
+    brokerage'. `connected: False` is the flag the frontend + system prompt key on."""
+    return {
+        "total_equity": None,
+        "cash": None,
+        "buying_power": None,
+        "day_pnl": None,
+        "day_pnl_pct": None,
+        "currency": None,
+        "base_currency": None,
+        "account_id": None,
+        "as_of": None,
+        "source": "ibkr",
+        "read_only": True,
+        "connected": False,
+        "is_paper": False,
+        "is_mock": False,
+        "positions": [],
+    }
+
+
+async def _ibkr_snapshot_cached(user_id: str, token: str, query_id: str | None) -> dict:
+    """This user's IBKR snapshot, cached per-user for `_CACHE_TTL_S` (Flex is slow +
+    end-of-day). Fetched with the USER's decrypted Flex token (mock-first inside
+    `ibkr_flex` when USE_MOCK_IBKR=1)."""
     now = time.monotonic()
-    if _ibkr_cache["snap"] is not None and (now - _ibkr_cache["at"]) < _CACHE_TTL_S:
-        return _ibkr_cache["snap"]
+    ent = _ibkr_cache.get(user_id)
+    if ent and ent.get("snap") is not None and (now - ent["at"]) < _CACHE_TTL_S:
+        return ent["snap"]
     import ibkr_flex  # top-level module (backend/ on sys.path); lazy so boot is cheap
 
-    snap = await ibkr_flex.get_portfolio_snapshot()  # mock-first (USE_MOCK_IBKR/no creds)
-    _ibkr_cache["snap"] = snap
-    _ibkr_cache["at"] = now
+    snap = await ibkr_flex.get_portfolio_snapshot(token, query_id)
+    _ibkr_cache[user_id] = {"snap": snap, "at": now}
     return snap
 
 
 async def _fetch_ibkr_portfolio(user_id: str) -> dict[str, Any]:
-    """Read-only IBKR portfolio (mapped). On a real-path failure, surface the error
-    (with the mock fixture as fallback values) rather than silently faking it."""
+    """The authenticated user's OWN read-only IBKR portfolio (040, per-user).
+
+    Resolves `user_id` → their `/connect` IBKR connection (decrypted token, service
+    key). **Not connected → a nil portfolio** (no fabricated demo number). Connected
+    → fetch + map their snapshot; a real-path failure surfaces an `error` (nil values,
+    never a fake), so a Flex hiccup can't show stale/wrong data as if it were theirs.
+    """
     try:
-        snap = await _ibkr_snapshot_cached()
+        import connections
+        conn = await connections.get_connection_with_token_admin(user_id)
+    except Exception as e:  # noqa: BLE001 — Supabase/service-key unavailable → treat as not connected
+        log.info("portfolio: connection lookup unavailable for %s: %s", user_id, e)
+        return _nil_portfolio()
+    if not conn or not conn.get("flex_token"):
+        return _nil_portfolio()  # no connection (or token won't decrypt) → nil
+
+    try:
+        snap = await _ibkr_snapshot_cached(user_id, conn["flex_token"], conn.get("flex_query_id"))
         return _map_ibkr_snapshot(snap)
     except Exception as e:  # noqa: BLE001 — IBKRFlexError or transport
-        log.warning("IBKR portfolio fetch failed: %s", e)
-        import ibkr_flex
-        code = getattr(e, "code", "ibkr_fetch_failed")
-        try:
-            fallback = _map_ibkr_snapshot(ibkr_flex.parse_flex_statement(ibkr_flex._FIXTURE.read_text()))
-        except Exception:  # noqa: BLE001 — fixture unreadable; still return a shaped error
-            fallback = {}
+        log.warning("IBKR portfolio fetch failed for %s: %s", user_id, e)
         return {
-            "error": code,
+            **_nil_portfolio(),
+            "error": getattr(e, "code", "ibkr_fetch_failed"),
             "message": f"Could not reach IBKR Flex: {e}",
-            "is_mock_fallback": True,
-            **fallback,
-            "is_mock": True,
         }
 
 

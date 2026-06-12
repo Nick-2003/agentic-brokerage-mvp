@@ -3,10 +3,11 @@
 // failure so the Hero header can fall back to static text instead of crashing.
 
 export type PortfolioSummary = {
-  total_equity: number;
-  day_pnl: number;
-  day_pnl_pct: number;
-  currency: string;
+  // 040: nil when the user hasn't connected an IBKR account yet (or on fetch error).
+  total_equity: number | null;
+  day_pnl: number | null;
+  day_pnl_pct: number | null;
+  currency: string | null;
   is_mock: boolean;
 };
 

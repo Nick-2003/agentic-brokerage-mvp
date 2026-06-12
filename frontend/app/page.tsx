@@ -306,21 +306,27 @@ function Hero({ pinnedCount, portfolio }: { pinnedCount: number; portfolio: Port
   // 035: the signed-in account email, shown above "Portfolio value". Null in demo
   // mode (no session) → the line is omitted.
   const email = useAuth().session?.user?.email ?? null;
-  // Fall back to the established demo numbers while loading / on fetch failure,
-  // so the header is never empty or broken.
+  // 040: the value is the user's OWN read-only IBKR account. Until they connect one,
+  // it is NIL — show "—", not a fabricated demo number. `hasData` = a connected
+  // account with a value; `notConnected` = the endpoint responded with a null equity
+  // (the per-user "no IBKR connection" signal) → show a connect hint. A null portfolio
+  // (still loading / fetch error) just shows "—" with no hint.
   const hasData = portfolio != null && portfolio.total_equity != null;
-  const currency = portfolio?.currency ?? '$';
-  const equity = hasData ? portfolio!.total_equity : 51000.0;
-  const dayPnl = portfolio?.day_pnl ?? 964.1;
-  const dayPnlPct = portfolio?.day_pnl_pct ?? 1.93;
-  const up = dayPnl >= 0;
-  const sign = up ? '+' : '-';
+  const notConnected = portfolio != null && portfolio.total_equity == null;
+  const currency = portfolio?.currency ?? '';
 
   const fmt = (n: number) =>
     n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  const equityText = `${currency}${fmt(equity)}`;
-  const pnlText = `${sign}${currency}${fmt(Math.abs(dayPnl))} (${sign}${Math.abs(dayPnlPct).toFixed(2)}%) today`;
+  const up = (portfolio?.day_pnl ?? 0) >= 0;
+  const sign = up ? '+' : '-';
+  const equityText = hasData ? `${currency}${fmt(portfolio!.total_equity!)}` : '—';
+  const pnlText =
+    hasData && portfolio!.day_pnl != null && portfolio!.day_pnl_pct != null
+      ? `${sign}${currency}${fmt(Math.abs(portfolio!.day_pnl!))} (${sign}${Math.abs(
+          portfolio!.day_pnl_pct!
+        ).toFixed(2)}%) today`
+      : null;
 
   return (
     <div className="px-6 pt-5 pb-1">
@@ -329,9 +335,17 @@ function Hero({ pinnedCount, portfolio }: { pinnedCount: number; portfolio: Port
       )}
       <div className="text-xs text-text-3 uppercase tracking-[0.06em] mb-1.5">Portfolio value</div>
       <div className="text-4xl font-semibold -tracking-tight">{equityText}</div>
-      <div className={`mt-1 text-sm font-medium ${up ? 'text-green-DEFAULT' : 'text-red-DEFAULT'}`}>
-        {pnlText}
-      </div>
+      {pnlText && (
+        <div className={`mt-1 text-sm font-medium ${up ? 'text-green-DEFAULT' : 'text-red-DEFAULT'}`}>
+          {pnlText}
+        </div>
+      )}
+      {notConnected && (
+        <div className="mt-1 text-[12px] text-text-3">
+          Connect Interactive Brokers to see your portfolio —{' '}
+          <a href="/connect" className="underline underline-offset-2 hover:text-text-2">connect</a>.
+        </div>
+      )}
       {pinnedCount === 0 && (
         <div className="mt-2 text-[11px] text-text-3">Your home is empty — pin a widget to start building it.</div>
       )}

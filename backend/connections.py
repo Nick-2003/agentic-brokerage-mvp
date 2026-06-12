@@ -188,6 +188,42 @@ async def get_user_email_admin(user_id: str) -> str | None:
     return (getattr(user, "email", None) or None) if user else None
 
 
+async def get_connection_with_token_admin(user_id: str) -> dict[str, Any] | None:
+    """ONE user's connection WITH the decrypted Flex token + query id, or None if
+    they haven't connected (no row) / the token won't decrypt. SERVICE KEY.
+
+    For the per-user main-page portfolio read (040): `get_portfolio` resolves the
+    *authenticated* `user_id` (the trusted JWT `sub`, never a client value) to their
+    own connection so the home screen shows THEIR IBKR account. This is a per-request
+    admin read strictly scoped to the caller — the same decrypt-the-token need the W5
+    cron has, for one user on demand. The user-JWT/RLS path can't be used here: it
+    deliberately never returns the token (it's not in `_PUBLIC_COLS`).
+
+    Returns the public view + `flex_token` (or `flex_token`=None + `decrypt_error`).
+    A `demo`/empty user_id short-circuits to None (demo users own no connection).
+    """
+    if not user_id or user_id == "demo":
+        return None
+    c = await _admin_client()
+    res = (
+        await c.table("ibkr_connections")
+        .select("*")
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    row = res.data[0] if res.data else None
+    if not row:
+        return None
+    rec = _public_view(row)
+    try:
+        rec["flex_token"] = token_crypto.decrypt_token(row["flex_token_encrypted"])
+    except token_crypto.TokenCryptoError as e:
+        rec["flex_token"] = None
+        rec["decrypt_error"] = e.code
+    return rec
+
+
 async def list_active_connections_admin() -> list[dict[str, Any]]:
     """Every opted-in, active connection WITH the decrypted Flex token + query id —
     what the W5 cron iterates to fetch holdings (W1) and send (W3). SERVICE KEY.
