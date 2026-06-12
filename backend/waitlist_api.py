@@ -35,6 +35,7 @@ class ConnectRequest(BaseModel):
     flex_query_id: str = Field(..., min_length=1, max_length=64)
     whatsapp_number: str = Field(..., max_length=24)  # E.164, e.g. +85291234567
     opt_in: bool = True
+    email_opt_in: bool = False  # 037 — separate consent from WhatsApp; default off
 
 
 class OptInRequest(BaseModel):
@@ -70,6 +71,7 @@ async def connect_ibkr(req: ConnectRequest, auth: AuthCtx = Depends(resolve_auth
         flex_query_id=req.flex_query_id.strip(),
         whatsapp_number=req.whatsapp_number.strip(),
         opt_in=req.opt_in,
+        email_opt_in=req.email_opt_in,
     )
     if row is None:
         raise HTTPException(status_code=500, detail="could not store connection")

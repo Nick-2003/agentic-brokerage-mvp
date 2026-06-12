@@ -51,12 +51,18 @@ create table if not exists public.ibkr_connections (
   flex_token_encrypted text not null,
   flex_query_id        text not null,
   whatsapp_number      text not null,          -- E.164, e.g. +85291234567
-  opt_in               boolean not null default true,
+  opt_in               boolean not null default true,   -- WhatsApp briefing consent
+  email_opt_in         boolean not null default false,  -- 037: email channel (separate consent)
   status               text not null default 'active'
                          check (status in ('active', 'paused', 'revoked')),
   created_at           timestamptz not null default now(),
   updated_at           timestamptz not null default now()
 );
+-- 037 — additive column for an ALREADY-CREATED table (the `create table if not
+-- exists` above is a no-op on an existing DB, so the new column needs an explicit
+-- idempotent ALTER). Safe to run repeatedly.
+alter table public.ibkr_connections
+  add column if not exists email_opt_in boolean not null default false;
 create index if not exists ibkr_connections_active
   on public.ibkr_connections(opt_in, status);
 drop trigger if exists ibkr_connections_set_updated_at on public.ibkr_connections;
@@ -73,7 +79,7 @@ create table if not exists public.briefing_deliveries (
   user_id     uuid not null references auth.users(id) on delete cascade,
   account_id  text,                            -- IBKR account (e.g. U19883362)
   as_of       date,                            -- the statement date the brief was about
-  channel     text not null default 'whatsapp',
+  channel     text not null default 'whatsapp',  -- whatsapp | email (037)
   status      text not null,                   -- queued | sent | failed | skipped
   provider_id text,                            -- Twilio message sid
   error       text,                            -- error code/message on failure
