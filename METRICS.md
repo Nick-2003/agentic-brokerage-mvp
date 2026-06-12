@@ -14,6 +14,20 @@ We're optimising for *evidence of product-market fit*, not feature completion. P
 
 The Sean Ellis test (40%+ "very disappointed") is the gold standard once we have ≥30 actively engaged users.
 
+> ## ⚠️ ACTIVE PRODUCT: the IBKR + WhatsApp/email waitlist funnel (2026-06-05 pivot)
+> The chat-MVP metrics below are **paused** with the chat product; the live waitlist product validates a different, simpler question — *will people connect their real brokerage and value a daily briefing?* Its funnel and signals:
+>
+> | Stage | Event (PostHog, W6.2 — PII-safe, no email) | What it proves |
+> | --- | --- | --- |
+> | **Acquisition** | `waitlist_joined` (`source`) | Interest from the landing page |
+> | **Activation 1 — connect started** | `connect_started` | Signed in + began linking IBKR |
+> | **Activation 2 — connected** | `connect_completed` / `connect_failed` | A real Flex token stored (the high-intent step — they trust it with their brokerage) |
+> | **Opt-in** | `briefing_opt_in_changed` | Agreed to a daily brief (WhatsApp and/or email) |
+> | **Magic moment** | first `briefing_deliveries` row `status=sent` | They received their first real, personalised brief |
+> | **Retention** | brief **opens** — `/b/<token>` permalink hits + WhatsApp/email read; sustained `opt_in` (not unsubscribed) | They keep wanting it each morning |
+>
+> **The core validation bar:** a meaningful share of waitlist signups **connect IBKR** (not just "join"), and connected users **stay opted-in** (low unsubscribe) and **open** the brief on later days. That's the equivalent of activation + retention here. Counter-metrics still apply (exclude founder/friends; one heavy user ≠ traction). Unsubscribe rate is the cleanest "this isn't valuable" signal. Sean Ellis (≥40% "very disappointed") and the D1/D7/D30 frame still hold once there are ≥30 connected users; "active" = opened a brief that week.
+
 ## Primary metrics (the dashboard)
 
 ### Retention
