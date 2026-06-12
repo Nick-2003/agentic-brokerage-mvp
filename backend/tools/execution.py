@@ -27,6 +27,15 @@ MOCK_ORDERS_FILE = DATA_DIR / "mock_orders.json"
 MAX_NOTIONAL = float(os.getenv("MAX_PAPER_TRADE_NOTIONAL", "50000"))
 
 
+def _trading_enabled() -> bool:
+    """Whether order placement is allowed (039). Defaults to **off**: the main page
+    now shows a read-only IBKR portfolio, and IBKR Flex can't trade — so executing an
+    Alpaca order would be incoherent (trading one account while displaying another).
+    Set `TRADING_ENABLED=1` to re-enable the Alpaca paper-order path (e.g. when
+    `PORTFOLIO_SOURCE=alpaca`)."""
+    return os.getenv("TRADING_ENABLED", "0") == "1"
+
+
 # ---------------------------------------------------------------------------
 # Mock order book — persisted to disk so it survives backend restarts.
 # ---------------------------------------------------------------------------
@@ -135,6 +144,18 @@ async def place_paper_order(args: dict[str, Any], user_id: str) -> dict[str, Any
 
     Always paper. Notional capped at MAX_PAPER_TRADE_NOTIONAL.
     """
+    # 039 — order placement is OFF by default (read-only IBKR main page; Flex can't
+    # trade). Return a clear, non-fabricated "unavailable" result; the agent relays
+    # it as plain text (see system.md "Trading is currently unavailable").
+    if not _trading_enabled():
+        return {
+            "error": "trading_unavailable",
+            "message": (
+                "Order placement isn't available right now — your portfolio is "
+                "connected read-only (IBKR). Trading is coming later."
+            ),
+        }
+
     # Validation — server-side cap (Threat 6 mitigation)
     ticker = (args.get("ticker") or "").upper()
     side = args.get("side")
