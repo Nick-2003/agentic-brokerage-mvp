@@ -47,6 +47,7 @@ import db  # noqa: E402
 import memory  # noqa: E402
 import observability  # noqa: E402
 import security  # noqa: E402  (W6.6 — rate limit + security headers)
+import token_budget  # noqa: E402  (P5 / 034 — per-user daily LLM token budget)
 import waitlist_api  # noqa: E402  (W4 — IBKR connect + waitlist router)
 import webhooks  # noqa: E402  (W6 — Twilio inbound STOP/START webhook)
 from agent import MODEL, run_agent  # noqa: E402
@@ -211,6 +212,24 @@ async def chat(
             except Exception:
                 memory_context = ""
 
+            # ---- P5 (034): per-user daily token budget. Check BEFORE running the
+            # agent — an already-capped user is refused this turn instead of
+            # spending more. In-memory + fail-open (no-op when CHAT_DAILY_TOKEN_BUDGET
+            # is unset; over_budget() never raises). Complements W6.6's per-IP rate
+            # limit (frequency) with a per-user daily *cost* ceiling.
+            if token_budget.over_budget(auth.user_id):
+                yield {
+                    "event": "error",
+                    "data": json.dumps(
+                        {"message": "Daily usage limit reached — please try again tomorrow.",
+                         "code": "daily_token_budget_exceeded"}
+                    ),
+                }
+                yield {"event": "done", "data": json.dumps({"elapsed_ms": 0, "iterations": 0})}
+                return  # skip the agent, persistence, and memory store for this turn
+
+            turn_input_tokens = 0
+            turn_output_tokens = 0
             try:
                 async for ev in run_agent(
                     req.message,
@@ -222,6 +241,9 @@ async def chat(
                         widget_acc.append(ev["data"])
                     elif ev["event"] == "message":
                         text_acc.append(ev["data"].get("text", ""))
+                    elif ev["event"] == "done":
+                        turn_input_tokens = int(ev["data"].get("input_tokens") or 0)
+                        turn_output_tokens = int(ev["data"].get("output_tokens") or 0)
                     yield {
                         "event": ev["event"],
                         "data": json.dumps(ev["data"], ensure_ascii=False),
@@ -231,6 +253,13 @@ async def chat(
                     "event": "error",
                     "data": json.dumps({"message": f"stream failed: {e}"}),
                 }
+
+            # ---- P5 (034): record this turn's tokens against the daily budget
+            # (in-memory; no-op when disabled). Best-effort — never breaks the stream.
+            try:
+                token_budget.record(auth.user_id, turn_input_tokens, turn_output_tokens)
+            except Exception:
+                pass
 
             # ---- post-stream: persist the assistant turn (best effort) ----
             if conversation_id and auth.token and (text_acc or widget_acc):
