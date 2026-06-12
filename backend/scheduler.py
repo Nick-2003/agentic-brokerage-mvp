@@ -31,6 +31,8 @@ from typing import Any
 
 import briefing
 import connections
+import email_delivery
+import email_unsubscribe
 import published_briefs
 import whatsapp
 
@@ -51,6 +53,12 @@ _PUBLISH = os.getenv("PUBLISH_BRIEFS", "1") != "0"
 # where the gap is larger still). Set BRIEFING_DEDUP=0 to disable; --force bypasses.
 _DEDUP = os.getenv("BRIEFING_DEDUP", "1") != "0"
 _MIN_RESEND_HOURS = float(os.getenv("BRIEFING_MIN_RESEND_HOURS", "12"))
+# 038 — email is a SECOND delivery channel (P7-NOTIFY, email-first). Per-user opt-in
+# (`email_opt_in`, separate from the WhatsApp `opt_in`); a user with it on gets the
+# SAME brief emailed too. Best-effort/secondary: an email failure is logged
+# (channel="email") but does NOT fail the user's run — WhatsApp is the gating
+# channel. Set EMAIL_BRIEFINGS=0 to disable the whole leg.
+_EMAIL_ENABLED = os.getenv("EMAIL_BRIEFINGS", "1") != "0"
 
 
 async def _with_retries(factory, *, label: str):
@@ -80,8 +88,11 @@ async def _safe_log(user_id: str, **kw: Any) -> None:
 
 
 async def _process_one(c: dict, *, dry_run: bool) -> dict:
-    """Build → (send → log) for one connection. Raises on unrecovered failure
-    (the caller logs it as `failed`)."""
+    """Build → (send → log) for one connection. Raises on unrecovered WhatsApp
+    failure (the caller logs it as `failed`). The 038 email leg is independent +
+    best-effort: it's attempted regardless of the WhatsApp outcome and its failure
+    is logged but never raised (so an email-opted user still gets the brief even if
+    their WhatsApp number is bad, and an email hiccup can't fail the run)."""
     uid, to = c["user_id"], c.get("whatsapp_number")
     brief = await _with_retries(
         lambda: briefing.build_briefing(c["flex_token"], c["flex_query_id"]),
@@ -91,8 +102,8 @@ async def _process_one(c: dict, *, dry_run: bool) -> dict:
     if dry_run:
         return {**base, "status": "built", "chars": len(brief.get("text") or "")}
 
-    # W6.3 — publish the brief to a web permalink (best-effort) + append the link
-    # to the outgoing message. The STORED body is the original brief (no link line).
+    # W6.3 — publish the brief to a web permalink (best-effort), shared by both
+    # channels. The STORED body is the original brief (no link line).
     text = brief.get("text") or ""
     permalink: str | None = None
     if _PUBLISH:
@@ -103,18 +114,65 @@ async def _process_one(c: dict, *, dry_run: bool) -> dict:
             permalink = pub["permalink"]
         except Exception as e:  # noqa: BLE001 — never block the send on a publish failure
             log.warning("publish_brief failed for %s: %s", uid, e)
-    # Pass the raw permalink through so W6.4's template path can use it as a
-    # variable; also append it to the freeform text for the Sandbox/no-template path.
-    send_brief = {**brief, "permalink": permalink}
+    # `brief_with_link` keeps the ORIGINAL text + the raw permalink field — email's
+    # _compose_body and W6.4's WhatsApp template both read `permalink` and add the
+    # link themselves (so it isn't doubled). For the freeform WhatsApp path we make
+    # a separate copy with the link appended to the text.
+    brief_with_link = {**brief, "permalink": permalink}
+    wa_brief = dict(brief_with_link)
     if permalink:
-        send_brief["text"] = f"{text}\n\n📄 View this brief on the web: {permalink}"
+        wa_brief["text"] = f"{text}\n\n📄 View this brief on the web: {permalink}"
 
-    send = await _with_retries(lambda: whatsapp.send_briefing(send_brief, to), label=f"send:{uid}")
+    # WhatsApp (gating channel) — its failure propagates so the user tallies `failed`
+    # (and the caller can handle an opt-out).
+    send = await _with_retries(lambda: whatsapp.send_briefing(wa_brief, to), label=f"send:{uid}")
     status = send.get("status") or "sent"
-    await _safe_log(uid, status=status, account_id=brief.get("account_id"),
+    await _safe_log(uid, status=status, channel="whatsapp", account_id=brief.get("account_id"),
                     as_of=brief.get("as_of"), provider_id=send.get("sid"))
+
+    # 038 — email (secondary channel; isolated, never raises into the user's run).
+    email_result = await _maybe_email(c, brief_with_link)
+
     return {**base, "status": status, "sid": send.get("sid"),
-            "is_mock": send.get("is_mock"), "permalink": permalink}
+            "is_mock": send.get("is_mock"), "permalink": permalink, "email": email_result}
+
+
+async def _maybe_email(c: dict, brief_with_link: dict) -> dict | None:
+    """038 — if this user opted into email, send the SAME brief by email. Fully
+    isolated: resolves the address, refuses a non-compliant send (real send with no
+    unsubscribe link), sends with retries, logs `channel="email"`. Returns a small
+    result dict (or None when the leg didn't run). Never raises."""
+    uid = c.get("user_id")
+    if not (_EMAIL_ENABLED and c.get("email_opt_in")):
+        return None
+    # Compliance gate: a REAL email must carry a working unsubscribe link. With no
+    # secret set, refuse to send (mock mode just logs, so it's exempt).
+    if not email_delivery.email_mock_enabled() and not email_unsubscribe.configured():
+        log.warning("email skipped for %s: EMAIL_UNSUBSCRIBE_SECRET unset (no unsubscribe link)", uid)
+        await _safe_log(uid, status="skipped", channel="email", error="no_unsubscribe_secret",
+                        account_id=brief_with_link.get("account_id"), as_of=brief_with_link.get("as_of"))
+        return {"status": "skipped", "error": "no_unsubscribe_secret"}
+    to_email = await connections.get_user_email_admin(uid)
+    if not to_email:
+        log.info("email skipped for %s: no account email", uid)
+        await _safe_log(uid, status="skipped", channel="email", error="no_email",
+                        account_id=brief_with_link.get("account_id"), as_of=brief_with_link.get("as_of"))
+        return {"status": "skipped", "error": "no_email"}
+    unsub = email_unsubscribe.unsubscribe_url_for(uid)
+    try:
+        er = await _with_retries(
+            lambda: email_delivery.send_briefing_email(brief_with_link, to_email, unsubscribe_url=unsub),
+            label=f"email:{uid}",
+        )
+        await _safe_log(uid, status=er.get("status") or "sent", channel="email",
+                        account_id=brief_with_link.get("account_id"),
+                        as_of=brief_with_link.get("as_of"), provider_id=er.get("sid"))
+        return {"status": er.get("status") or "sent", "sid": er.get("sid"), "is_mock": er.get("is_mock")}
+    except Exception as e:  # noqa: BLE001 — secondary channel: log, don't fail the user
+        await _safe_log(uid, status="failed", channel="email", error=str(e)[:300],
+                        account_id=brief_with_link.get("account_id"), as_of=brief_with_link.get("as_of"))
+        log.warning("email send failed for %s: %s", uid, e)
+        return {"status": "failed", "error": str(e)[:300]}
 
 
 async def _recently_delivered(user_id: str) -> bool:

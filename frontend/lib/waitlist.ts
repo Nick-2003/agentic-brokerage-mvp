@@ -8,6 +8,7 @@ export type Connection = {
   flex_query_id: string;
   whatsapp_number: string;
   opt_in: boolean;
+  email_opt_in: boolean; // 038 — email channel consent (separate from WhatsApp opt_in)
   status: string;
   created_at?: string;
   updated_at?: string;
@@ -18,6 +19,7 @@ export type ConnectPayload = {
   flex_query_id: string;
   whatsapp_number: string;
   opt_in: boolean;
+  email_opt_in: boolean; // 038
 };
 
 // Public — no auth (precedes sign-up).

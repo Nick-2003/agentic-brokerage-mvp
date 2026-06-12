@@ -55,8 +55,8 @@ async def _admin_client() -> AsyncClient:
     return await acreate_client(_supabase_url(), _service_key())
 
 
-_PUBLIC_COLS = ("user_id", "flex_query_id", "whatsapp_number", "opt_in", "status",
-                "created_at", "updated_at")
+_PUBLIC_COLS = ("user_id", "flex_query_id", "whatsapp_number", "opt_in",
+                "email_opt_in", "status", "created_at", "updated_at")
 
 
 def _public_view(row: dict[str, Any]) -> dict[str, Any]:
@@ -76,15 +76,21 @@ async def upsert_my_connection(
     flex_query_id: str,
     whatsapp_number: str,
     opt_in: bool = True,
+    email_opt_in: bool = False,
 ) -> dict[str, Any] | None:
     """Create/replace THIS user's IBKR connection. The Flex token is encrypted
-    here; only ciphertext is sent to the DB. Returns the public view (no token)."""
+    here; only ciphertext is sent to the DB. Returns the public view (no token).
+
+    `email_opt_in` (038) is a SEPARATE consent from `opt_in` (WhatsApp) — default
+    off; the email channel only sends when the user explicitly ticks it.
+    """
     row = {
         "user_id": user_id,
         "flex_token_encrypted": token_crypto.encrypt_token(flex_token),
         "flex_query_id": flex_query_id,
         "whatsapp_number": whatsapp_number,
         "opt_in": opt_in,
+        "email_opt_in": email_opt_in,
         "status": "active",
     }
     c = await _client_for_user(user_jwt)
@@ -142,6 +148,44 @@ async def set_opt_in_by_whatsapp(whatsapp_number: str, opt_in: bool) -> int:
         .execute()
     )
     return len(res.data or [])
+
+
+async def set_email_opt_in_admin(user_id: str, opt_in: bool) -> int:
+    """Flip `email_opt_in` for a user. SERVICE KEY — used by the 038 one-click
+    unsubscribe endpoint, which has no user JWT (it's clicked from an inbox; the
+    signed token is the identity). Flips ONLY email — `opt_in` (WhatsApp) is
+    untouched, so the channels unsubscribe independently. Returns rows updated.
+
+    `.eq("user_id", …)` is required (PostgREST mass-update guard), same as
+    `set_opt_in_by_whatsapp`.
+    """
+    c = await _admin_client()
+    res = (
+        await c.table("ibkr_connections")
+        .update({"email_opt_in": opt_in})
+        .eq("user_id", user_id)
+        .execute()
+    )
+    return len(res.data or [])
+
+
+async def get_user_email_admin(user_id: str) -> str | None:
+    """Resolve a user's verified account email via the Supabase Auth admin API
+    (`auth.users` isn't directly selectable). SERVICE KEY. Returns None if the user
+    is gone or has no email (never raises into the cron — a missing email just
+    means "can't email this user", logged + skipped by the caller).
+
+    The 038 email channel sends to this address — the same verified email the user
+    signed in with (P4.1 magic link), so there's no separate email-capture step.
+    """
+    c = await _admin_client()
+    try:
+        resp = await c.auth.admin.get_user_by_id(user_id)
+    except Exception as e:  # noqa: BLE001 — admin lookup transient/not-found
+        log.info("user email lookup failed for %s: %s", user_id, e)
+        return None
+    user = getattr(resp, "user", None)
+    return (getattr(user, "email", None) or None) if user else None
 
 
 async def list_active_connections_admin() -> list[dict[str, Any]]:

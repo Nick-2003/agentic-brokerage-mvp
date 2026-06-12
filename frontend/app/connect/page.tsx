@@ -322,6 +322,7 @@ function ConnectionCard({
       <dl className="mt-3 space-y-1.5 text-[13px]">
         <Row k="Flex query" v={conn.flex_query_id} />
         <Row k="WhatsApp" v={conn.whatsapp_number} />
+        <Row k="Email briefings" v={conn.email_opt_in ? `On — ${email || 'your account email'}` : 'Off'} />
         <Row k="Status" v={conn.status} />
       </dl>
       <div className="mt-4 flex gap-2">
@@ -374,6 +375,7 @@ function ConnectForm({
   const [queryId, setQueryId] = useState(existing?.flex_query_id ?? '');
   const [whatsapp, setWhatsapp] = useState(existing?.whatsapp_number ?? '');
   const [optIn, setOptIn] = useState(existing?.opt_in ?? true);
+  const [emailOptIn, setEmailOptIn] = useState(existing?.email_opt_in ?? false); // 038
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -395,6 +397,7 @@ function ConnectForm({
       flex_query_id: queryId.trim(),
       whatsapp_number: whatsapp.trim(),
       opt_in: optIn,
+      email_opt_in: emailOptIn,
     });
     setBusy(false);
     if (res.ok && res.connection) {
@@ -441,6 +444,19 @@ function ConnectForm({
           />
           <span>
             I agree to receive a daily portfolio briefing on WhatsApp. I can pause it anytime.
+          </span>
+        </label>
+        {/* 038 — email channel: a separate, optional consent. Off by default. */}
+        <label className="flex items-start gap-2 text-[12px] text-text-2">
+          <input
+            type="checkbox"
+            checked={emailOptIn}
+            onChange={(e) => setEmailOptIn(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            Also email me the same briefing{email ? ` at ${email}` : ''}. Every email has a
+            one-click unsubscribe; turning it off doesn’t affect WhatsApp.
           </span>
         </label>
         <button
