@@ -386,8 +386,10 @@ function SidePanel({
       </div>
 
       <div className="mt-6 text-[11px] text-white/45">
-        Backend status: <a href="/api/healthz" target="_blank" className="underline">/api/healthz</a>\n
-        Connect: <a href="/connect" target="_blank" className="underline">/connect</a>
+        Backend status: <a href="/api/healthz" target="_blank" className="underline">/api/healthz</a>
+      </div>
+      <div className="mt-6 text-[11px] text-white/45">
+        Portfolio briefings: <a href="/connect" target="_blank" className="underline">/connect</a>
       </div>
     </div>
   );
