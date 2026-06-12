@@ -1,4 +1,4 @@
-"""Email delivery for the daily briefing (037) — SendGrid.
+"""Email delivery for the daily briefing (038) — Resend.
 
 A SECOND delivery channel for the W2 brief, alongside WhatsApp (W3). Same hard
 rule as `whatsapp.py`: a SYSTEM-SIDE sender, deliberately NOT an agent tool and
@@ -6,22 +6,22 @@ NOT in the `tools/` registry (SECURITY threat 1 — the agent has no outbound-co
 tool, so a prompt injection can't exfiltrate the portfolio). The LLM *writes* the
 brief (W2); the scheduler (W5) imports this and *sends* it. P7-NOTIFY, email-first.
 
-Provider = **SendGrid** (Twilio's email product — one billing relationship with the
-existing WhatsApp stack). Talks to the v3 `mail/send` REST API over **httpx**
-(already a core dep), the same httpx+stdlib house style as `fmp_client.py` /
-`ibkr_flex.py` — so NO new dependency and NO optional dep group. The provider is
-behind a thin seam (`_send_via_provider`); swapping to Resend/Postmark/SES later is
-a localized change.
+Provider = **Resend** (permanent free tier: 3,000/mo, 100/day — picked over SendGrid
+because Twilio funding does NOT subsidise SendGrid's separate billing). Talks to the
+`POST /emails` REST API over **httpx** (already a core dep), the same httpx+stdlib
+house style as `fmp_client.py` / `ibkr_flex.py` — so NO new dependency and NO
+optional dep group. The provider is behind a thin seam (`_send_via_provider` +
+`_creds`); swapping back to SendGrid/Postmark/SES is a localized change to those two.
 
 Mock-first, same discipline as every other client:
-  • `USE_MOCK_EMAIL=1` or missing SendGrid creds → LOG the message, don't send
+  • `USE_MOCK_EMAIL=1` or missing Resend creds → LOG the message, don't send
     (offline dev + lets W5 run end-to-end without spending / emailing).
-  • real path → SendGrid `POST /v3/mail/send`; a non-2xx raises `EmailError`
+  • real path → Resend `POST /emails`; a non-2xx raises `EmailError`
     (no silent swallow — same rule as `WhatsAppError` / `BriefingError`).
 
 CAN-SPAM / one-click unsubscribe: every briefing email carries a `List-Unsubscribe`
 header (+ `List-Unsubscribe-Post` for RFC 8058 one-click) and a visible footer
-link, both pointing at the 037 unsubscribe endpoint (`email_unsubscribe.py`). The
+link, both pointing at the 038 unsubscribe endpoint (`email_unsubscribe.py`). The
 scheduler passes the per-user URL in; this module just wires it onto the message.
 """
 from __future__ import annotations
@@ -36,7 +36,7 @@ import httpx
 
 log = logging.getLogger(__name__)
 
-_SENDGRID_URL = "https://api.sendgrid.com/v3/mail/send"
+_RESEND_URL = "https://api.resend.com/emails"
 _TIMEOUT = float(os.getenv("EMAIL_HTTP_TIMEOUT", "15"))
 # Light email check (mirrors waitlist_api._EMAIL) — avoids the email-validator dep.
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -63,7 +63,7 @@ class EmailError(Exception):
 
 def _creds() -> tuple[str, str, str] | None:
     """(api_key, from_email, from_name) or None when not real-send-ready."""
-    key = os.getenv("SENDGRID_API_KEY", "").strip()
+    key = os.getenv("RESEND_API_KEY", "").strip()
     frm = os.getenv("EMAIL_FROM", "").strip()
     name = os.getenv("EMAIL_FROM_NAME", "Daily Portfolio Briefing").strip()
     bad = any(not v or v.endswith("REPLACE") for v in (key, frm))
@@ -73,7 +73,7 @@ def _creds() -> tuple[str, str, str] | None:
 def email_mock_enabled() -> bool:
     """True iff sends should be LOGGED, not delivered.
 
-    Forced by `USE_MOCK_EMAIL=1`, or implied when SendGrid creds are absent (so
+    Forced by `USE_MOCK_EMAIL=1`, or implied when Resend creds are absent (so
     offline dev / a keyless box logs instead of erroring).
     """
     if os.getenv("USE_MOCK_EMAIL") == "1":
@@ -82,7 +82,7 @@ def email_mock_enabled() -> bool:
 
 
 def email_configured() -> bool:
-    """True when the real email path can send: SendGrid creds present. (The
+    """True when the real email path can send: Resend creds present. (The
     unsubscribe-secret check lives in `email_unsubscribe.configured()`; the
     scheduler requires BOTH before sending a real email — no unsubscribe, no send.)
     """
@@ -125,9 +125,9 @@ async def send_email(
 ) -> dict[str, Any]:
     """Send (or, in mock mode, log) one email. Returns {is_mock, to, sid, status}.
 
-    Raises `EmailError` on a bad recipient, an empty body, or a real-path SendGrid
-    failure. SendGrid accepts with **HTTP 202** (empty body); the message id comes
-    back in the `X-Message-Id` header.
+    Raises `EmailError` on a bad recipient, an empty body, or a real-path Resend
+    failure. Resend accepts with **HTTP 200** and returns the message id in the JSON
+    body (`{"id": …}`), which `_send_via_provider` maps to `sid`.
     """
     addr = _validate_addr(to)
     if not text or not text.strip():
@@ -151,45 +151,48 @@ async def send_email(
 async def _send_via_provider(
     addr: str, subject: str, text: str, html: str | None, headers_extra: dict[str, str]
 ) -> dict[str, Any]:
-    """SendGrid v3 `mail/send`. Isolated so the provider is a single seam to swap."""
+    """Resend `POST /emails`. Isolated so the provider is a single seam to swap.
+
+    Resend takes a flat JSON body: `from` is a single "Name <email>" string, `to`
+    is a list, `text`/`html` are top-level, custom `headers` ride a dict. Success is
+    200 with `{"id": "..."}` (the message id in the body, not a header)."""
     key, from_email, from_name = _creds()  # type: ignore[misc]  — not None when not mock
-    content = [{"type": "text/plain", "value": text}]
-    if html:
-        content.append({"type": "text/html", "value": html})  # text/plain MUST come first
+    from_str = f"{from_name} <{from_email}>" if from_name else from_email
     payload: dict[str, Any] = {
-        "personalizations": [{"to": [{"email": addr}]}],
-        "from": {"email": from_email, "name": from_name},
+        "from": from_str,
+        "to": [addr],
         "subject": subject,
-        "content": content,
+        "text": text,
     }
+    if html:
+        payload["html"] = html
     if headers_extra:
         payload["headers"] = headers_extra
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             resp = await client.post(
-                _SENDGRID_URL,
+                _RESEND_URL,
                 json=payload,
                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
             )
     except Exception as e:  # noqa: BLE001 — transport/timeout → retryable
-        raise EmailError(f"SendGrid request failed: {e}") from e
+        raise EmailError(f"Resend request failed: {e}") from e
 
     if resp.status_code in (200, 201, 202):
-        return {
-            "is_mock": False,
-            "to": addr,
-            "sid": resp.headers.get("X-Message-Id"),
-            "status": "sent",
-        }
+        try:
+            msg_id = (resp.json() or {}).get("id")
+        except Exception:  # noqa: BLE001 — a 2xx with an odd body still counts as sent
+            msg_id = None
+        return {"is_mock": False, "to": addr, "sid": msg_id, "status": "sent"}
     # A bad API key is a config error, not a transient one — don't burn retries.
     if resp.status_code in (401, 403):
         raise EmailError(
-            f"SendGrid auth rejected ({resp.status_code}) — check SENDGRID_API_KEY / "
-            "verified sender (EMAIL_FROM)",
+            f"Resend auth rejected ({resp.status_code}) — check RESEND_API_KEY / "
+            "verified sending domain (EMAIL_FROM)",
             code="email_auth_failed",
         )
     body = (resp.text or "")[:300]
-    raise EmailError(f"SendGrid send failed ({resp.status_code}): {body}")
+    raise EmailError(f"Resend send failed ({resp.status_code}): {body}")
 
 
 def _subject(brief: dict) -> str:

@@ -1,4 +1,4 @@
-"""Email unsubscribe tokens (037) — stateless, signed, no DB row needed.
+"""Email unsubscribe tokens (038) — stateless, signed, no DB row needed.
 
 A one-click unsubscribe link must verifiably identify the user WITHOUT a login
 (it's clicked from an inbox) and WITHOUT being guessable/forgeable. We mint a
@@ -85,7 +85,7 @@ def _base_url() -> str:
 
     Prefer `PUBLIC_BACKEND_URL` (the Railway backend, where `/api/email/unsubscribe`
     actually lives — most robust, no proxy hop). Fall back to `PUBLIC_BASE_URL` (the
-    FRONTEND origin), which works because 037 adds an `/api/email/:path*` rewrite that
+    FRONTEND origin), which works because 038 adds an `/api/email/:path*` rewrite that
     proxies to the backend. Set `PUBLIC_BACKEND_URL` on the cron for directness.
     """
     base = os.getenv("PUBLIC_BACKEND_URL", "").strip() or os.getenv(

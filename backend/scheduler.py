@@ -53,7 +53,7 @@ _PUBLISH = os.getenv("PUBLISH_BRIEFS", "1") != "0"
 # where the gap is larger still). Set BRIEFING_DEDUP=0 to disable; --force bypasses.
 _DEDUP = os.getenv("BRIEFING_DEDUP", "1") != "0"
 _MIN_RESEND_HOURS = float(os.getenv("BRIEFING_MIN_RESEND_HOURS", "12"))
-# 037 — email is a SECOND delivery channel (P7-NOTIFY, email-first). Per-user opt-in
+# 038 — email is a SECOND delivery channel (P7-NOTIFY, email-first). Per-user opt-in
 # (`email_opt_in`, separate from the WhatsApp `opt_in`); a user with it on gets the
 # SAME brief emailed too. Best-effort/secondary: an email failure is logged
 # (channel="email") but does NOT fail the user's run — WhatsApp is the gating
@@ -89,7 +89,7 @@ async def _safe_log(user_id: str, **kw: Any) -> None:
 
 async def _process_one(c: dict, *, dry_run: bool) -> dict:
     """Build → (send → log) for one connection. Raises on unrecovered WhatsApp
-    failure (the caller logs it as `failed`). The 037 email leg is independent +
+    failure (the caller logs it as `failed`). The 038 email leg is independent +
     best-effort: it's attempted regardless of the WhatsApp outcome and its failure
     is logged but never raised (so an email-opted user still gets the brief even if
     their WhatsApp number is bad, and an email hiccup can't fail the run)."""
@@ -130,7 +130,7 @@ async def _process_one(c: dict, *, dry_run: bool) -> dict:
     await _safe_log(uid, status=status, channel="whatsapp", account_id=brief.get("account_id"),
                     as_of=brief.get("as_of"), provider_id=send.get("sid"))
 
-    # 037 — email (secondary channel; isolated, never raises into the user's run).
+    # 038 — email (secondary channel; isolated, never raises into the user's run).
     email_result = await _maybe_email(c, brief_with_link)
 
     return {**base, "status": status, "sid": send.get("sid"),
@@ -138,7 +138,7 @@ async def _process_one(c: dict, *, dry_run: bool) -> dict:
 
 
 async def _maybe_email(c: dict, brief_with_link: dict) -> dict | None:
-    """037 — if this user opted into email, send the SAME brief by email. Fully
+    """038 — if this user opted into email, send the SAME brief by email. Fully
     isolated: resolves the address, refuses a non-compliant send (real send with no
     unsubscribe link), sends with retries, logs `channel="email"`. Returns a small
     result dict (or None when the leg didn't run). Never raises."""

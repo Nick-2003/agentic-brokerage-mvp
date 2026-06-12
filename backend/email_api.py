@@ -1,4 +1,4 @@
-"""Public email-unsubscribe endpoint (037).
+"""Public email-unsubscribe endpoint (038).
 
 `/api/email/unsubscribe?token=…` — turns OFF a user's email briefings. No auth (it's
 clicked from an inbox); the signed token (`email_unsubscribe.py`) IS the capability

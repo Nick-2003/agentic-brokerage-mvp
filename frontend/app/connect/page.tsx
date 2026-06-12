@@ -375,7 +375,7 @@ function ConnectForm({
   const [queryId, setQueryId] = useState(existing?.flex_query_id ?? '');
   const [whatsapp, setWhatsapp] = useState(existing?.whatsapp_number ?? '');
   const [optIn, setOptIn] = useState(existing?.opt_in ?? true);
-  const [emailOptIn, setEmailOptIn] = useState(existing?.email_opt_in ?? false); // 037
+  const [emailOptIn, setEmailOptIn] = useState(existing?.email_opt_in ?? false); // 038
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -446,7 +446,7 @@ function ConnectForm({
             I agree to receive a daily portfolio briefing on WhatsApp. I can pause it anytime.
           </span>
         </label>
-        {/* 037 — email channel: a separate, optional consent. Off by default. */}
+        {/* 038 — email channel: a separate, optional consent. Off by default. */}
         <label className="flex items-start gap-2 text-[12px] text-text-2">
           <input
             type="checkbox"

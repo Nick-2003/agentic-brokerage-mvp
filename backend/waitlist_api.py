@@ -35,7 +35,7 @@ class ConnectRequest(BaseModel):
     flex_query_id: str = Field(..., min_length=1, max_length=64)
     whatsapp_number: str = Field(..., max_length=24)  # E.164, e.g. +85291234567
     opt_in: bool = True
-    email_opt_in: bool = False  # 037 — separate consent from WhatsApp; default off
+    email_opt_in: bool = False  # 038 — separate consent from WhatsApp; default off
 
 
 class OptInRequest(BaseModel):

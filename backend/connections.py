@@ -81,7 +81,7 @@ async def upsert_my_connection(
     """Create/replace THIS user's IBKR connection. The Flex token is encrypted
     here; only ciphertext is sent to the DB. Returns the public view (no token).
 
-    `email_opt_in` (037) is a SEPARATE consent from `opt_in` (WhatsApp) — default
+    `email_opt_in` (038) is a SEPARATE consent from `opt_in` (WhatsApp) — default
     off; the email channel only sends when the user explicitly ticks it.
     """
     row = {
@@ -151,7 +151,7 @@ async def set_opt_in_by_whatsapp(whatsapp_number: str, opt_in: bool) -> int:
 
 
 async def set_email_opt_in_admin(user_id: str, opt_in: bool) -> int:
-    """Flip `email_opt_in` for a user. SERVICE KEY — used by the 037 one-click
+    """Flip `email_opt_in` for a user. SERVICE KEY — used by the 038 one-click
     unsubscribe endpoint, which has no user JWT (it's clicked from an inbox; the
     signed token is the identity). Flips ONLY email — `opt_in` (WhatsApp) is
     untouched, so the channels unsubscribe independently. Returns rows updated.
@@ -175,7 +175,7 @@ async def get_user_email_admin(user_id: str) -> str | None:
     is gone or has no email (never raises into the cron — a missing email just
     means "can't email this user", logged + skipped by the caller).
 
-    The 037 email channel sends to this address — the same verified email the user
+    The 038 email channel sends to this address — the same verified email the user
     signed in with (P4.1 magic link), so there's no separate email-capture step.
     """
     c = await _admin_client()

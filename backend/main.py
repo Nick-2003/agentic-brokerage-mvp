@@ -44,9 +44,9 @@ load_dotenv()
 import brief_api  # noqa: E402  (W6.3 — public brief permalink GET /api/brief/{token})
 import connections  # noqa: E402  (W4 — connect/waitlist storage diagnostics)
 import db  # noqa: E402
-import email_api  # noqa: E402  (037 — public email-unsubscribe endpoint)
-import email_delivery  # noqa: E402  (037 — email channel diagnostics)
-import email_unsubscribe  # noqa: E402  (037 — unsubscribe-token config diagnostics)
+import email_api  # noqa: E402  (038 — public email-unsubscribe endpoint)
+import email_delivery  # noqa: E402  (038 — email channel diagnostics)
+import email_unsubscribe  # noqa: E402  (038 — unsubscribe-token config diagnostics)
 import memory  # noqa: E402
 import observability  # noqa: E402
 import security  # noqa: E402  (W6.6 — rate limit + security headers)
@@ -87,7 +87,7 @@ app.include_router(waitlist_api.router)
 app.include_router(webhooks.router)
 # W6.3 (pivot) — public brief permalink (GET /api/brief/{token}).
 app.include_router(brief_api.router)
-# 037 (pivot) — public email unsubscribe (GET/POST /api/email/unsubscribe).
+# 038 (pivot) — public email unsubscribe (GET/POST /api/email/unsubscribe).
 app.include_router(email_api.router)
 
 
@@ -122,7 +122,7 @@ async def healthz() -> dict[str, Any]:
         "memory_configured": memory.memory_configured(),
         # W4 connect/waitlist diagnostics (Supabase + Flex-token encryption ready).
         "connect_storage_configured": connections.connect_storage_configured(),
-        # 037 email-channel diagnostics: real send needs BOTH SendGrid creds AND an
+        # 038 email-channel diagnostics: real send needs BOTH Resend creds AND an
         # unsubscribe secret (no unsubscribe → no send). False here ⇒ email logs only.
         "email_configured": email_delivery.email_configured() and email_unsubscribe.configured(),
     }

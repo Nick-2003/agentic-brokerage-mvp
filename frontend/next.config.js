@@ -32,7 +32,7 @@ const nextConfig = {
       { source: '/api/ibkr/:path*', destination: `${backend}/api/ibkr/:path*` },
       // W6.3 (pivot) — public brief permalink.
       { source: '/api/brief/:token', destination: `${backend}/api/brief/:token` },
-      // 037 (pivot) — public email unsubscribe (so a PUBLIC_BASE_URL-based unsub
+      // 038 (pivot) — public email unsubscribe (so a PUBLIC_BASE_URL-based unsub
       // link resolves to the backend; prefer PUBLIC_BACKEND_URL to skip this hop).
       { source: '/api/email/:path*', destination: `${backend}/api/email/:path*` },
     ];
