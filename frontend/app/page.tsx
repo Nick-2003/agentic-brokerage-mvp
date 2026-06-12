@@ -303,6 +303,9 @@ function Header() {
 }
 
 function Hero({ pinnedCount, portfolio }: { pinnedCount: number; portfolio: PortfolioSummary | null }) {
+  // 035: the signed-in account email, shown above "Portfolio value". Null in demo
+  // mode (no session) → the line is omitted.
+  const email = useAuth().session?.user?.email ?? null;
   // Fall back to the established demo numbers while loading / on fetch failure,
   // so the header is never empty or broken.
   const hasData = portfolio != null && portfolio.total_equity != null;
@@ -321,6 +324,9 @@ function Hero({ pinnedCount, portfolio }: { pinnedCount: number; portfolio: Port
 
   return (
     <div className="px-6 pt-5 pb-1">
+      {email && (
+        <div className="text-[11px] text-text-3 mb-1 truncate" title={email}>{email}</div>
+      )}
       <div className="text-xs text-text-3 uppercase tracking-[0.06em] mb-1.5">Portfolio value</div>
       <div className="text-4xl font-semibold -tracking-tight">{equityText}</div>
       <div className={`mt-1 text-sm font-medium ${up ? 'text-green-DEFAULT' : 'text-red-DEFAULT'}`}>
@@ -380,7 +386,7 @@ function SidePanel({
       </div>
 
       <div className="mt-6 text-[11px] text-white/45">
-        Backend status: <a href="/api/healthz" target="_blank" className="underline">/api/healthz</a>
+        Backend status: <a href="/api/healthz" target="_blank" className="underline">/api/healthz</a>\n
         Connect: <a href="/connect" target="_blank" className="underline">/connect</a>
       </div>
     </div>
