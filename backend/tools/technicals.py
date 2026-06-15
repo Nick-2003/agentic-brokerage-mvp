@@ -124,6 +124,155 @@ def _use_mock_ta() -> bool:
     return os.getenv("USE_MOCK_TA", "0") == "1"
 
 
+# ---------------------------------------------------------------------------
+# yfinance-computed indicators (043) — the real, key-less, prod-ready TA path.
+#
+# Covers ANY yfinance ticker (US + Hong Kong + … ) by computing SMA/RSI/MACD
+# from daily candles in Python (pure pandas, via the DataFrame yfinance returns
+# — no new dependency, no TradingView Desktop). This is what lets the agent
+# assess HK-listed names like 1398.HK; before 043 the only real path was
+# TradingView (local-only) and the mock covered ~11 US tickers, so HK → no_coverage.
+# ---------------------------------------------------------------------------
+
+# Base-ccy symbol for the price/level display (HK accounts are HKD → "HK$").
+_CCY_SYMBOL = {"USD": "$", "HKD": "HK$", "EUR": "€", "GBP": "£", "JPY": "¥", "CNY": "¥", "CNH": "¥"}
+
+# yfinance period/interval per requested timeframe (enough bars for SMA 200).
+_TF_PERIOD = {"1D": "1y", "1W": "5y", "4H": "60d", "1H": "30d"}
+_TF_INTERVAL = {"1D": "1d", "1W": "1wk", "4H": "60m", "1H": "60m"}
+
+
+def _ccy_symbol(code: str | None) -> str:
+    if not code:
+        return "$"
+    return _CCY_SYMBOL.get(code.upper(), f"{code.upper()} ")
+
+
+def _yfinance_ta_available() -> bool:
+    try:
+        import yfinance  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def _tradingview_configured() -> bool:
+    """True when a TradingView MCP server is set up (local dev). When it isn't
+    (e.g. Railway prod), the real path skips TradingView and computes from
+    yfinance — so we don't surface `tradingview_mcp_unreachable` for HK/US alike.
+    Gated on the absolute path to the MCP server, the unambiguous signal."""
+    return bool(os.getenv("TRADINGVIEW_MCP_ARGS", "").strip())
+
+
+def _last(series) -> float | None:  # noqa: ANN001 — pandas Series
+    """Last non-NaN value of a pandas Series, rounded, or None."""
+    s = series.dropna()
+    return round(float(s.iloc[-1]), 2) if len(s) else None
+
+
+def _compute_indicators(closes) -> dict[str, float]:  # noqa: ANN001 — pandas Series of closes
+    """SMA 10/20/50/200, EMA 20, RSI 14 (Wilder), MACD 12/26/9 — from the close
+    series, using only pandas Series methods (no `import pandas`/ta-lib needed).
+    Keys absent when there isn't enough history for that indicator."""
+    out: dict[str, float | None] = {}
+    n = len(closes)
+    for w in (10, 20, 50, 200):
+        out[f"SMA {w}"] = _last(closes.rolling(w).mean()) if n >= w else None
+    out["EMA 20"] = _last(closes.ewm(span=20, adjust=False).mean()) if n >= 20 else None
+    if n >= 15:  # RSI 14, Wilder's smoothing
+        delta = closes.diff()
+        gain = delta.clip(lower=0)
+        loss = (-delta).clip(lower=0)
+        avg_gain = gain.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
+        avg_loss = loss.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
+        # No-loss windows → avg_loss 0 → rs +inf → RSI 100 (the standard result),
+        # which falls out naturally; don't NaN it out (that dropped RSI entirely
+        # for an all-gains series).
+        rs = avg_gain / avg_loss
+        out["RSI 14"] = _last(100 - 100 / (1 + rs))
+    if n >= 26:  # MACD 12/26/9
+        macd_line = closes.ewm(span=12, adjust=False).mean() - closes.ewm(span=26, adjust=False).mean()
+        signal = macd_line.ewm(span=9, adjust=False).mean()
+        out["MACD"] = _last(macd_line)
+        out["MACD signal"] = _last(signal)
+        out["MACD hist"] = _last(macd_line - signal)
+    return {k: v for k, v in out.items() if v is not None}
+
+
+def _swing_levels(highs, lows, price: float, lookback: int = 60) -> dict[str, list[float]]:  # noqa: ANN001
+    """Support/resistance from the recent swing high/low (last `lookback` bars),
+    falling back to a ±4% band around price if the swing is on the wrong side."""
+    rec_high = round(float(highs.tail(lookback).max()), 2)
+    rec_low = round(float(lows.tail(lookback).min()), 2)
+    resistance = [rec_high] if rec_high > price else [round(price * 1.04, 2)]
+    support = [rec_low] if rec_low < price else [round(price * 0.96, 2)]
+    return {"resistance": resistance, "support": support}
+
+
+async def _yfinance_technical_levels(
+    ticker: str, timeframe: str, indicators: list[str],
+) -> dict[str, Any]:
+    """Compute indicators from yfinance daily candles. Real, key-less, covers
+    HK + US. Same widget contract as the mock/TradingView paths, plus `currency`
+    (base ccy) and the full `indicator_values` (SMA/RSI/MACD) for the agent to
+    narrate. Honest `error` on no data — never a fabricated number."""
+    if not _yfinance_ta_available():
+        return {"error": "no_coverage", "ticker": ticker,
+                "message": "no market-data provider available for technicals"}
+    import yfinance as yf
+
+    period = _TF_PERIOD.get(timeframe, "1y")
+    interval = _TF_INTERVAL.get(timeframe, "1d")
+
+    def _pull():  # sync yfinance → run in a worker thread
+        t = yf.Ticker(ticker)
+        df = t.history(period=period, interval=interval)
+        ccy = None
+        try:
+            ccy = (t.fast_info or {}).get("currency")
+        except Exception:  # noqa: BLE001 — fast_info is best-effort
+            ccy = None
+        return df, ccy
+
+    try:
+        df, ccy = await asyncio.to_thread(_pull)
+    except Exception as e:  # noqa: BLE001 — network/transport
+        log.warning("yfinance TA fetch failed for %s: %s", ticker, e)
+        return {"error": "market_data_fetch_failed", "ticker": ticker, "message": str(e)[:200]}
+
+    if df is None or getattr(df, "empty", True) or "Close" not in getattr(df, "columns", []):
+        return {"error": "no_coverage", "ticker": ticker, "message": f"no candles for {ticker}"}
+    closes = df["Close"].dropna()
+    if len(closes) < 20:
+        return {"error": "insufficient_history", "ticker": ticker,
+                "message": f"only {len(closes)} bars for {ticker}"}
+
+    indicator_values = _compute_indicators(closes)
+    last_close = round(float(closes.iloc[-1]), 2)
+    key_levels = _swing_levels(df["High"], df["Low"], last_close)
+    trend = _infer_trend(last_close, indicator_values)
+    sma200 = indicator_values.get("SMA 200")
+    # indicators_applied drives the chart legend — the requested SMAs we have.
+    applied = [i for i in indicators if i in indicator_values] or \
+        [k for k in ("SMA 50", "SMA 200") if k in indicator_values]
+    return {
+        "ticker": ticker,
+        "timeframe": timeframe,
+        "current_price": last_close,
+        "currency": _ccy_symbol(ccy),
+        "indicators_applied": applied,
+        "indicator_values": indicator_values,
+        "key_levels": key_levels,
+        "trend": trend,
+        "price_above_sma200": (sma200 is not None and last_close > sma200),
+        "bars": len(closes),
+        "is_mock": False,
+        "screenshot_url": "",  # no TradingView screenshot on this path
+        "source": "yfinance_computed",
+        "sources": [{"name": f"Daily OHLC via yfinance · {len(closes)}d"}],
+    }
+
+
 # ----- Parsers for the actual `tradesdontlie/tradingview-mcp` response shapes
 # (sourced from src/core/data.js + src/core/capture.js in the sibling repo,
 # verified pre-apply against the JS source; proposal 023). -----
@@ -502,14 +651,34 @@ async def get_technical_levels(args: dict[str, Any], user_id: str) -> dict[str, 
     ticker = (args.get("ticker") or "").upper()
     timeframe = args.get("timeframe", "1D")
     indicators = args.get("indicators") or ["SMA 50", "SMA 200"]
-    # Inline if/else (matches the three verb tools below). The previous
-    # `_branch(real_coro, mock_coro)` helper eagerly constructed both
-    # coroutines and only awaited one — the other leaked, triggering a
-    # `RuntimeWarning: coroutine '_mock_technical_levels' was never awaited`.
-    # Proposal 004.
+
+    # Source priority (043):
+    #   1. Deterministic mock (USE_MOCK_TA=1) — offline/demo. Only covers the
+    #      US MOCK_QUOTES set; a non-covered ticker (e.g. 1398.HK) FALLS THROUGH
+    #      to the real yfinance path, so HK works even in the mock default
+    #      (incl. today's Railway USE_MOCK_TA=1) — no flag change needed.
+    #   2. TradingView Desktop (local dev, when configured) — the rich
+    #      screenshot/"talk to charts" path. On failure, fall through (don't
+    #      lose the assessment).
+    #   3. yfinance-computed indicators — real, key-less, covers HK + US,
+    #      production-ready (no TradingView). The default real path.
     if _use_mock_ta():
-        return await _mock_technical_levels(ticker, timeframe, indicators)
-    return await _real_technical_levels(ticker, timeframe, indicators)
+        m = await _mock_technical_levels(ticker, timeframe, indicators)
+        if "error" not in m:
+            return m
+        if not _yfinance_ta_available():
+            return m  # honest no_coverage when fully offline
+        log.info("mock TA has no coverage for %s; computing from yfinance", ticker)
+        return await _yfinance_technical_levels(ticker, timeframe, indicators)
+
+    if _tradingview_configured():
+        tv = await _real_technical_levels(ticker, timeframe, indicators)
+        if "error" not in tv:
+            return tv
+        log.info("TradingView TA failed for %s (%s); computing from yfinance",
+                 ticker, tv.get("error"))
+
+    return await _yfinance_technical_levels(ticker, timeframe, indicators)
 
 
 async def chart_apply_indicator(args: dict[str, Any], user_id: str) -> dict[str, Any]:
@@ -651,10 +820,14 @@ register(
     ToolDef(
         name="get_technical_levels",
         description=(
-            "Get technical analysis for one ticker: current price, configured "
-            "indicator values (SMA 50, SMA 200, EMA 20, RSI 14, VWAP), key "
-            "support and resistance levels, trend label, and a chart screenshot "
-            "URL. Use this to build a ta_chart widget."
+            "Get technical analysis for one ticker: current price (in the ticker's "
+            "own currency — see `currency`), indicator values (`indicator_values`: "
+            "SMA 10/20/50/200, EMA 20, RSI 14, and MACD/MACD signal/MACD hist), key "
+            "support and resistance levels, a trend label, `price_above_sma200`, and "
+            "(in local dev with TradingView) a chart screenshot. Works for US AND "
+            "non-US tickers — including Hong Kong, e.g. 1398.HK — computed from daily "
+            "candles. Use this to build a ta_chart widget; cite the indicator values "
+            "in `trend_summary_html`."
         ),
         input_schema={
             "type": "object",

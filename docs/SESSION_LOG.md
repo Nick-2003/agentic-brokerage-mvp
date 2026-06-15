@@ -916,6 +916,7 @@ Acted on the prior session's "next decision": drafted **`proposed_changes/P6-dep
 **Confirmed the Railway-vs-Vercel split is not an either/or** (Nicholas asked): the architecture is **locked** — Railway hosts the **backend web service** (SSE loop, Twilio webhooks, permalink API — needs a long-lived server) *and* the **briefing cron** (a 2nd service on the same image); Vercel hosts the **frontend**. The cron is a Railway cron service running `uv run python -m scheduler` directly — deliberately **no public trigger endpoint**, because the briefing send is a system job, never an agent tool (SECURITY threat 1). A Vercel cron hitting an HTTP route would have created exactly that forbidden trigger surface.
 
 **Built:**
+
 - `backend/railway.cron.json` (NEW) — cron service config: `startCommand: uv run python -m scheduler`, `cronSchedule: 0 23 * * 1-5` (UTC = ~07:00 HKT, tunable), `restartPolicyType: NEVER`, no healthcheck. `scripts/run_briefings.py` isn't in the backend build context, so the cron invokes `scheduler.__main__` (which `run_daily_briefings()` + prints a JSON summary; cost-capped by `BRIEFING_MAX_USERS_PER_RUN`; per-user failures isolated → `briefing_deliveries.status='failed'`).
 - `frontend/vercel.json` (Edit) — removed the stale `CHANGE-ME` rewrites (2 routes); `next.config.js` owns all ~6 rewrites via `NEXT_PUBLIC_API_URL`, so the vercel.json block was a partial/stale override. Kept framework + install/build commands.
 - `docs/DEPLOY.md` (NEW) — the authoritative runbook: Supabase schema (3 files) → Railway backend → Railway cron → Vercel frontend → **cross-wire origins** (`PUBLIC_BASE_URL`=frontend, `NEXT_PUBLIC_API_URL`=backend, `CORS_ALLOW_ORIGINS`) → Twilio webhooks (`/api/twilio/inbound` + `/api/twilio/status`, exact URLs for signature match) → end-to-end smoke test. Plus a **secrets matrix** (every var × web/cron/frontend × prod value) and the production mock-flag posture (`REQUIRE_AUTH=1`, `USE_MOCK_IBKR/BRIEFING/WHATSAPP=0`, `USE_MOCK_TA=1`).
@@ -935,6 +936,7 @@ Acted on the prior session's "next decision": drafted **`proposed_changes/P6-dep
 The deploy went all the way: Nicholas applied the P6 proposal and stood up **Railway (backend web + briefing cron) + Vercel (frontend) + Supabase**, and the full `land → connect IBKR → daily WhatsApp brief` loop now runs against real cloud infra. Every failure surfaced **only on the live deploy** (builds/images were always fine) — the same "verify against the live dependency" lesson as 002/006/025, now applied to infra. Six real-run fixes, each diagnosed from the actual logs Nicholas pasted:
 
 **Backend (Railway web service) — two boot crashes, both `Network › Healthcheck` "service unavailable":**
+
 1. **No writable HOME.** `useradd` ran without `--create-home`, so `/home/app` didn't exist → `uv run` couldn't create its cache under `$HOME/.cache/uv` → crash before binding the port. Fix in `Dockerfile`: `useradd --create-home` + `ENV UV_NO_CACHE=1` (the venv is fully built at image time, so the runtime cache is pure liability).
 2. **Unexpanded `${PORT}`.** `railway.json`'s `startCommand` overrides the Dockerfile `CMD`, and Railway runs the override in **exec form (no shell)** → `--port ${PORT:-8000}` reached uvicorn as the literal string → `invalid integer` crash. Fix: **drop `startCommand` from `railway.json`** so the Dockerfile `CMD` (`["sh","-c", …]`, which expands `$PORT`) runs. Backend then live — `Uvicorn running on 0.0.0.0:8080`, `/healthz 200` (all flags true; Railway injected `PORT=8080`).
 
@@ -951,6 +953,7 @@ The deploy went all the way: Nicholas applied the P6 proposal and stood up **Rai
 Also clarified, not bugs: Railway **cron runs only on its UTC schedule** (no "Run now"; config-as-code overrides the dashboard schedule; a redeploy doesn't fire it) — manual test via local run / near-future `cronSchedule` / `railway run`; and the **public domain is generated** (Settings → Networking), it isn't auto-assigned, and serves only once a deploy is healthy.
 
 **Decisions/notes:**
+
 - **Locked split confirmed in practice:** Railway = backend web + cron (2nd service, `python -m scheduler`, **no public trigger endpoint** — threat 1); Vercel = frontend. Not an either/or.
 - **`/healthz` `*_configured` flags are presence checks, not validity** — a present-but-wrong key passes health and fails at runtime (bit us on the Supabase key hunt).
 - All six fixes folded into the `proposed_changes/P6-deploy/` proposal (`Dockerfile`, `railway.json`, `next.config.js` are now edits, not "verified unchanged"); `docs/DEPLOY.md` gained a full **Troubleshooting** section (each gotcha above), a corrected anon-key validation test, the "generate the domain" step, and the cron-trigger methods. `STATUS.md` row marked **✅ STACK LIVE**.

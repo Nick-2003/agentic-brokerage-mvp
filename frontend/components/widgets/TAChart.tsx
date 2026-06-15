@@ -4,6 +4,8 @@ import { SafeHtml, Sources, WidgetCard } from './Sources';
 export function TAChart({ data, sources }: { data: TAChartData; sources: Source[] }) {
   const r1 = data.key_levels.resistance[0];
   const s1 = data.key_levels.support[0];
+  // 043: render in the ticker's own currency (e.g. HK$ for 1398.HK), not a hardcoded $.
+  const ccy = data.currency ?? '$';
   // Bug fix from proposal 002 §4.8: the prior version rendered <MockChartSvg /> unconditionally
   // and ignored `data.screenshot_url`. Even when the backend returned a real TradingView
   // screenshot (base64 data URL), the user saw the mock SVG. Now render the screenshot when
@@ -17,7 +19,7 @@ export function TAChart({ data, sources }: { data: TAChartData; sources: Source[
       <div className="bg-bg border border-border rounded-xl px-3.5 pt-3 pb-2.5 mb-3">
         {/* Chart slot. When TradingView MCP is live, this is the real screenshot. */}
         <div className="flex items-center justify-between text-[11px] mb-2">
-          <span className="font-semibold text-text text-[12px]">${data.current_price.toFixed(2)}</span>
+          <span className="font-semibold text-text text-[12px]">{ccy}{data.current_price.toFixed(2)}</span>
           <span className="text-text-3">{data.timeframe}</span>
         </div>
         {hasScreenshot ? (
@@ -39,8 +41,8 @@ export function TAChart({ data, sources }: { data: TAChartData; sources: Source[
 
       {/* Key level cells */}
       <div className="flex gap-2 mb-3">
-        <LevelCell label="Resistance" value={`$${r1}`} variant="r" />
-        <LevelCell label="Support" value={`$${s1}`} variant="s" />
+        <LevelCell label="Resistance" value={`${ccy}${r1}`} variant="r" />
+        <LevelCell label="Support" value={`${ccy}${s1}`} variant="s" />
       </div>
 
       <div className="bg-surface-2 rounded-xl px-3.5 py-2.5 text-[13px] leading-snug text-text">

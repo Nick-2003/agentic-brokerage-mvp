@@ -2,6 +2,7 @@
 
 import { AuthGate, useAuth } from '@/components/AuthGate';
 import { ChatBar } from '@/components/ChatBar';
+import { Markdown } from '@/components/Markdown';
 import { ThinkingCard, type Thought } from '@/components/ThinkingCard';
 import { WidgetRenderer } from '@/components/widgets/WidgetRenderer';
 import {
@@ -253,10 +254,10 @@ function ChatScreen() {
                 </div>
               ))}
 
-              {/* Plain text messages */}
+              {/* Plain text messages — rendered as markdown (042). */}
               {t.messages.map((m, i) => (
-                <div key={i} className="mt-3 bg-surface border border-border text-sm px-3.5 py-2.5 rounded-2xl rounded-bl-md max-w-[85%]">
-                  {m}
+                <div key={i} className="mt-3 bg-surface border border-border px-3.5 py-2.5 rounded-2xl rounded-bl-md max-w-[85%]">
+                  <Markdown>{m}</Markdown>
                 </div>
               ))}
 

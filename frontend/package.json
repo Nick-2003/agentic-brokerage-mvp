@@ -16,7 +16,9 @@
     "next": "^15.0.4",
     "posthog-js": "^1.205.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-markdown": "^9.0.1",
+    "remark-gfm": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

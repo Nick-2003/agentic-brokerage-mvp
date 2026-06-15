@@ -30,6 +30,7 @@ export type TAChartData = {
   ticker: string;
   timeframe: string;
   current_price: number;
+  currency?: string; // 043: base-ccy symbol (e.g. "HK$" for 1398.HK); defaults to "$"
   screenshot_url?: string;
   indicators_applied: string[];
   key_levels: { resistance: number[]; support: number[] };
