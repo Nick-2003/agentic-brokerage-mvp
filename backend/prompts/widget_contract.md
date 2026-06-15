@@ -76,6 +76,7 @@ Every widget has:
     "ticker": "NVDA",
     "timeframe": "1D",
     "current_price": 942.50,
+    "currency": "$",
     "screenshot_url": "https://...supabase.co/storage/.../nvda_1d.png",
     "indicators_applied": ["SMA 50", "SMA 200"],
     "key_levels": {
@@ -90,6 +91,8 @@ Every widget has:
   ]
 }
 ```
+
+`currency` is the symbol for the price + level figures — **copy it verbatim from `get_technical_levels.currency`** (e.g. `"HK$"` for a Hong Kong ticker like `1398.HK`, `"$"` for US). Don't assume `$`. `get_technical_levels` also returns `indicator_values` (SMA 10/20/50/200, EMA 20, RSI 14, MACD/MACD signal/MACD hist), `trend`, and `price_above_sma200` — copy whichever you cite into `trend_summary_html`; never compute or invent indicator numbers.
 
 ## order_ticket
 
