@@ -42,6 +42,7 @@ load_dotenv()
 
 # Import agent AFTER load_dotenv so module-level env reads work
 import brief_api  # noqa: E402  (W6.3 — public brief permalink GET /api/brief/{token})
+import chart_api  # noqa: E402  (044 — public chart-data GET /api/chart-data for in-app charts)
 import connections  # noqa: E402  (W4 — connect/waitlist storage diagnostics)
 import db  # noqa: E402
 import email_api  # noqa: E402  (038 — public email-unsubscribe endpoint)
@@ -87,6 +88,8 @@ app.include_router(waitlist_api.router)
 app.include_router(webhooks.router)
 # W6.3 (pivot) — public brief permalink (GET /api/brief/{token}).
 app.include_router(brief_api.router)
+# 044 (chat) — public chart-data for the in-app lightweight-charts ta_chart.
+app.include_router(chart_api.router)
 # 038 (pivot) — public email unsubscribe (GET/POST /api/email/unsubscribe).
 app.include_router(email_api.router)
 
