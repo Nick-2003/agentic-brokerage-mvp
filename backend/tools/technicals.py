@@ -209,22 +209,20 @@ def _swing_levels(highs, lows, price: float, lookback: int = 60) -> dict[str, li
     return {"resistance": resistance, "support": support}
 
 
-async def _yfinance_technical_levels(
-    ticker: str, timeframe: str, indicators: list[str],
-) -> dict[str, Any]:
-    """Compute indicators from yfinance daily candles. Real, key-less, covers
-    HK + US. Same widget contract as the mock/TradingView paths, plus `currency`
-    (base ccy) and the full `indicator_values` (SMA/RSI/MACD) for the agent to
-    narrate. Honest `error` on no data — never a fabricated number."""
+async def _fetch_ohlcv(ticker: str, timeframe: str):  # noqa: ANN201 — (DataFrame|None, str|None)
+    """Fetch daily candles from yfinance → `(DataFrame, currency_code)`, or
+    `(None, None)` when yfinance is unavailable / the fetch errors. **Shared (044)**
+    by the indicator-compute path (`_yfinance_technical_levels`) and the chart-data
+    endpoint (`chart_api.py`) so both read the SAME bars. Sync yfinance runs in a
+    worker thread; never raises."""
     if not _yfinance_ta_available():
-        return {"error": "no_coverage", "ticker": ticker,
-                "message": "no market-data provider available for technicals"}
+        return None, None
     import yfinance as yf
 
     period = _TF_PERIOD.get(timeframe, "1y")
     interval = _TF_INTERVAL.get(timeframe, "1d")
 
-    def _pull():  # sync yfinance → run in a worker thread
+    def _pull():
         t = yf.Ticker(ticker)
         df = t.history(period=period, interval=interval)
         ccy = None
@@ -235,11 +233,20 @@ async def _yfinance_technical_levels(
         return df, ccy
 
     try:
-        df, ccy = await asyncio.to_thread(_pull)
+        return await asyncio.to_thread(_pull)
     except Exception as e:  # noqa: BLE001 — network/transport
-        log.warning("yfinance TA fetch failed for %s: %s", ticker, e)
-        return {"error": "market_data_fetch_failed", "ticker": ticker, "message": str(e)[:200]}
+        log.warning("yfinance OHLCV fetch failed for %s: %s", ticker, e)
+        return None, None
 
+
+async def _yfinance_technical_levels(
+    ticker: str, timeframe: str, indicators: list[str],
+) -> dict[str, Any]:
+    """Compute indicators from yfinance daily candles. Real, key-less, covers
+    HK + US. Same widget contract as the mock/TradingView paths, plus `currency`
+    (base ccy) and the full `indicator_values` (SMA/RSI/MACD) for the agent to
+    narrate. Honest `error` on no data — never a fabricated number."""
+    df, ccy = await _fetch_ohlcv(ticker, timeframe)
     if df is None or getattr(df, "empty", True) or "Close" not in getattr(df, "columns", []):
         return {"error": "no_coverage", "ticker": ticker, "message": f"no candles for {ticker}"}
     closes = df["Close"].dropna()

@@ -35,6 +35,8 @@ const nextConfig = {
       // 038 (pivot) — public email unsubscribe (so a PUBLIC_BASE_URL-based unsub
       // link resolves to the backend; prefer PUBLIC_BACKEND_URL to skip this hop).
       { source: '/api/email/:path*', destination: `${backend}/api/email/:path*` },
+      // 044 (chat) — public chart-data for the in-app lightweight-charts ta_chart.
+      { source: '/api/chart-data', destination: `${backend}/api/chart-data` },
     ];
   },
   // W6.6 — security headers on every page (the live /connect + /b/[token] surface).
