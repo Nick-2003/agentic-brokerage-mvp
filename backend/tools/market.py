@@ -1,9 +1,17 @@
 """Market data tools — quotes, recent news, macro snapshot.
 
-Real implementation: yfinance for quotes/history, Anthropic web search (or
-NewsAPI) for news. Mock fallback for offline dev.
+Real implementation: yfinance for quotes/history AND for news/macro (proposal
+045 — the real news/macro engine already lived in `backend/news_context.py`,
+built + live-verified for the W2 briefing; 045 routes these two chat tools to
+it instead of returning hand-tuned mock). Mock fallback for offline dev.
 
-To force mock mode set USE_MOCK_MARKET=1.
+To force mock mode set USE_MOCK_MARKET=1 (deterministic demo — quotes, news,
+and macro all stay hand-tuned). USE_MOCK_NEWS=1 forces mock for news/macro
+specifically while leaving quotes real.
+
+Mock-first discipline (same as the rest of the file): the real path runs only
+when yfinance is importable and mock isn't forced; the deterministic demo
+(USE_MOCK_MARKET=1) is byte-identical to pre-045.
 """
 
 from __future__ import annotations
@@ -14,6 +22,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from . import ToolDef, register
+
+# Top-level sibling module (backend/ is on sys.path; NOT a package — same import
+# convention as research.py's `from fmp_client import …`). `news_context` is the
+# system-side real news/macro helper (pure stdlib at import time; yfinance is
+# lazy-imported inside it), so importing it here is safe and cheap.
+import news_context  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Hand-tuned mock prices matching the demo HTML so flows are deterministic.
@@ -55,6 +69,23 @@ def _mock_quote(ticker: str) -> dict[str, Any] | None:
 
 def _use_mock() -> bool:
     return os.getenv("USE_MOCK_MARKET", "0") == "1" or not _yfinance_available()
+
+
+def _use_mock_news() -> bool:
+    """Whether news/macro should return hand-tuned mock (proposal 045).
+
+    Mirrors `_use_mock()` for the news/macro tools, with one extra explicit
+    override so an operator can keep quotes real but pin news to mock:
+      - USE_MOCK_NEWS=1                → force mock (news/macro only)
+      - USE_MOCK_MARKET=1              → force mock (the deterministic demo)
+      - yfinance not importable        → mock (can't fetch real news)
+    Otherwise the real `news_context` (yfinance) path runs.
+    """
+    if os.getenv("USE_MOCK_NEWS") == "1":
+        return True
+    if os.getenv("USE_MOCK_MARKET", "0") == "1":
+        return True
+    return not _yfinance_available()
 
 
 def _yfinance_available() -> bool:
@@ -214,23 +245,38 @@ _NEWS_TEMPLATES: dict[str, list[dict[str, Any]]] = {
 
 
 async def get_company_news(args: dict[str, Any], user_id: str) -> dict[str, Any]:
-    """Get recent news for one or more tickers (mock for now).
+    """Get recent news for one or more tickers.
+
+    Real path (proposal 045): per-ticker headlines from yfinance via
+    `news_context.fetch_recent_news` — covers any yfinance symbol (US + HK,
+    e.g. 0700.HK). Mock path: the hand-tuned `_NEWS_TEMPLATES` (deterministic
+    demo / offline), selected by `_use_mock_news()`.
 
     Optional `since` (ISO-8601) filters to items at or after that timestamp —
     used by the filled-trade flow to surface what's happened since the fill.
+    Both paths honour it; ISO-8601-UTC lexicographic compare is correct.
 
-    Proposal 003 — bug B: timestamps are computed at CALL TIME, not at
-    module-import time, so the `since=filled_at` filter can actually match
-    recent items. Pre-003, the static anchor `_NOW = datetime.now(...)` at
-    module load meant every mock-news ts was strictly before the moment the
-    backend booted, and therefore strictly before any post-boot filled_at —
-    the filter rejected everything.
+    Proposal 003 — bug B (mock path): timestamps are computed at CALL TIME, not
+    at module-import time, so the `since=filled_at` filter can actually match
+    recent items.
     """
     tickers = args.get("tickers") or []
     if isinstance(tickers, str):
         tickers = [tickers]
     limit = int(args.get("limit", 5))
     since = args.get("since")  # ISO-8601 string; lexicographic compare works for ISO-8601 UTC
+
+    if not _use_mock_news():
+        # Real path — yfinance headlines. `fetch_recent_news` is best-effort
+        # per ticker (a failed symbol → empty list, never a fabricated item)
+        # and returns the SAME `news_by_ticker` shape, plus a per-item `url`.
+        # No silent fall-through to mock on failure: if yfinance isn't usable
+        # it surfaces `error: yfinance_unavailable` (still is_mock:False), which
+        # we pass through honestly (same rule as get_quote's yfinance_error).
+        res = await news_context.fetch_recent_news(tickers, limit=limit, since=since)
+        res.setdefault("source", "yfinance")
+        return res
+
     out: dict[str, list[dict[str, Any]]] = {}
     now = datetime.now(timezone.utc)
     for t in tickers[:10]:
@@ -255,8 +301,70 @@ async def get_company_news(args: dict[str, Any], user_id: str) -> dict[str, Any]
 # Macro snapshot — futures, yields, FX, key levels.
 # ---------------------------------------------------------------------------
 
+# Map news_context's macro indicators (keyed by yfinance symbol) → this tool's
+# legacy flat fields. Only the indicators news_context actually fetches are
+# mappable; the rest stay absent rather than fabricated (trust principle #1).
+#   ES=F → sp_futures_pct   NQ=F → nasdaq_futures_pct   ^TNX → 10Y yield level
+#   ^VIX → vix level        CL=F → WTI ($)              GC=F → gold ($)
+# Deliberately NOT mapped (no real free source → never invent): dow_futures_pct,
+# dxy_level, btc_usd, and fed_events_today / earnings_today (the latter was the
+# exact fabrication the W2 briefing fix #1 removed — an invented "FOMC 14:00").
+def _macro_from_indicators(indicators: list[dict[str, Any]]) -> dict[str, Any]:
+    by_sym = {i.get("symbol"): i for i in indicators if isinstance(i, dict)}
+
+    def pct(sym: str) -> float | None:
+        i = by_sym.get(sym)
+        return i.get("change_pct") if i else None
+
+    def level(sym: str) -> float | None:
+        i = by_sym.get(sym)
+        return i.get("price") if i else None
+
+    flat = {
+        "sp_futures_pct": pct("ES=F"),
+        "nasdaq_futures_pct": pct("NQ=F"),
+        "treasury_10y_yield_pct": level("^TNX"),
+        "vix": level("^VIX"),
+        "wti_crude_usd": level("CL=F"),
+        "gold_usd": level("GC=F"),
+    }
+    # Drop fields we couldn't source (don't emit nulls the agent might quote).
+    return {k: v for k, v in flat.items() if v is not None}
+
+
 async def get_macro_snapshot(args: dict[str, Any], user_id: str) -> dict[str, Any]:
-    """Pre-market futures and macro reference points. Mock data for MVP."""
+    """Current macro picture: index futures, 10Y yield, VIX, oil, gold.
+
+    Real path (proposal 045): live values from yfinance via
+    `news_context.fetch_macro_context` (ES=F/NQ=F/^VIX/^TNX/GC=F/CL=F through
+    `fast_info`), mapped to the legacy flat fields PLUS the richer `indicators`
+    list (each with a human `display` string) for the morning brief's
+    "what it means" line. Mock path: the deterministic demo dict.
+
+    Honest by design: the real path NEVER fabricates a Fed calendar or earnings
+    list (no reliable free source — this is the hallucination W2 fix #1 removed),
+    and only quotes indicators that actually fetched. If yfinance returns
+    nothing, surfaces `macro_unavailable` rather than blank/fake numbers.
+    """
+    if not _use_mock_news():
+        ctx = await news_context.fetch_macro_context()
+        if ctx.get("error"):
+            return {"is_mock": False, "source": "yfinance", **ctx}
+        indicators = ctx.get("indicators") or []
+        if not indicators:
+            return {
+                "is_mock": False,
+                "source": "yfinance",
+                "error": "macro_unavailable",
+                "message": "No macro indicators fetched cleanly from yfinance.",
+            }
+        return {
+            "is_mock": False,
+            "source": "yfinance",
+            "indicators": indicators,
+            **_macro_from_indicators(indicators),
+        }
+
     return {
         "is_mock": True,
         "sp_futures_pct": 0.4,
@@ -347,9 +455,11 @@ register(
     ToolDef(
         name="get_macro_snapshot",
         description=(
-            "Get the current macro picture: index futures, 10Y yield, DXY, VIX, oil, "
-            "gold, BTC, plus today's Fed events and earnings. Use for morning briefs "
-            "and risk context."
+            "Get the current macro picture: S&P/Nasdaq index futures, 10Y yield, VIX, "
+            "WTI crude, gold (live via yfinance). Also returns an `indicators` list, "
+            "each with a ready-to-quote `display` string. Use for morning briefs and "
+            "risk context. Quote only the fields present — do not assume a Fed calendar "
+            "or earnings list (not a real-data field)."
         ),
         input_schema={
             "type": "object",

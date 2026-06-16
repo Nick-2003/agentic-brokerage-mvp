@@ -1066,3 +1066,19 @@ A working session against a 5-task list (proactive email · TradingView-via-Verc
 **Method note (carried from earlier this session):** dep-adding frontend proposals are verified by temp-apply → `pnpm install` → `tsc` → restore (package.json + lockfile + files all restored, live left clean); package-relative backend tools (`tools/technicals.py`) are tested by temp-applying then running the offline test, then restoring.
 
 **State:** unchanged at the product level. Both 042 + 043 **drafted/awaiting apply** (STATUS.md rows added; queue now 040, 041, 042, 043 awaiting apply — 036/038/039 already applied). 043 optional prod tweak: set `USE_MOCK_TA=0` on Railway to make *US* technicals real too (HK already works via the mock fall-through).
+
+---
+
+## 2026-06-12 (later ×2) · 044 — in-app TradingView charts (Lightweight Charts); the whole 036–044 batch APPLIED
+
+**Task 2 done — "TradingView charts via Vercel, no local TV" → proposal 044 (planned in plan mode, then built).** Decision (user-confirmed over an iframe embed): render charts **client-side with TradingView's open-source `lightweight-charts`**, fed by OUR yfinance OHLCV (reusing 043) — real candlesticks in the deployed app, no TradingView Desktop, no API key, base ccy (HK$), HK + US, numbers stay sourced.
+
+- **Out-of-band data (the key call):** a ~250-bar OHLCV array must NOT travel through the LLM, so instead of stuffing the widget JSON, the chart component fetches a dedicated **`GET /api/chart-data`** (new `backend/chart_api.py`; TTL cache; `candles:[]` on no-data; public, guarded by the W6.6 per-IP limit). Zero `agent.py`/widget-contract change. Refactored 043's yfinance pull into a shared **`_fetch_ohlcv`** (technicals.py) so the chart + the indicator values read the same bars — **behaviour-preserving (043 test still 18/18).**
+- **Frontend:** `lightweight-charts ^5` dep; `/api/chart-data` rewrite (**no CSP change** — `script-src 'self'` covers the bundled lib, `connect-src 'self'` the same-origin fetch); `lib/chart.ts`; `TAChart.tsx` rewritten (`'use client'` `ChartSlot` — candlesticks + SMA 50/200 overlays computed client-side + dashed S/R price lines + `ResizeObserver` + `chart.remove()` cleanup so a pinned chart survives; render priority **live chart → screenshot (local-TV) → `MockChartSvg`**).
+- **Verification:** backend **8/8** (`test_044_chart_data.py`) + 043 regression **18/18**; `py_compile` ✓; frontend `tsc` clean (temp-apply → `pnpm install` → restore). Interactive chart-verbs (`chart_apply_indicator`/draw/scroll) + pattern recognition kept out of scope (a later follow-on).
+
+**Applications (this session's whole batch is now live).** Nicholas applied **041 (docs reconciliation)** + **044**. So **036/038/039/040/041/042/043/044 are ALL APPLIED** (037 superseded by 038); the `proposed_changes/` queue is empty. Net effect on the **chat MVP**: the main page now shows the signed-in user's **own read-only IBKR** portfolio (per-user, nil-until-connected, trading disabled), with a `/connect`↔`/` link; chat replies render as **markdown**; technical analysis covers **HK + US** (yfinance SMA/RSI/MACD) and draws a **live in-app candle chart** (no local TV). The pivot also gained a proactive **email** channel (Resend). And the top-level docs (README/CLAUDE/METRICS/SCOPE/SECURITY) are reconciled with this log (041).
+
+**Operator follow-ups (unchanged + new):** email go-live needs a Resend-verified domain/DNS + env (`adventai.io`; see `proposed_changes/038-email-briefing-resend/`); 043 optional `USE_MOCK_TA=0` on Railway to make US technicals real; the standing W6.4a / W6.2b items in `OPERATOR_CHECKLIST.md`.
+
+**State:** chat MVP materially upgraded (per-user IBKR portfolio, markdown, HK technicals, in-app charts); pivot gained email; docs current. Everything code-complete + applied; remaining work is external/operator only.
