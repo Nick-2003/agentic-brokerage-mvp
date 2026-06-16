@@ -23,6 +23,11 @@ P4.3 (025):     each turn recalls this user's Mem0 memories (scoped by the
                 authenticated `user_id`) and injects them into the system prompt;
                 after the turn it stores the new salient facts. No-op when
                 unconfigured. Scope is ALWAYS `auth.user_id` — never client input.
+046:            conversation memory — for a persisted conversation, the prior
+                turns are loaded (RLS-scoped) and seeded into the agent loop so
+                it remembers earlier messages in the same chat. Distinct from
+                P4.3 (cross-conversation user *facts*); this is in-thread
+                history. Demo mode (no persistence) stays historyless.
 """
 
 from __future__ import annotations
@@ -165,9 +170,13 @@ async def chat(
     hiccup never breaks the user-facing stream.
     """
 
-    # ---- pre-stream: ensure a conversation, write the user message ----
+    # ---- pre-stream: ensure a conversation, load prior turns, write the user message ----
     conversation_id: str | None = None
     conversation_title: str | None = None
+    # P046 — conversation memory: the prior turns of THIS conversation, as an
+    # Anthropic-ready history list to seed run_agent with. Empty for a new
+    # conversation and in demo mode (no token/persistence) → no behaviour change.
+    agent_history: list[dict[str, str]] = []
     if auth.token and db.persistence_configured():
         try:
             conv = await db.get_or_create_conversation(
@@ -179,6 +188,14 @@ async def chat(
             if conv:
                 conversation_id = conv["id"]
                 conversation_title = conv.get("title")
+                # P046: load the thread BEFORE writing the current message, so
+                # history excludes it. RLS-scoped; bounded by db.to_agent_history;
+                # best-effort — a hiccup just means this turn runs historyless.
+                try:
+                    prior = await db.get_conversation_messages(auth.token, conversation_id)
+                    agent_history = db.to_agent_history(prior)
+                except Exception:
+                    agent_history = []
                 await db.add_message(
                     auth.token,
                     conversation_id,
@@ -189,6 +206,7 @@ async def chat(
         except Exception:
             # Don't break the stream on a DB hiccup; treat as if not persistable.
             conversation_id = None
+            agent_history = []
 
     async def event_stream():
         # Open the Langfuse trace for this turn. When unconfigured this yields
@@ -247,6 +265,7 @@ async def chat(
                     auth.user_id,
                     tracer=tracer,
                     memory_context=memory_context,
+                    history=agent_history,
                 ):
                     if ev["event"] == "widget":
                         widget_acc.append(ev["data"])

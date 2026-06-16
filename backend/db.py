@@ -175,3 +175,94 @@ async def get_conversation_messages(
         .execute()
     )
     return res.data or []
+
+
+# ---------------------------------------------------------------------------
+# Conversation memory (proposal 046) — turn persisted rows into a Claude-ready
+# history the agent loop can be seeded with, so the agent remembers earlier
+# turns in the SAME chat. Pure + side-effect-free (easy to unit-test): main.py
+# loads the rows (RLS-scoped) and calls this; agent.run_agent seeds `messages`.
+# ---------------------------------------------------------------------------
+
+
+def to_agent_history(
+    rows: list[dict[str, Any]],
+    *,
+    max_messages: int | None = None,
+    max_chars: int | None = None,
+) -> list[dict[str, str]]:
+    """Convert persisted message rows (oldest-first, as `get_conversation_messages`
+    returns) into a list of ``{"role", "content"}`` dicts safe to prepend to the
+    Anthropic ``messages`` array.
+
+    Guarantees (Anthropic requires strict user/assistant alternation, starting
+    with user):
+      - assistant rows use their stored markdown ``content``; a widget-only turn
+        (no text) becomes a short ``[Assistant showed a <type> widget]`` line —
+        we deliberately do NOT replay the widget's numeric JSON, so stale numbers
+        can't masquerade as fresh (trust principle #1) while continuity is kept;
+      - empty rows are skipped; consecutive same-role rows are merged;
+      - a leading assistant / trailing user is dropped, so the caller can append
+        the fresh user turn and preserve `user → assistant → … → user` ordering;
+      - bounded to the last ``max_messages`` turns and ``max_chars`` characters
+        (most-recent kept; oldest trimmed) to cap token cost. Defaults come from
+        ``CHAT_HISTORY_MAX_MESSAGES`` (20) / ``CHAT_HISTORY_MAX_CHARS`` (12000);
+        either ≤ 0 disables history (returns []).
+    """
+    if max_messages is None:
+        max_messages = int(os.getenv("CHAT_HISTORY_MAX_MESSAGES", "20"))
+    if max_chars is None:
+        max_chars = int(os.getenv("CHAT_HISTORY_MAX_CHARS", "12000"))
+    if not rows or max_messages <= 0 or max_chars <= 0:
+        return []
+
+    # 1. rows → (role, text), skipping empties; widget-only assistant → placeholder.
+    pairs: list[tuple[str, str]] = []
+    for r in rows:
+        role = r.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        text = (r.get("content") or "").strip()
+        if not text and role == "assistant":
+            widgets = r.get("widgets") or []
+            types = [w.get("type") for w in widgets
+                     if isinstance(w, dict) and w.get("type")]
+            if types:
+                text = f"[Assistant showed a {', '.join(types)} widget]"
+        if not text:
+            continue
+        pairs.append((role, text))
+
+    # 2. merge consecutive same-role messages.
+    merged: list[tuple[str, str]] = []
+    for role, text in pairs:
+        if merged and merged[-1][0] == role:
+            merged[-1] = (role, merged[-1][1] + "\n\n" + text)
+        else:
+            merged.append((role, text))
+
+    def _trim(seq: list[tuple[str, str]]) -> list[tuple[str, str]]:
+        s = list(seq)
+        while s and s[0][0] != "user":       # must start with a user turn
+            s.pop(0)
+        while s and s[-1][0] != "assistant":  # caller appends the fresh user turn
+            s.pop()
+        return s
+
+    merged = _trim(merged)
+
+    # 3. bound by message count (keep most recent), then re-trim.
+    if len(merged) > max_messages:
+        merged = _trim(merged[-max_messages:])
+
+    # 4. bound by total chars (keep most recent; always keep ≥1), then re-trim.
+    total = 0
+    kept_rev: list[tuple[str, str]] = []
+    for role, text in reversed(merged):
+        total += len(text)
+        if kept_rev and total > max_chars:
+            break
+        kept_rev.append((role, text))
+    merged = _trim(list(reversed(kept_rev)))
+
+    return [{"role": role, "content": text} for role, text in merged]
