@@ -238,6 +238,7 @@ async def run_agent(
     user_id: str = "demo",
     tracer: Tracer = NOOP_TRACER,
     memory_context: str = "",
+    history: list[MessageParam] | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Run one user turn through the Claude tool-use loop.
 
@@ -247,6 +248,14 @@ async def run_agent(
     ``memory_context`` (P4.3) is this user's recalled Mem0 facts, pre-formatted
     as a system-prompt block by ``memory.recall()``. It's appended to the system
     prompt for THIS turn only; ``""`` (the default) leaves the prompt unchanged.
+
+    ``history`` (proposal 046 — conversation memory) is this conversation's
+    prior turns as Anthropic ``{"role", "content"}`` messages (built by
+    ``db.to_agent_history`` from the persisted thread — alternation-safe and
+    bounded), seeded BEFORE the current user message so the agent remembers
+    earlier turns in the same chat. ``None`` (the default) → behaviour identical
+    to pre-046 (single-message turn). ``main.py`` only supplies it for persisted
+    (authenticated) conversations; demo turns stay historyless.
     """
     start_time = time.monotonic()
     client = _get_client()
@@ -258,7 +267,12 @@ async def run_agent(
         if isinstance(memory_context, str) and memory_context
         else SYSTEM_PROMPT
     )
-    messages: list[MessageParam] = [{"role": "user", "content": user_message}]
+    # Proposal 046: seed with this conversation's prior turns (if any) so the
+    # agent has multi-turn memory, then append the current user message. `list(...)`
+    # copies the caller's history so the in-loop appends (assistant/tool turns)
+    # don't mutate it.
+    messages: list[MessageParam] = list(history or [])
+    messages.append({"role": "user", "content": user_message})
     iterations = 0
     # P5 (034): accumulate this turn's LLM token usage across iterations so the
     # `done` event can surface it for the per-user daily token budget.
