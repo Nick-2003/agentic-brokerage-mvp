@@ -3,9 +3,10 @@
 A prompt-first mobile brokerage where every action — research, charting, trading, alerts, risk audits — is a prompt that generates a personalised widget you can pin to your dashboard.
 
 > ## ⚠️ ACTIVE PIVOT (2026-06-05) — IBKR + WhatsApp/email waitlist briefing
+>
 > The chat MVP above is **PAUSED**. The **live, deployed** product is a pre-launch **waitlist briefing**: land → join waitlist → magic-link sign-in → **connect Interactive Brokers** via a one-time Flex token → a daily **WhatsApp + email** narrative briefing of what moved in your portfolio (Claude writes it; Twilio + Resend deliver it; a web permalink holds the full text).
 >
-> **Live URLs:** frontend **https://agentic-brokerage-mvp-front.vercel.app** (`/connect`) · backend **https://agentic-brokerage-mvp-production.up.railway.app** (`/healthz`).
+> **Live URLs:** frontend **<https://agentic-brokerage-mvp-front.vercel.app>** (`/connect`) · backend **<https://agentic-brokerage-mvp-production.up.railway.app>** (`/healthz`).
 >
 > **Read first for the live product:** `self_management/DECISION_pivot_waitlist.md` (rationale), `self_management/PRIORITIES.md` (W1–W6 + status), `self_management/OPERATOR_CHECKLIST.md` (non-code remainder), `docs/DEPLOY.md` (deploy runbook). The chat-MVP setup below still works and is the reference for when chat resumes.
 
@@ -29,7 +30,7 @@ A prompt-first mobile brokerage where every action — research, charting, tradi
 `backend/.env.example` is the **source of truth** for every env var (with setup notes per provider). Accounts:
 
 | Service | Why | How to get the key |
-|---|---|---|
+| --- | --- | --- |
 | Anthropic | Claude API (chat + the brief narrative) | console.anthropic.com → API Keys → new key |
 | Supabase | Auth + Postgres + RLS + magic links | supabase.com → new project → free tier → URL + anon key + **service key** |
 | **Interactive Brokers** | **Read-only holdings/NAV (Flex Web Service)** — the live product + the main-page portfolio | IBKR Account Mgmt → set up an *Activity* Flex Query + a Flex Web Service token (see `backend/.env.example` "Holdings") |

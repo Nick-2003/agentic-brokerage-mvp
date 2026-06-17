@@ -15,6 +15,7 @@ We're optimising for *evidence of product-market fit*, not feature completion. P
 The Sean Ellis test (40%+ "very disappointed") is the gold standard once we have ≥30 actively engaged users.
 
 > ## ⚠️ ACTIVE PRODUCT: the IBKR + WhatsApp/email waitlist funnel (2026-06-05 pivot)
+>
 > The chat-MVP metrics below are **paused** with the chat product; the live waitlist product validates a different, simpler question — *will people connect their real brokerage and value a daily briefing?* Its funnel and signals:
 >
 > | Stage | Event (PostHog, W6.2 — PII-safe, no email) | What it proves |
@@ -77,6 +78,7 @@ Paper trades only — but the *intent* signal is what matters. If nobody ever wa
 Sent to all active users at D14 and again at D30:
 
 > *"How would you feel if you could no longer use this product?"*
+>
 > - Very disappointed
 > - Somewhat disappointed
 > - Not disappointed

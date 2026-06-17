@@ -3,7 +3,9 @@
 **This must pass before any tester touches the product.** Per the MVP guide: AI tools generate code that *works*, not code that's *inherently secure*. Functional bugs are visible; security bugs aren't, until they're exploited. We don't ship without explicit security review.
 
 > ## ⚠️ PIVOT SECURITY POSTURE (updated 2026-06-11) — the LIVE waitlist product
+>
 > The waitlist product (IBKR read + WhatsApp/email brief) is **deployed**, so its security subset is **done & live-verified** (the chat-MVP lockdown below stays the reference for when chat resumes). What changed / what's new:
+>
 > - **Threat 1 is now LOAD-BEARING and realized.** The daily brief's delivery (WhatsApp via Twilio, email via Resend) is a **system-side scheduled job, NEVER an agent tool** — the cron has no public trigger endpoint. This is precisely *why* the no-outbound-tools rule existed; see Threat 1 below.
 > - **New asset — the IBKR Flex token at rest.** Stored **Fernet-encrypted** app-side (`backend/token_crypto.py`, via the existing `cryptography`) in `ibkr_connections` (RLS); decrypted only by the cron's service key. See Threat 2.
 > - **New surface — outbound email (Resend)** with RFC 8058 one-click **unsubscribe** (HMAC-signed token, `backend/email_unsubscribe.py`); WhatsApp opt-out via PAUSE/RESUME + status-callback (W6.1b).

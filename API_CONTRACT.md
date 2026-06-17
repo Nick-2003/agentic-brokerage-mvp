@@ -129,20 +129,21 @@ data: <single-line JSON>\r\n
 ```
 
 > **Framing notes (these have bitten us — keep them):**
+>
 > - Lines end with `\r\n`; frames are separated by a blank line, i.e. `\r\n\r\n`. The frontend SSE parser (`frontend/lib/sse.ts`) splits frames on `/\r?\n\r?\n/` and lines on `/\r?\n/`. Splitting on `\n\n` alone parses **zero** events — that was a real bug.
 > - `sse-starlette` injects periodic keep-alive **comment** lines (`: ping - <timestamp>`). They are not events; ignore any line starting with `:`.
 > - Emission is incremental but the contract only promises a *stream of events* in order — a consumer must not assume timing.
 
 Event types (`agent.py` + `main.py`), in typical emission order:
 
-| `event`        | `data` payload                                              | meaning |
-|----------------|-------------------------------------------------------------|---------|
-| `conversation` | `{ "id": "uuid", "title": "…" \| null }`                    | **(P4.2)** Emitted at most once, *before* the agent stream starts, when the request is authenticated AND persistence is configured. The frontend captures this id and echoes it as `conversation_id` on subsequent turns. Absent in demo mode. |
-| `thought`      | `{ "text": "Reading your portfolio…" }`                     | one human-readable breadcrumb. 0..N. |
-| `tool_call`    | `{ "id": "toolu_…", "name": "get_quote", "args": { … } }`   | a tool was invoked. diagnostic. |
-| `tool_result`  | `{ "id": "toolu_…", "ok": true, "summary": "get_quote → 1 quotes" }` | result of the matching `tool_call` (same `id`). diagnostic. |
-| `widget`       | a Widget object — `{ "type", "data", "sources" }` (§7)      | the generative UI card. Typically exactly one, terminal. |
-| `message`      | `{ "text": "markdown…" }`                                   | plain markdown reply (loose chat, not pinnable). Terminal alternative to `widget`. |
+| `event` | `data` payload | meaning |
+| ---------------- | ---------------- | ---------------- |
+| `conversation` | `{ "id": "uuid", "title": "…" \| null }` | **(P4.2)** Emitted at most once, *before* the agent stream starts, when the request is authenticated AND persistence is configured. The frontend captures this id and echoes it as `conversation_id` on subsequent turns. Absent in demo mode. |
+| `thought` | `{ "text": "Reading your portfolio…" }` | one human-readable breadcrumb. 0..N. |
+| `tool_call` | `{ "id": "toolu_…", "name": "get_quote", "args": { … } }` | a tool was invoked. diagnostic. |
+| `tool_result` | `{ "id": "toolu_…", "ok": true, "summary": "get_quote → 1 quotes" }` | result of the matching `tool_call` (same `id`). diagnostic. |
+| `widget` | a Widget object — `{ "type", "data", "sources" }` (§7) | the generative UI card. Typically exactly one, terminal. |
+| `message` | `{ "text": "markdown…" }`                                   | plain markdown reply (loose chat, not pinnable). Terminal alternative to `widget`. |
 | `error`        | `{ "message": "…" }`                                         | failure. terminal. |
 | `done`         | `{ "elapsed_ms": 8421, "iterations": 3 }`                   | stream complete. always the final event on success. |
 
