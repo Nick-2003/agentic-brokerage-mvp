@@ -417,7 +417,10 @@ register(
     ToolDef(
         name="get_company_news",
         description=(
-            "Get the latest news headlines for one or more tickers. Returns a list of "
+            "Get the latest news headlines for one or more tickers. Pass yfinance-valid "
+            "ticker symbols only — resolve any company name, sector, or nickname "
+            "(e.g. 'Apple'->AAPL, 'Mag 7'->the seven symbols) to symbols before calling, "
+            "and prefer the symbol the user holds for dual-listed names. Returns a list of "
             "headlines per ticker, each with source and timestamp. Use this to explain "
             "moves or surface catalysts. Pass `since` (ISO-8601) to filter to news at "
             "or after that time — e.g. since a trade's fill timestamp."
