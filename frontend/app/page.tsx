@@ -236,6 +236,23 @@ function ChatScreen() {
                 </div>
               </div>
 
+              {/* Loading ring — only in the gap before the first SSE event
+                  populates this turn. Reuses ThinkingCard's card chrome + the
+                  accent ring so the swap to the real ThinkingCard is seamless.
+                  `!t.done` guards against a hang if a turn finishes empty. */}
+              {t.thoughts.length === 0 &&
+                t.widgets.length === 0 &&
+                t.messages.length === 0 &&
+                !t.error &&
+                !t.done && (
+                  <div className="bg-surface border border-border rounded-2xl p-4 mt-3 animate-slide-in flex items-center gap-2.5">
+                    <div className="w-4 h-4 rounded-full border-2 border-accent border-t-transparent animate-spin-slow" />
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-accent">
+                      Working
+                    </span>
+                  </div>
+                )}
+
               {/* Thinking */}
               {t.thoughts.length > 0 && (
                 <ThinkingCard thoughts={t.thoughts} done={t.done} elapsedMs={t.elapsedMs} />

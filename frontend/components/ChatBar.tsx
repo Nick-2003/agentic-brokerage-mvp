@@ -25,7 +25,17 @@ export function ChatBar({ onSubmit, onMicTap, disabled }: Props) {
   const [phIndex, setPhIndex] = useState(0);
   const [phText, setPhText] = useState('');
   const [phPhase, setPhPhase] = useState<'typing' | 'pausing' | 'erasing'>('typing');
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-grow the textarea with its content, capped at ~5 lines then scroll.
+  // Reset-then-measure so it also SHRINKS when text is deleted (without the
+  // `height='auto'` reset, scrollHeight only ever grows).
+  const MAX_TEXTAREA_PX = 120; // ~5 lines at text-sm / leading-snug
+  const autoGrow = (el: HTMLTextAreaElement) => {
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, MAX_TEXTAREA_PX)}px`;
+    el.style.overflowY = el.scrollHeight > MAX_TEXTAREA_PX ? 'auto' : 'hidden';
+  };
 
   // Animated placeholder loop
   useEffect(() => {
@@ -54,6 +64,12 @@ export function ChatBar({ onSubmit, onMicTap, disabled }: Props) {
     const t = value.trim();
     if (!t || disabled) return;
     setValue('');
+    // setValue('') does NOT fire onChange, so reset the grown height manually,
+    // else the box stays tall after sending.
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+      inputRef.current.style.overflowY = 'hidden';
+    }
     onSubmit(t);
   };
 
@@ -63,24 +79,36 @@ export function ChatBar({ onSubmit, onMicTap, disabled }: Props) {
     <div className="absolute inset-x-0 bottom-0 z-50 px-4 pb-6 pt-3 bg-gradient-to-t from-bg via-bg/95 to-transparent">
       <div className="flex items-center gap-2.5">
         <div className="relative flex-1">
-          <div className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none">
+          {/* Pinned to the first line (not vertically centered) so it stays put
+              when the textarea grows. */}
+          <div className="absolute left-4 top-[18px] pointer-events-none">
             <span className="pulse-dot block" />
           </div>
-          {/* Animated placeholder when input is empty */}
+          {/* Animated placeholder when input is empty (only ever shown at 1 line). */}
           {showPlaceholder && (
-            <div className="absolute left-9 top-1/2 -translate-y-1/2 pointer-events-none text-text-3 text-sm">
+            <div className="absolute left-9 top-[14px] pointer-events-none text-text-3 text-sm">
               {phText}
               <span className="inline-block w-px h-3 bg-text-3 ml-px align-middle animate-caret-blink" />
             </div>
           )}
-          <input
+          <textarea
             ref={inputRef}
-            type="text"
+            rows={1}
             value={value}
-            onChange={(e) => setValue(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && submit()}
+            onChange={(e) => {
+              setValue(e.target.value);
+              autoGrow(e.target);
+            }}
+            onKeyDown={(e) => {
+              // Enter sends; Shift+Enter inserts a newline. preventDefault stops
+              // the stray '\n' before we submit. Skip while an IME is composing.
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                submit();
+              }
+            }}
             disabled={disabled}
-            className="w-full h-12 bg-surface border border-border rounded-3xl pl-9 pr-4 text-sm text-text outline-none focus:border-accent transition-colors"
+            className="block w-full bg-surface border border-border rounded-2xl pl-9 pr-4 py-3 text-sm leading-snug text-text outline-none focus:border-accent transition-colors resize-none"
           />
         </div>
         <button
