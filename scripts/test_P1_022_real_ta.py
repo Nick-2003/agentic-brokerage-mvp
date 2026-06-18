@@ -30,15 +30,15 @@ from pathlib import Path
 from typing import Any
 
 # Walk up parents until we find one containing `backend/` — robust to both
-# pre-apply (script under `proposed_changes/.../scripts/`) and post-apply
+# pre-apply (script under `.proposed_changes/.../scripts/`) and post-apply
 # (script at repo root `scripts/`) layouts.
 def _find_repo_root() -> Path:
     for parent in Path(__file__).resolve().parents:
-        if (parent / "backend").is_dir() and (parent / "proposed_changes").is_dir():
+        if (parent / "backend").is_dir() and (parent / ".proposed_changes").is_dir():
             return parent
         if (parent / "backend").is_dir() and (parent / "API_CONTRACT.md").is_file():
             return parent
-    raise RuntimeError("repo root not found (no parent has both backend/ and proposed_changes/)")
+    raise RuntimeError("repo root not found (no parent has both backend/ and .proposed_changes/)")
 
 
 _REPO_ROOT = _find_repo_root()

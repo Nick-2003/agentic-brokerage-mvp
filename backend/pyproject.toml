@@ -18,7 +18,7 @@ dependencies = [
     "yfinance>=0.2.50",
     # MCP Python SDK — used by backend/mcp_client.py to host stdio MCP
     # client sessions against external servers (TradingView today, TrueNorth
-    # tomorrow). See proposed_changes/002-tradingview-mcp/README.md §4.7.
+    # tomorrow). See .proposed_changes/002-tradingview-mcp/README.md §4.7.
     "mcp>=1.0",
     # P4.1 auth — Supabase magic-link JWT verification (backend/auth.py).
     # The `crypto` extra pulls `cryptography`, REQUIRED for ES256/RS256 — the

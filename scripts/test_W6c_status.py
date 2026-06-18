@@ -2,7 +2,7 @@
 opt_in on an async opted-out delivery (failed/undelivered + opted-out ErrorCode).
 Fully offline (FastAPI TestClient + real RequestValidator; DB write stubbed).
 
-    backend/.venv/bin/python proposed_changes/W6.1b-optout/scripts/test_W6c_status.py
+    backend/.venv/bin/python .proposed_changes/W6.1b-optout/scripts/test_W6c_status.py
 """
 from __future__ import annotations
 

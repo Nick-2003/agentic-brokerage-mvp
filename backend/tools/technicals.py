@@ -10,7 +10,7 @@ Two paths per tool, gated by USE_MOCK_TA:
 Mock-first preserved per CLAUDE.md / SCOPE.md discipline — never delete the
 mock path. Real path is the wedge; mock keeps the deterministic demo working
 when TV Desktop isn't around (and is the Railway production default until
-containerised TV ships, see proposed_changes/applied/002-tradingview-mcp/README.md §3).
+containerised TV ships, see .proposed_changes/applied/002-tradingview-mcp/README.md §3).
 
 New tools added for the "talk to your chart" wedge:
     - chart_apply_indicator     "add RSI to NVDA"
@@ -416,7 +416,7 @@ async def _real_technical_levels(
     """Drive a real TradingView Desktop chart via the MCP server.
 
     Sequence (each call serialised by the per-session lock in mcp_client.py —
-    CDP is single-controller, see proposed_changes/applied/002 §4.1):
+    CDP is single-controller, see .proposed_changes/applied/002 §4.1):
 
       1. tv_health_check          — fast fail if TV Desktop / CDP isn't ready
       2. chart_set_symbol         — load the ticker
