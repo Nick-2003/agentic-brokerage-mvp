@@ -11,7 +11,7 @@ Self-contained: temp-applies the proposal's db.py / main.py / agent.py over the
 live files, imports, runs, then restores all three in a finally block.
 
 Run with the backend venv:
-    backend/.venv/bin/python proposed_changes/046-chat-conversation-memory/scripts/test_046_conversation_memory.py
+    backend/.venv/bin/python .proposed_changes/046-chat-conversation-memory/scripts/test_046_conversation_memory.py
 
 Exit code 0 = all pass, 1 = a check failed.
 """
@@ -40,7 +40,7 @@ def _find_repo(start: str) -> str:
 
 REPO = _find_repo(HERE)
 BACKEND = os.path.join(REPO, "backend")
-PROP = os.path.join(REPO, "proposed_changes", "046-chat-conversation-memory", "backend")
+PROP = os.path.join(REPO, ".proposed_changes", "046-chat-conversation-memory", "backend")
 FILES = ("db.py", "main.py", "agent.py")
 
 PASS, FAIL = "\033[92mPASS\033[0m", "\033[91mFAIL\033[0m"

@@ -166,6 +166,6 @@ Never silently. If the right move is to deviate, update this file first, then bu
 - `METRICS.md` — PMF benchmarks (chat) + the waitlist funnel
 - `SECURITY.md` — threat model + lockdown checklist before any tester
 - **Pivot / live product:** `.self_management/DECISION_pivot_waitlist.md` (rationale + reuse-map), `.self_management/PRIORITIES.md` (W1–W6 checklist), `.self_management/OPERATOR_CHECKLIST.md` (non-code remainder), `docs/DEPLOY.md` (deploy runbook)
-- **Day-to-day reference:** `.self_management/CONTEXT_TRANSFER.md` (cold-start brief), `docs/SESSION_LOG.md` (chronological decisions), `API_CONTRACT.md` (HTTP boundary), `proposed_changes/STATUS.md` (proposal index)
+- **Day-to-day reference:** `.self_management/CONTEXT_TRANSFER.md` (cold-start brief), `docs/SESSION_LOG.md` (chronological decisions), `API_CONTRACT.md` (HTTP boundary), `.proposed_changes/STATUS.md` (proposal index)
 
 > Note: the user is **Nicholas** (earlier sessions said "Tom" — same person, corrected 2026-06-01). Stale `~/Downloads/*` and `~/.claude/projects/-Users-tom-*` paths from the original spec are historical; the canonical reference docs are the `.self_management/` set above.

@@ -7,7 +7,7 @@ file, imports `tools.market`, runs the checks with `news_context` STUBBED (no
 network / no yfinance needed), then restores the live file in a finally block.
 
 Run with the backend venv (so `tools` package deps import cleanly):
-    backend/.venv/bin/python proposed_changes/045-real-news-data/scripts/test_045_real_news.py
+    backend/.venv/bin/python .proposed_changes/045-real-news-data/scripts/test_045_real_news.py
 
 Exit code 0 = all pass, 1 = a check failed.
 """
@@ -27,7 +27,7 @@ def _find_repo(start: str) -> str:
     stop too early at the proposal folder. news_context.py exists only at the
     real backend/ root — which is exactly the module this test imports. Works
     whether run from the proposal folder
-    (proposed_changes/045-real-news-data/scripts/) or the applied scripts/.
+    (.proposed_changes/045-real-news-data/scripts/) or the applied scripts/.
     """
     d = start
     while True:
@@ -47,7 +47,7 @@ LIVE_MARKET = os.path.join(BACKEND, "tools", "market.py")
 # The proposal copy. May be absent once the proposal is archived/removed — in
 # that case we just test the live file in place (no temp-apply).
 PROP_MARKET = os.path.join(
-    REPO, "proposed_changes", "045-real-news-data", "backend", "tools", "market.py"
+    REPO, ".proposed_changes", "045-real-news-data", "backend", "tools", "market.py"
 )
 
 PASS, FAIL = "\033[92mPASS\033[0m", "\033[91mFAIL\033[0m"

@@ -2,7 +2,7 @@
 mirroring (flip opt_in, no retry, count skipped). Fully offline; stubs the Twilio
 client and the W4 admin write.
 
-    backend/.venv/bin/python proposed_changes/W6.1b-optout/scripts/test_W6b_optout.py
+    backend/.venv/bin/python .proposed_changes/W6.1b-optout/scripts/test_W6b_optout.py
 """
 from __future__ import annotations
 

@@ -91,7 +91,7 @@ backend/.venv/bin/python scripts/run_briefings.py --max-users 1
 #   --force bypasses the W6.5 12h resend guard (e.g. to re-test the same day)
 ```
 
-In production this is the **Railway briefing cron** (`python -m scheduler` on a UTC `cronSchedule`) — there's no public endpoint that triggers a send (threat 1). Provider setup: WhatsApp → `.self_management/WHATSAPP_BUSINESS_SENDER.md`; email (Resend domain/DNS + env) → the go-live section of `proposed_changes/038-email-briefing-resend/README.md`.
+In production this is the **Railway briefing cron** (`python -m scheduler` on a UTC `cronSchedule`) — there's no public endpoint that triggers a send (threat 1). Provider setup: WhatsApp → `.self_management/WHATSAPP_BUSINESS_SENDER.md`; email (Resend domain/DNS + env) → the go-live section of `.proposed_changes/038-email-briefing-resend/README.md`.
 
 ## Talk-to-your-charts (TradingView MCP) — *paused chat MVP*
 
@@ -186,6 +186,6 @@ See [SECURITY.md § Pre-launch lockdown checklist](./SECURITY.md#pre-launch-lock
 
 - **Live product:** `.self_management/DECISION_pivot_waitlist.md` · `.self_management/PRIORITIES.md` · `.self_management/OPERATOR_CHECKLIST.md` · `docs/DEPLOY.md`
 - **Cold-start brief:** `.self_management/CONTEXT_TRANSFER.md`
-- **HTTP contract:** `API_CONTRACT.md` · **proposal index:** `proposed_changes/STATUS.md` · **decisions log:** `docs/SESSION_LOG.md`
+- **HTTP contract:** `API_CONTRACT.md` · **proposal index:** `.proposed_changes/STATUS.md` · **decisions log:** `docs/SESSION_LOG.md`
 
 > The original spec's `/Users/tom/...` plan/demo/memory paths are historical (the user is **Nicholas** — "Tom" was an earlier naming; same person). The canonical references are the `.self_management/` set above.

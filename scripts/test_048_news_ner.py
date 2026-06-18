@@ -43,7 +43,7 @@ def _find_repo(start: str) -> str:
 
 REPO = _find_repo(HERE)
 BACKEND = os.path.join(REPO, "backend")
-PROP = os.path.join(REPO, "proposed_changes", "048-news-ner-ticker-resolution")
+PROP = os.path.join(REPO, ".proposed_changes", "048-news-ner-ticker-resolution")
 LIVE_MARKET = os.path.join(BACKEND, "tools", "market.py")
 PROP_MARKET = os.path.join(PROP, "backend", "tools", "market.py")
 PROP_SYSTEM = os.path.join(PROP, "backend", "prompts", "system.md")

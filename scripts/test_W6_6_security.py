@@ -5,7 +5,7 @@ Covers: headers on every response, per-IP fixed-window 429 (with Retry-After),
 /healthz + Twilio webhooks + OPTIONS preflight all exempt, per-IP isolation via
 X-Forwarded-For, fail-open on an internal error, and RATE_LIMIT_ENABLED=0.
 
-    backend/.venv/bin/python proposed_changes/W6.6-waitlist-security/scripts/test_W6_6_security.py
+    backend/.venv/bin/python .proposed_changes/W6.6-waitlist-security/scripts/test_W6_6_security.py
 """
 from __future__ import annotations
 

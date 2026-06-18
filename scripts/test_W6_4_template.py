@@ -6,7 +6,7 @@ in template mode but enforced in freeform, send_briefing picks template when
 `TWILIO_BRIEF_TEMPLATE_SID` + permalink are present (else freeform / fallback),
 the date formatter, and the scheduler passing `permalink` through to send_briefing.
 
-    backend/.venv/bin/python proposed_changes/W6.4-template-send/scripts/test_W6_4_template.py
+    backend/.venv/bin/python .proposed_changes/W6.4-template-send/scripts/test_W6_4_template.py
 """
 from __future__ import annotations
 

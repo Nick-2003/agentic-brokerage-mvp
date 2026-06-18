@@ -1,7 +1,7 @@
 """Offline test for 034 — per-user daily LLM token budget. Pure in-memory; no DB,
 no network. Drives `token_budget` directly with a controlled day + env.
 
-    backend/.venv/bin/python proposed_changes/034-chat-token-budget/scripts/test_034_token_budget.py
+    backend/.venv/bin/python .proposed_changes/034-chat-token-budget/scripts/test_034_token_budget.py
 """
 from __future__ import annotations
 

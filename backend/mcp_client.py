@@ -4,7 +4,7 @@ Hosts long-lived stdio MCP `ClientSession`s for external MCP servers we proxy
 through our existing tool registry. Today: TradingView (chart manipulation).
 Tomorrow: TrueNorth (research data).
 
-Design choices (see proposed_changes/002-tradingview-mcp/README.md §1, §4.1):
+Design choices (see .proposed_changes/002-tradingview-mcp/README.md §1, §4.1):
 
 1. **Anthropic SDK stays the primary agent transport.** This module is a client
    that backend tools call into — not a replacement for the agent loop. Mirrors
