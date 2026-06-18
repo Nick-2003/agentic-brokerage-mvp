@@ -5,7 +5,7 @@ Sends one WhatsApp message and prints the result. Honours the same switches as t
   • unset + real creds (and `uv sync --group whatsapp`) → real Twilio send.
 
 The recipient must have joined your Twilio Sandbox first (send the "join <phrase>"
-code once — see self_management/TWILIO_SETUP.md).
+code once — see .self_management/TWILIO_SETUP.md).
 
     # log-only smoke (no creds needed):
     USE_MOCK_WHATSAPP=1 backend/.venv/bin/python scripts/whatsapp_probe.py +85291234567

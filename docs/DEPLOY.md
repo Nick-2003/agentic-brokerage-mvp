@@ -10,7 +10,7 @@
 | **Briefing cron** (`scheduler`) | **Railway** (2nd service, same image) | Runs `run_daily_briefings` on a schedule and exits. Deliberately **no public trigger endpoint** — the send is a system job, never an agent tool (SECURITY threat 1). |
 | **Frontend** (Next.js) | **Vercel** | Static-ish; magic-link friendly; `next.config.js` rewrites proxy `/api/*` to the backend. |
 
-> **W6.4 (WhatsApp Business sender + approved templates) is Meta-gated and NOT part of this deploy.** Production runs on the Twilio **Sandbox** for the validation cohort (each tester sends `join <phrase>` once). Start Meta business verification in parallel; it does not block P6. See `self_management/TWILIO_SETUP.md`.
+> **W6.4 (WhatsApp Business sender + approved templates) is Meta-gated and NOT part of this deploy.** Production runs on the Twilio **Sandbox** for the validation cohort (each tester sends `join <phrase>` once). Start Meta business verification in parallel; it does not block P6. See `.self_management/TWILIO_SETUP.md`.
 
 ---
 

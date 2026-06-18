@@ -40,7 +40,7 @@ next-env.d.ts
 .idea/
 *.swp
 
-self_management/
+.self_management/
 proposed_changes/
 *.tsbuildinfo
 /*.tsbuildinfo
