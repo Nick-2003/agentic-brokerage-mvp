@@ -21,7 +21,7 @@ template (a short hook + the W6.3 permalink as variables) instead of freeform �
 required for business-initiated sends outside the 24h window via a registered
 Business sender. The path is **flag-gated on the template SID's presence**: unset
 (Sandbox / today) → freeform exactly as before; set → template. The full narrative
-always lives at the permalink. See `self_management/WHATSAPP_BUSINESS_SENDER.md`.
+always lives at the permalink. See `.self_management/WHATSAPP_BUSINESS_SENDER.md`.
 
 `twilio` is an OPTIONAL dep group (`uv sync --group whatsapp`) — mirrors the
 `memory` group so the default install / chat backend stays lean.

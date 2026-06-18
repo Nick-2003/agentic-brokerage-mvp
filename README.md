@@ -8,11 +8,11 @@ A prompt-first mobile brokerage where every action — research, charting, tradi
 >
 > **Live URLs:** frontend **<https://agentic-brokerage-mvp-front.vercel.app>** (`/connect`) · backend **<https://agentic-brokerage-mvp-production.up.railway.app>** (`/healthz`).
 >
-> **Read first for the live product:** `self_management/DECISION_pivot_waitlist.md` (rationale), `self_management/PRIORITIES.md` (W1–W6 + status), `self_management/OPERATOR_CHECKLIST.md` (non-code remainder), `docs/DEPLOY.md` (deploy runbook). The chat-MVP setup below still works and is the reference for when chat resumes.
+> **Read first for the live product:** `.self_management/DECISION_pivot_waitlist.md` (rationale), `.self_management/PRIORITIES.md` (W1–W6 + status), `.self_management/OPERATOR_CHECKLIST.md` (non-code remainder), `docs/DEPLOY.md` (deploy runbook). The chat-MVP setup below still works and is the reference for when chat resumes.
 
 **Status:** waitlist product **deployed & live** (the full `land → connect IBKR → daily WhatsApp/email brief` loop runs in production: Railway web + briefing cron, Vercel, Supabase). Chat MVP: feature-complete through P5, **paused**.
 
-**Start every dev session by reading:** [CLAUDE.md](./CLAUDE.md) · [SCOPE.md](./SCOPE.md) · [METRICS.md](./METRICS.md) · [SECURITY.md](./SECURITY.md) · `self_management/CONTEXT_TRANSFER.md`.
+**Start every dev session by reading:** [CLAUDE.md](./CLAUDE.md) · [SCOPE.md](./SCOPE.md) · [METRICS.md](./METRICS.md) · [SECURITY.md](./SECURITY.md) · `.self_management/CONTEXT_TRANSFER.md`.
 
 ## Local setup
 
@@ -34,7 +34,7 @@ A prompt-first mobile brokerage where every action — research, charting, tradi
 | Anthropic | Claude API (chat + the brief narrative) | console.anthropic.com → API Keys → new key |
 | Supabase | Auth + Postgres + RLS + magic links | supabase.com → new project → free tier → URL + anon key + **service key** |
 | **Interactive Brokers** | **Read-only holdings/NAV (Flex Web Service)** — the live product + the main-page portfolio | IBKR Account Mgmt → set up an *Activity* Flex Query + a Flex Web Service token (see `backend/.env.example` "Holdings") |
-| **Twilio** | **WhatsApp delivery** of the daily brief (system-side) | twilio.com → Messaging → WhatsApp (Sandbox to start; Business sender = W6.4a, see `self_management/WHATSAPP_BUSINESS_SENDER.md`) |
+| **Twilio** | **WhatsApp delivery** of the daily brief (system-side) | twilio.com → Messaging → WhatsApp (Sandbox to start; Business sender = W6.4a, see `.self_management/WHATSAPP_BUSINESS_SENDER.md`) |
 | **Resend** | **Email delivery** of the daily brief (system-side) | resend.com → free tier (3k/mo) → verify a sending domain (SPF/DKIM) → API key (Sending access) |
 | Alpaca | Paper trading (chat; **trading currently disabled**) | alpaca.markets → Paper Trading dashboard → API Keys |
 | FMP | Research data for the `research_card` | financialmodelingprep.com → free tier (~87 sample symbols) |
@@ -91,7 +91,7 @@ backend/.venv/bin/python scripts/run_briefings.py --max-users 1
 #   --force bypasses the W6.5 12h resend guard (e.g. to re-test the same day)
 ```
 
-In production this is the **Railway briefing cron** (`python -m scheduler` on a UTC `cronSchedule`) — there's no public endpoint that triggers a send (threat 1). Provider setup: WhatsApp → `self_management/WHATSAPP_BUSINESS_SENDER.md`; email (Resend domain/DNS + env) → the go-live section of `proposed_changes/038-email-briefing-resend/README.md`.
+In production this is the **Railway briefing cron** (`python -m scheduler` on a UTC `cronSchedule`) — there's no public endpoint that triggers a send (threat 1). Provider setup: WhatsApp → `.self_management/WHATSAPP_BUSINESS_SENDER.md`; email (Resend domain/DNS + env) → the go-live section of `proposed_changes/038-email-briefing-resend/README.md`.
 
 ## Talk-to-your-charts (TradingView MCP) — *paused chat MVP*
 
@@ -167,7 +167,7 @@ Don't skip. Five minutes per session. This is the practice that prevents archite
 
 ## Deployment
 
-**Deployed & live (P6).** Full runbook + troubleshooting: `docs/DEPLOY.md`. Operator config remainder: `self_management/OPERATOR_CHECKLIST.md`.
+**Deployed & live (P6).** Full runbook + troubleshooting: `docs/DEPLOY.md`. Operator config remainder: `.self_management/OPERATOR_CHECKLIST.md`.
 
 | Component | Where | How |
 | --- | --- | --- |
@@ -184,8 +184,8 @@ See [SECURITY.md § Pre-launch lockdown checklist](./SECURITY.md#pre-launch-lock
 
 ## Useful references
 
-- **Live product:** `self_management/DECISION_pivot_waitlist.md` · `self_management/PRIORITIES.md` · `self_management/OPERATOR_CHECKLIST.md` · `docs/DEPLOY.md`
-- **Cold-start brief:** `self_management/CONTEXT_TRANSFER.md`
+- **Live product:** `.self_management/DECISION_pivot_waitlist.md` · `.self_management/PRIORITIES.md` · `.self_management/OPERATOR_CHECKLIST.md` · `docs/DEPLOY.md`
+- **Cold-start brief:** `.self_management/CONTEXT_TRANSFER.md`
 - **HTTP contract:** `API_CONTRACT.md` · **proposal index:** `proposed_changes/STATUS.md` · **decisions log:** `docs/SESSION_LOG.md`
 
-> The original spec's `/Users/tom/...` plan/demo/memory paths are historical (the user is **Nicholas** — "Tom" was an earlier naming; same person). The canonical references are the `self_management/` set above.
+> The original spec's `/Users/tom/...` plan/demo/memory paths are historical (the user is **Nicholas** — "Tom" was an earlier naming; same person). The canonical references are the `.self_management/` set above.

@@ -4,7 +4,7 @@
 
 > ## ⚠️ SCOPE AMENDMENT (2026-06-05) — the IBKR + WhatsApp waitlist product
 >
-> Per a **founder positioning decision** (the one amendment trigger besides the 3-user interview bar), the build pivoted to a pre-launch **waitlist briefing** product, and the chat MVP below is **PAUSED** (retained, not cancelled). Rationale + reuse-map: `self_management/DECISION_pivot_waitlist.md`; staged plan + status: `self_management/PRIORITIES.md`.
+> Per a **founder positioning decision** (the one amendment trigger besides the 3-user interview bar), the build pivoted to a pre-launch **waitlist briefing** product, and the chat MVP below is **PAUSED** (retained, not cancelled). Rationale + reuse-map: `.self_management/DECISION_pivot_waitlist.md`; staged plan + status: `.self_management/PRIORITIES.md`.
 >
 > **Now IN scope (the live product):**
 >
