@@ -258,6 +258,95 @@ async def _fetch_ibkr_portfolio(user_id: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Sample portfolio (053) — a dedicated read-only Alpaca PAPER book for GUEST/DEMO
+# users so a not-yet-connected visitor sees a realistic (clearly-labelled) demo
+# instead of an empty hero. Flag-gated, default OFF; signed-in users never see it.
+# ---------------------------------------------------------------------------
+
+_sample_cache: dict[str, Any] = {"at": 0.0, "data": None}
+
+
+def _sample_enabled() -> bool:
+    return os.getenv("SAMPLE_PORTFOLIO_ENABLED", "0") == "1"
+
+
+def _sample_creds() -> tuple[str, str] | None:
+    """(key, secret) for the dedicated sample paper account, or None if unset/placeholder."""
+    key = os.getenv("SAMPLE_ALPACA_API_KEY", "").strip()
+    secret = os.getenv("SAMPLE_ALPACA_API_SECRET", "").strip()
+    if not key or not secret or key.endswith("REPLACE"):
+        return None
+    return key, secret
+
+
+def _sample_mock() -> dict[str, Any]:
+    """The curated static demo book, tagged as a sample — used when the sample is
+    enabled but no SAMPLE_ALPACA_* creds are set (so guests still see SOMETHING)."""
+    return {**MOCK_PORTFOLIO, "is_sample": True, "source": "alpaca_sample", "read_only": True}
+
+
+async def _fetch_sample_alpaca_portfolio(api_key: str, api_secret: str) -> dict[str, Any]:
+    """Read-only positions + equity from the dedicated SAMPLE Alpaca paper account.
+    Same shape as `_fetch_alpaca_portfolio`, tagged `is_sample`/read-only. TTL-cached
+    (the sample book is shared across all guests, so one fetch serves everyone)."""
+    now = time.monotonic()
+    ent = _sample_cache
+    if ent.get("data") is not None and (now - ent["at"]) < _CACHE_TTL_S:
+        return ent["data"]
+    # Lazy import so the backend boots even if alpaca-py isn't installed.
+    from alpaca.trading.client import TradingClient
+
+    client = TradingClient(api_key=api_key, secret_key=api_secret, paper=True)
+    account = client.get_account()
+    positions = client.get_all_positions()
+
+    equity = float(account.equity)
+    last_equity = float(getattr(account, "last_equity", 0) or 0)
+    day_pnl = equity - last_equity
+    day_pnl_pct = (day_pnl / last_equity * 100) if last_equity else 0.0
+
+    data = {
+        "total_equity": equity,
+        "cash": float(account.cash),
+        "buying_power": float(account.buying_power),
+        "day_pnl": day_pnl,
+        "day_pnl_pct": day_pnl_pct,
+        "currency": "$",
+        "is_paper": True,
+        "is_mock": False,
+        "is_sample": True,          # 053 — clearly NOT the user's own money
+        "source": "alpaca_sample",
+        "read_only": True,
+        "positions": [
+            {
+                "ticker": p.symbol,
+                "shares": float(p.qty),
+                "avg_cost": float(p.avg_entry_price),
+                "market_value": float(p.market_value),
+                "unrealized_pnl": float(p.unrealized_pl),
+            }
+            for p in positions
+        ],
+    }
+    _sample_cache.update(at=now, data=data)
+    return data
+
+
+async def _sample_portfolio() -> dict[str, Any]:
+    """The guest sample book: live dedicated Alpaca paper account when configured,
+    else the curated static `_sample_mock()`. Never raises into the caller."""
+    creds = _sample_creds()
+    if not creds:
+        return _sample_mock()
+    try:
+        return await _fetch_sample_alpaca_portfolio(*creds)
+    except Exception as e:  # noqa: BLE001 — demo book; degrade to the static sample
+        log.warning("sample Alpaca portfolio fetch failed: %s", e)
+        return {**_sample_mock(), "is_mock_fallback": True,
+                "message": f"sample account unavailable: {e}"}
+
+
+# ---------------------------------------------------------------------------
 
 async def get_portfolio(args: dict[str, Any], user_id: str) -> dict[str, Any]:
     """Get the user's current portfolio holdings, cash, and unrealized P&L.
@@ -265,6 +354,12 @@ async def get_portfolio(args: dict[str, Any], user_id: str) -> dict[str, Any]:
     Source is `PORTFOLIO_SOURCE` (default `ibkr`, read-only). Returns a dict with a
     positions list; top-line figures are in the account's base currency.
     """
+    # 053 — GUEST/DEMO fallback: show the read-only sample book instead of nil, so a
+    # not-yet-signed-in visitor sees a realistic (labelled) portfolio. Signed-in users
+    # (a real UUID) skip this and get their own IBKR account (or nil). Default OFF.
+    if user_id == "demo" and _sample_enabled():
+        return await _sample_portfolio()
+
     if portfolio_source() == "ibkr":
         return await _fetch_ibkr_portfolio(user_id)
 

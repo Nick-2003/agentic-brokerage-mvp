@@ -389,6 +389,8 @@ async def portfolio_endpoint(
         "day_pnl_pct": p.get("day_pnl_pct"),
         "currency": p.get("currency", "$"),
         "is_mock": p.get("is_mock", True),
+        # 053 — true when this is the guest read-only sample book (frontend badges it).
+        "is_sample": p.get("is_sample", False),
     }
 
 
