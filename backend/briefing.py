@@ -53,9 +53,9 @@ _MAX_CHARS = int(os.getenv("BRIEFING_MAX_CHARS", "1500"))
 # Headline freshness window (days), anchored to the statement's as_of date — only
 # news at/after (as_of − this) is offered to the brief, so a stale headline can't
 # be cited as a cause for today's move. See _news_since().
-# Widened 2 → 4 (proposal 049): the brief is T+1 (the as_of session is already a
+# Widened 2 → 3 (proposal 049): the brief is T+1 (the as_of session is already a
 # day old by send time) and yfinance headlines are sparse for some names, so a
-# 2-day window left real movers unexplained. 4 days still keeps stale news out.
+# 2-day window left real movers unexplained. 3 days still keeps stale news out.
 _NEWS_MAX_AGE_DAYS = int(os.getenv("BRIEFING_NEWS_MAX_AGE_DAYS", "3"))
 # Headlines fetched per mover (049: 2 → 3 so a relevant one is more likely to land).
 _NEWS_PER_TICKER = int(os.getenv("BRIEFING_NEWS_PER_TICKER", "3"))
@@ -449,6 +449,32 @@ def _facts_user_message(facts: dict) -> str:
     )
 
 
+def _chart_data(snapshot: dict) -> dict | None:
+    """Per-holding day P&L for the web brief's bar chart (051).
+
+    Every holding with a day P&L (not just the top movers), each with the
+    base-ccy numeric `day_pnl` (drives the bar width on the page) and a
+    pre-formatted `day_pnl_display`. Sorted gainers-first. Returns None when no
+    holding has a day P&L (the page then renders no chart). Stored with the
+    published brief; the WhatsApp/email text is unaffected.
+    """
+    base = snapshot.get("base_currency") or "USD"
+    bars: list[dict] = []
+    for p in snapshot.get("positions") or []:
+        dp = p.get("day_pnl")
+        if dp is None:
+            continue
+        bars.append({
+            "symbol": p.get("symbol"),
+            "day_pnl": round(dp, 2),
+            "day_pnl_display": _money(dp, base, signed=True),
+        })
+    if not bars:
+        return None
+    bars.sort(key=lambda b: b["day_pnl"], reverse=True)  # gainers first
+    return {"kind": "day_pnl", "base_currency": base, "bars": bars}
+
+
 async def generate_briefing(snapshot: dict, market_context: dict | None = None) -> dict:
     """Snapshot (+ context) → a finished briefing dict.
 
@@ -494,6 +520,10 @@ async def generate_briefing(snapshot: dict, market_context: dict | None = None) 
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "permalink": facts.get("permalink"),
         "facts": facts,
+        # 051 — per-holding day P&L for the web brief's bar chart (stored with
+        # the published brief; the WhatsApp/email text is unaffected). None when
+        # no holding has a day P&L.
+        "chart_data": _chart_data(snapshot),
     }
 
 

@@ -37,9 +37,15 @@ async def publish_brief(
     *,
     account_id: str | None = None,
     as_of: str | None = None,
+    chart_data: dict | None = None,
 ) -> dict[str, Any]:
     """Store the brief under a fresh capability token. Returns {token, permalink}.
-    SERVICE KEY. Raises on a DB failure (caller decides whether to proceed)."""
+    SERVICE KEY. Raises on a DB failure (caller decides whether to proceed).
+
+    `chart_data` (051) is an optional per-holding day-P&L payload rendered as a
+    bar chart on /b/<token>, stored under the same token gate as the body.
+    None → no chart on the page.
+    """
     if not body or not body.strip():
         raise ValueError("refusing to publish an empty brief")
     token = secrets.token_urlsafe(32)
@@ -51,6 +57,7 @@ async def publish_brief(
         "account_id": account_id,
         "as_of": as_of,
         "body": body,
+        "chart_data": chart_data,
         "expires_at": expires_at,
     }).execute()
     return {"token": token, "permalink": permalink_for(token)}
@@ -64,7 +71,7 @@ async def get_published_brief(token: str) -> dict[str, Any] | None:
     c = await _admin_client()
     res = (
         await c.table("published_briefs")
-        .select("body, account_id, as_of, created_at, expires_at")
+        .select("body, account_id, as_of, chart_data, created_at, expires_at")
         .eq("token", token)
         .limit(1)
         .execute()
@@ -79,6 +86,7 @@ async def get_published_brief(token: str) -> dict[str, Any] | None:
         "text": row.get("body"),
         "account_id": row.get("account_id"),
         "as_of": row.get("as_of"),
+        "chart_data": row.get("chart_data"),  # 051 — day-P&L bars (None if absent)
         "generated_at": row.get("created_at"),
     }
 
