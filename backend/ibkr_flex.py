@@ -329,6 +329,34 @@ def parse_flex_statement(xml_text: str) -> dict:
         if ccy and rate is not None:
             rates[ccy] = rate
 
+    # Executed trades (proposal 050) — "did my orders go through". Present only
+    # when the Flex Query includes the Trades section (operator-configured); the
+    # list is simply empty otherwise (so this is harmless until they enable it).
+    # Skip lot-level rows (CLOSED_LOT/LOT duplicate a fill into tax lots); keep
+    # one row per execution/order. `buySell` is BUY/SELL; price is in the trade's
+    # native currency. The Flex period (LastBusinessDay) already scopes these to
+    # the statement day, so we don't date-filter here.
+    trades: list[dict[str, Any]] = []
+    for t in _findall(stmt, "Trade"):
+        lod = (_attr(t, "levelOfDetail") or "").upper()
+        if lod in {"CLOSED_LOT", "LOT"}:
+            continue
+        sym = _attr(t, "symbol")
+        if not sym:
+            continue
+        trades.append({
+            "symbol": sym,
+            "description": _attr(t, "description"),
+            "side": (_attr(t, "buySell", "buy_sell") or "").upper(),  # BUY / SELL
+            "quantity": _anum(t, "quantity"),
+            "price": _anum(t, "tradePrice", "price"),
+            "currency": _attr(t, "currency"),
+            "trade_date": _attr(t, "tradeDate", "reportDate", "dateTime"),
+            "proceeds": _anum(t, "proceeds"),
+            "realized_pnl": _anum(t, "fifoPnlRealized", "realizedPnl"),
+            "asset_class": _attr(t, "assetCategory"),
+        })
+
     # Make silent shape-mismatches audible (the 022 lesson — guides the real-probe fixups).
     if not positions:
         log.info("Flex parse: no <OpenPosition> found — check the Open Positions section/tag")
@@ -336,6 +364,8 @@ def parse_flex_statement(xml_text: str) -> dict:
         log.info("Flex parse: no MTM day P&L mapped — check MTMPerformanceSummaryUnderlying")
     if not nav:
         log.info("Flex parse: no NAV section — check EquitySummary*/ChangeInNAV tags")
+    if not trades:
+        log.info("Flex parse: no <Trade> rows — Trades section may be off in the Flex Query (050)")
 
     return {
         "account_id": _attr(stmt, "accountId"),
@@ -347,6 +377,7 @@ def parse_flex_statement(xml_text: str) -> dict:
         "positions": list(positions.values()),
         "performance": perf,
         "currency_rates": rates,
+        "trades": trades,
     }
 
 

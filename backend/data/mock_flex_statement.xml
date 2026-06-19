@@ -71,6 +71,22 @@
         <ConversionRate reportDate="2026-06-05" fromCurrency="USD" toCurrency="HKD" rate="7.8342"/>
         <ConversionRate reportDate="2026-06-05" fromCurrency="EUR" toCurrency="HKD" rate="9.0266"/>
       </ConversionRates>
+      <Trades>
+        <Trade accountId="U0000001" currency="USD" assetCategory="STK" symbol="NVDA"
+            description="NVIDIA CORP" conid="4815747" tradeID="7711001" buySell="BUY"
+            tradeDate="2026-06-05" dateTime="2026-06-05;10:14:00 EDT" quantity="20"
+            tradePrice="1175.30" proceeds="-23506.00" ibCommission="-1.00" netCash="-23507.00"
+            fifoPnlRealized="0" levelOfDetail="EXECUTION" />
+        <Trade accountId="U0000001" currency="USD" assetCategory="STK" symbol="AAPL"
+            description="APPLE INC" conid="265598" tradeID="7711002" buySell="SELL"
+            tradeDate="2026-06-05" dateTime="2026-06-05;14:02:00 EDT" quantity="-50"
+            tradePrice="201.10" proceeds="10055.00" ibCommission="-1.00" netCash="10054.00"
+            fifoPnlRealized="1145.00" levelOfDetail="EXECUTION" />
+        <Trade accountId="U0000001" currency="USD" assetCategory="STK" symbol="AAPL"
+            description="APPLE INC" conid="265598" tradeID="7711002" buySell="SELL"
+            tradeDate="2026-06-05" quantity="-50" tradePrice="201.10"
+            fifoPnlRealized="1145.00" levelOfDetail="CLOSED_LOT" />
+      </Trades>
     </FlexStatement>
   </FlexStatements>
 </FlexQueryResponse>
