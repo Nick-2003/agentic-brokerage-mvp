@@ -109,7 +109,8 @@ async def _process_one(c: dict, *, dry_run: bool) -> dict:
     if _PUBLISH:
         try:
             pub = await published_briefs.publish_brief(
-                uid, text, account_id=brief.get("account_id"), as_of=brief.get("as_of")
+                uid, text, account_id=brief.get("account_id"), as_of=brief.get("as_of"),
+                chart_data=brief.get("chart_data"),  # 051 — day-P&L bars for the web page
             )
             permalink = pub["permalink"]
         except Exception as e:  # noqa: BLE001 — never block the send on a publish failure
