@@ -59,6 +59,8 @@ _MAX_CHARS = int(os.getenv("BRIEFING_MAX_CHARS", "1500"))
 _NEWS_MAX_AGE_DAYS = int(os.getenv("BRIEFING_NEWS_MAX_AGE_DAYS", "3"))
 # Headlines fetched per mover (049: 2 → 3 so a relevant one is more likely to land).
 _NEWS_PER_TICKER = int(os.getenv("BRIEFING_NEWS_PER_TICKER", "3"))
+# Max executed trades to surface in the brief (050).
+_MAX_TRADES = int(os.getenv("BRIEFING_MAX_TRADES", "6"))
 
 
 class BriefingError(Exception):
@@ -117,7 +119,7 @@ def _yf_symbol(symbol: str | None, currency: str | None = None) -> str:
 
     Heuristic, covering the common cases:
       • already-suffixed (contains '.') → unchanged (e.g. `1398.HK`).
-      • HKD + all-digits → zero-pad to 3 + `.HK` (e.g. `700` → `0700.HK`).
+      • HKD + all-digits → zero-pad to 4 + `.HK` (e.g. `700` → `0700.HK`).
       • otherwise pass through (US and anything we don't special-case).
     """
     s = (symbol or "").strip().upper()
@@ -141,6 +143,33 @@ def _pct(v: float | None, *, signed: bool = True) -> str | None:
         return None
     sign = "+" if (signed and v >= 0) else ""
     return f"{sign}{v:.2f}%"
+
+
+def _qty_str(q: float | None) -> str:
+    """Quantity without a trailing `.0` for whole shares (10, not 10.0); abs value
+    (the side word carries direction)."""
+    if q is None:
+        return "?"
+    q = abs(q)
+    return str(int(q)) if float(q).is_integer() else f"{q:g}"
+
+
+def _format_trades(snapshot: dict) -> list[dict]:
+    """Pre-format executed trades (050) into copy-ready display strings, e.g.
+    `Bought 20 NVDA @ $1,175.30`. Price is in the trade's NATIVE currency (the
+    market it traded in); the side word ('Bought'/'Sold') carries direction, so
+    quantities are shown absolute. Capped at `_MAX_TRADES`."""
+    out: list[dict] = []
+    for t in (snapshot.get("trades") or [])[:_MAX_TRADES]:
+        side = (t.get("side") or "").upper()
+        verb = "Bought" if side == "BUY" else ("Sold" if side == "SELL" else (side.title() or "Traded"))
+        sym = t.get("symbol") or "?"
+        price = _money(t.get("price"), t.get("currency"))
+        disp = f"{verb} {_qty_str(t.get('quantity'))} {sym}"
+        if price:
+            disp += f" @ {price}"
+        out.append({"symbol": sym, "side": side, "display": disp})
+    return out
 
 
 def _macro_indicators(macro: dict | None) -> list[dict]:
@@ -249,6 +278,7 @@ def compute_brief_facts(snapshot: dict, market_context: dict | None = None) -> d
         "day_change_pct_display": _pct(day_change_pct) if day_change_pct is not None else None,
         "holdings_count": len(snapshot.get("positions") or []),
         "movers": top,
+        "trades": _format_trades(snapshot),  # 050 — executed trades (empty unless Flex Trades on)
         "mtd": perf.get("mtd"),
         "mtd_display": _money(perf.get("mtd"), base, signed=True),
         "ytd": perf.get("ytd"),
@@ -390,6 +420,9 @@ def _render_mock_briefing(facts: dict) -> str:
         lines.append("Movers: " + "; ".join(parts) + ".")
     else:
         lines.append("No per-position moves in today's statement.")
+    trades = facts.get("trades") or []
+    if trades:
+        lines.append("Executed: " + "; ".join(t["display"] for t in trades) + ".")
     macro = facts.get("macro") or []
     if macro:
         lines.append("Market: " + "; ".join(m["display"] for m in macro[:3]) + ".")

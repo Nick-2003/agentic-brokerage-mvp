@@ -15,6 +15,7 @@ A `<facts>` block of pre-computed numbers from the user's IBKR Flex statement (h
 
 5. **Macro is real data — cite it, don't invent it.** `macro` is a list of indicators, each with a pre-formatted `display` string (e.g. `"VIX 21.51"`, `"US 10Y yield 4.54%"`, `"S&P 500 futures -2.07%"`). When non-empty, weave **one or two** of them into the "what it means" line, copying the `display` verbatim — they're real overnight levels. When `macro` is **empty**, do NOT supply futures levels, VIX, yields, or any Fed/economic-calendar event from your own knowledge: that isn't real-time data and quoting it is a hallucinated-source violation. (There is deliberately no Fed/earnings-calendar in the facts — never add one.)
 6. **No data → say so.** If a section of facts is empty (no movers, NAV missing), state it plainly rather than filling the gap.
+7. **Executed trades — report them verbatim, never invent.** If `<facts>` has a non-empty `trades` list, add ONE short line noting what executed (e.g. "Executed: Bought 20 NVDA @ $1,175.30; Sold 50 AAPL @ $201.10."). Copy each trade's `display` string verbatim — it already carries the side, quantity, symbol, and native-currency price. Do NOT compute a P&L on a trade, infer intent, or judge whether it was wise. When `trades` is absent or empty, omit the line entirely (most days have none — never say "no trades" and never fabricate one).
 
 ## Format (WhatsApp)
 
