@@ -331,6 +331,9 @@ function Hero({ pinnedCount, portfolio }: { pinnedCount: number; portfolio: Port
   // (still loading / fetch error) just shows "—" with no hint.
   const hasData = portfolio != null && portfolio.total_equity != null;
   const notConnected = portfolio != null && portfolio.total_equity == null;
+  // 053: the guest read-only sample book — show a "Sample" badge so it's never
+  // mistaken for the user's own money, and a sign-in hint instead of the IBKR one.
+  const isSample = portfolio?.is_sample === true;
   const currency = portfolio?.currency ?? '';
 
   const fmt = (n: number) =>
@@ -351,11 +354,25 @@ function Hero({ pinnedCount, portfolio }: { pinnedCount: number; portfolio: Port
       {email && (
         <div className="text-[11px] text-text-3 mb-1 truncate" title={email}>{email}</div>
       )}
-      <div className="text-xs text-text-3 uppercase tracking-[0.06em] mb-1.5">Portfolio value</div>
+      <div className="text-xs text-text-3 uppercase tracking-[0.06em] mb-1.5 flex items-center gap-2">
+        Portfolio value
+        {isSample && (
+          <span className="px-1.5 py-0.5 rounded-full bg-accent-bg text-accent text-[9px] font-semibold tracking-normal normal-case">
+            Sample
+          </span>
+        )}
+      </div>
       <div className="text-4xl font-semibold -tracking-tight">{equityText}</div>
       {pnlText && (
         <div className={`mt-1 text-sm font-medium ${up ? 'text-green-DEFAULT' : 'text-red-DEFAULT'}`}>
           {pnlText}
+        </div>
+      )}
+      {isSample && (
+        <div className="mt-1 text-[12px] text-text-3">
+          Sample portfolio.{' '}
+          <a href="/connect" className="underline underline-offset-2 hover:text-text-2">Sign in &amp; connect IBKR</a>{' '}
+          to see your own.
         </div>
       )}
       {notConnected && (

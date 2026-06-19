@@ -9,6 +9,8 @@ export type PortfolioSummary = {
   day_pnl_pct: number | null;
   currency: string | null;
   is_mock: boolean;
+  // 053: true when this is the guest read-only sample book (not the user's own).
+  is_sample?: boolean;
 };
 
 export async function fetchPortfolio(token: string | null): Promise<PortfolioSummary | null> {
