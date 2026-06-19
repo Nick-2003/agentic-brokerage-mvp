@@ -35,6 +35,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo  # 052 — localize the freshness note to BRIEFING_TZ
 
 from anthropic import AsyncAnthropic
 
@@ -145,6 +146,49 @@ def _pct(v: float | None, *, signed: bool = True) -> str | None:
     return f"{sign}{v:.2f}%"
 
 
+def _briefing_tz_name() -> str:
+    """Configured display timezone for the freshness note (052). Defaults to the
+    operator's locale; read per-call so env changes/tests take effect without reimport."""
+    return os.getenv("BRIEFING_TZ", "Asia/Hong_Kong")
+
+
+def _tz_or_utc(tz_name: str):
+    """ZoneInfo for `tz_name`, falling back to UTC if the zone/tzdata is unavailable
+    (never crash the brief on a bad BRIEFING_TZ)."""
+    try:
+        return ZoneInfo(tz_name)
+    except Exception:  # noqa: BLE001 — bad zone name / missing tzdata
+        return timezone.utc
+
+
+def _freshness_note(as_of: str | None, now: datetime, tz_name: str | None = None) -> str | None:
+    """One-line data-freshness disclosure (052). IBKR Flex is end-of-day (T+1): the
+    statement reflects the close of the `as_of` US session, not live/intraday prices.
+
+    Shows BOTH the configured local timezone AND GMT so a reader (e.g. in GMT+8)
+    can reconcile recency without mental arithmetic:
+      • the session date is the US trading day (`as_of`), labelled plainly;
+      • the generation instant (`now`, ≈ send time) is rendered in the local tz
+        (`BRIEFING_TZ`) and in GMT.
+    `tz_name` overrides the env (for tests). None as_of → None."""
+    if not as_of:
+        return None
+    tz_name = tz_name or _briefing_tz_name()
+    try:
+        sess_str = datetime.strptime(as_of[:10], "%Y-%m-%d").strftime("%a %d %b %Y")
+    except (TypeError, ValueError):
+        sess_str = as_of
+    local = now.astimezone(_tz_or_utc(tz_name))
+    local_abbr = local.tzname() or tz_name
+    gen_local = local.strftime("%d %b %H:%M")
+    gen_gmt = now.astimezone(timezone.utc).strftime("%d %b %H:%M")
+    return (
+        f"Figures are end-of-day — the close of the US session on {sess_str} "
+        f"(IBKR statement data, not live/intraday). "
+        f"Generated {gen_local} {local_abbr} / {gen_gmt} GMT."
+    )
+
+
 def _qty_str(q: float | None) -> str:
     """Quantity without a trailing `.0` for whole shares (10, not 10.0); abs value
     (the side word carries direction)."""
@@ -207,13 +251,21 @@ def _macro_indicators(macro: dict | None) -> list[dict]:
 
 # --- facts computation (exact numbers; LLM only writes prose around these) ------
 
-def compute_brief_facts(snapshot: dict, market_context: dict | None = None) -> dict:
+def compute_brief_facts(
+    snapshot: dict, market_context: dict | None = None, now: datetime | None = None
+) -> dict:
     """Reduce a W1 snapshot (+ market context) to a flat, finished facts block.
 
     All P&L / NAV figures are in the snapshot's `base_currency`. Each numeric has
     a `*_display` sibling pre-formatted with the right symbol + sign, so the LLM
     copies a string and can't mangle the currency.
+
+    `now` (052) is the generation instant used for the freshness note's local/GMT
+    times; defaults to now (UTC). Pass it for deterministic tests / to match the
+    brief's `generated_at`.
     """
+    if now is None:
+        now = datetime.now(timezone.utc)
     ctx = market_context or {}
     base = snapshot.get("base_currency") or "USD"
     nav = snapshot.get("nav") or {}
@@ -279,6 +331,7 @@ def compute_brief_facts(snapshot: dict, market_context: dict | None = None) -> d
         "holdings_count": len(snapshot.get("positions") or []),
         "movers": top,
         "trades": _format_trades(snapshot),  # 050 — executed trades (empty unless Flex Trades on)
+        "data_freshness_note": _freshness_note(snapshot.get("as_of"), now),  # 052 — T+1/EOD + local/GMT
         "mtd": perf.get("mtd"),
         "mtd_display": _money(perf.get("mtd"), base, signed=True),
         "ytd": perf.get("ytd"),
@@ -433,6 +486,8 @@ def _render_mock_briefing(facts: dict) -> str:
         tail.append(f"YTD *{facts['ytd_display']}*")
     if tail:
         lines.append(", ".join(tail) + ".")
+    if facts.get("data_freshness_note"):  # 052 — T+1/EOD disclosure (always last)
+        lines.append(f"_{facts['data_freshness_note']}_")
     text = "\n\n".join(lines)
     return text[: facts.get("max_chars", _MAX_CHARS)]
 
@@ -485,7 +540,8 @@ async def generate_briefing(snapshot: dict, market_context: dict | None = None) 
     `is_mock` is True if EITHER the snapshot was mock OR the text was rendered by
     the template path (no LLM). Raises `BriefingError` on a real-LLM failure.
     """
-    facts = compute_brief_facts(snapshot, market_context)
+    now = datetime.now(timezone.utc)  # 052 — one instant for the freshness note + generated_at
+    facts = compute_brief_facts(snapshot, market_context, now=now)
     snap_mock = bool(snapshot.get("is_mock"))
     gen_mock = briefing_mock_enabled()
 
@@ -517,7 +573,7 @@ async def generate_briefing(snapshot: dict, market_context: dict | None = None) 
         "as_of": facts.get("as_of"),
         "account_id": facts.get("account_id"),
         "base_currency": facts.get("base_currency"),
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": now.isoformat(),
         "permalink": facts.get("permalink"),
         "facts": facts,
         # 051 — per-holding day P&L for the web brief's bar chart (stored with

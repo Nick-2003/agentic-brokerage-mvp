@@ -6,7 +6,7 @@
   },
   "deploy": {
     "startCommand": "uv run python -m scheduler",
-    "cronSchedule": "59 23 * * 1-5",
+    "cronSchedule": "0 12 * * 1-7",
     "restartPolicyType": "NEVER"
   }
 }
