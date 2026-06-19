@@ -10,7 +10,46 @@
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { fetchBrief, type PublishedBrief } from '@/lib/brief';
+import { fetchBrief, type PublishedBrief, type BriefChartData } from '@/lib/brief';
+
+// 051 — per-holding day-P&L bar chart. Diverging bars from a centre axis:
+// gainers (green) extend right, losers (red) left; width ∝ |P&L| / max. Pure
+// CSS (no chart lib / no SVG); data comes pre-computed from the brief.
+function DayPnlBars({ data }: { data: BriefChartData }) {
+  const bars = data.bars ?? [];
+  if (bars.length === 0) return null;
+  const max = Math.max(...bars.map((b) => Math.abs(b.day_pnl)), 1);
+  return (
+    <div className="pt-4 mt-2 border-t border-border">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-text-3 mb-2">
+        Day P&amp;L by holding
+      </div>
+      <div className="space-y-1.5">
+        {bars.map((b) => {
+          const up = b.day_pnl >= 0;
+          const w = (Math.abs(b.day_pnl) / max) * 50; // % of the half-track
+          return (
+            <div key={b.symbol} className="flex items-center gap-2 text-[12px]">
+              <span className="w-12 shrink-0 font-semibold text-text truncate">{b.symbol}</span>
+              <div className="relative flex-1 h-4">
+                <div className="absolute inset-y-0 left-1/2 w-px bg-border" />
+                <div
+                  className={`absolute inset-y-0 rounded-sm ${up ? 'bg-green-DEFAULT' : 'bg-red-DEFAULT'}`}
+                  style={up ? { left: '50%', width: `${w}%` } : { right: '50%', width: `${w}%` }}
+                />
+              </div>
+              <span
+                className={`w-24 shrink-0 text-right tabular-nums ${up ? 'text-green-DEFAULT' : 'text-red-DEFAULT'}`}
+              >
+                {b.day_pnl_display}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 // *bold* / _italic_ → React nodes, escape-free (no dangerouslySetInnerHTML).
 function renderInline(s: string): React.ReactNode[] {
@@ -75,6 +114,9 @@ export default function BriefPage() {
                   {renderInline(para)}
                 </p>
               ))}
+              {brief.chart_data && (brief.chart_data.bars?.length ?? 0) > 0 && (
+                <DayPnlBars data={brief.chart_data} />
+              )}
               {brief.as_of && (
                 <p className="pt-3 mt-2 border-t border-border text-[11px] text-text-3">
                   As of {brief.as_of}
