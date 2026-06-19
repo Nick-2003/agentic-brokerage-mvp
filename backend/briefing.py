@@ -53,7 +53,12 @@ _MAX_CHARS = int(os.getenv("BRIEFING_MAX_CHARS", "1500"))
 # Headline freshness window (days), anchored to the statement's as_of date — only
 # news at/after (as_of − this) is offered to the brief, so a stale headline can't
 # be cited as a cause for today's move. See _news_since().
-_NEWS_MAX_AGE_DAYS = int(os.getenv("BRIEFING_NEWS_MAX_AGE_DAYS", "2"))
+# Widened 2 → 4 (proposal 049): the brief is T+1 (the as_of session is already a
+# day old by send time) and yfinance headlines are sparse for some names, so a
+# 2-day window left real movers unexplained. 4 days still keeps stale news out.
+_NEWS_MAX_AGE_DAYS = int(os.getenv("BRIEFING_NEWS_MAX_AGE_DAYS", "3"))
+# Headlines fetched per mover (049: 2 → 3 so a relevant one is more likely to land).
+_NEWS_PER_TICKER = int(os.getenv("BRIEFING_NEWS_PER_TICKER", "3"))
 
 
 class BriefingError(Exception):
@@ -102,6 +107,25 @@ def _sym(ccy: str | None) -> str:
     if not ccy:
         return ""
     return _CCY_SYMBOL.get(ccy.upper(), f"{ccy.upper()} ")
+
+
+def _yf_symbol(symbol: str | None, currency: str | None = None) -> str:
+    """Best-effort map an IBKR Flex symbol to a yfinance ticker for news lookup
+    (proposal 049). The briefing passes the Flex `symbol` straight to yfinance;
+    US symbols match (AAPL→AAPL), but a Hong Kong numeric code under HKD does not
+    (Flex `700`/`0700` → yfinance `0700.HK`), so those movers silently got no news.
+
+    Heuristic, covering the common cases:
+      • already-suffixed (contains '.') → unchanged (e.g. `1398.HK`).
+      • HKD + all-digits → zero-pad to 3 + `.HK` (e.g. `700` → `0700.HK`).
+      • otherwise pass through (US and anything we don't special-case).
+    """
+    s = (symbol or "").strip().upper()
+    if not s or "." in s:
+        return s
+    if (currency or "").upper() == "HKD" and s.isdigit():
+        return f"{int(s):04d}.HK"
+    return s
 
 
 def _money(v: float | None, ccy: str | None, *, signed: bool = False) -> str | None:
@@ -297,21 +321,39 @@ async def gather_market_context(snapshot: dict) -> dict:
         key=lambda p: abs(p["day_pnl"]),
         reverse=True,
     )
-    tickers = [p["symbol"] for p in movers[:_TOP_MOVERS] if p.get("symbol")]
+    top = [p for p in movers[:_TOP_MOVERS] if p.get("symbol")]
+    tickers = [p["symbol"] for p in top]
     if tickers:
         try:
-            # Live → real yfinance headlines, capped to fresh news (anchored to
-            # as_of) so a stale headline can't be cited as today's cause; demo →
-            # deterministic mock tool (timestamps fresh-by-construction → no cap).
-            res = (
-                await get_company_news({"tickers": tickers, "limit": 2}, "system")
-                if allow_mock
-                else await fetch_recent_news(
-                    tickers, limit=2, since=_news_since(snapshot.get("as_of"))
+            if allow_mock:
+                # Demo → deterministic mock tool, keyed by the original symbols
+                # (timestamps fresh-by-construction → no recency cap).
+                res = await get_company_news(
+                    {"tickers": tickers, "limit": _NEWS_PER_TICKER}, "system"
                 )
-            )
-            if _real_enough(res):
-                ctx["news_by_ticker"] = res.get("news_by_ticker", {})
+                if _real_enough(res):
+                    ctx["news_by_ticker"] = res.get("news_by_ticker", {})
+            else:
+                # Live → real yfinance headlines. Map each Flex symbol to its
+                # yfinance ticker (049) so non-US/HK movers actually get news,
+                # fetch by the yf symbol, then RE-KEY the result back to the
+                # original Flex symbol so compute_brief_facts (which looks up by
+                # the snapshot symbol) attaches headlines to the right mover.
+                # Recency-capped (anchored to as_of) so stale news can't be cited.
+                yf_to_orig = {
+                    _yf_symbol(p["symbol"], p.get("currency")).upper(): p["symbol"].upper()
+                    for p in top
+                }
+                res = await fetch_recent_news(
+                    list(yf_to_orig.keys()),
+                    limit=_NEWS_PER_TICKER,
+                    since=_news_since(snapshot.get("as_of")),
+                )
+                if _real_enough(res):
+                    nb = res.get("news_by_ticker", {})
+                    ctx["news_by_ticker"] = {
+                        yf_to_orig.get(k.upper(), k): v for k, v in nb.items()
+                    }
         except Exception as e:  # noqa: BLE001
             log.info("briefing: news unavailable: %s", e)
     return ctx
