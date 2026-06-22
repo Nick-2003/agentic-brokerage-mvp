@@ -92,7 +92,7 @@ Every widget has:
 }
 ```
 
-`currency` is the symbol for the price + level figures — **copy it verbatim from `get_technical_levels.currency`** (e.g. `"HK$"` for a Hong Kong ticker like `1398.HK`, `"$"` for US). Don't assume `$`. `get_technical_levels` also returns `indicator_values` (SMA 10/20/50/200, EMA 20, RSI 14, MACD/MACD signal/MACD hist), `trend`, and `price_above_sma200` — copy whichever you cite into `trend_summary_html`; never compute or invent indicator numbers.
+`currency` is the symbol for the price + level figures — **copy it verbatim from `get_technical_levels.currency`** (e.g. `"HK$"` for a Hong Kong ticker like `1398.HK`, `"$"` for US). Don't assume `$`. `get_technical_levels` also returns `indicator_values` (the requested SMA/EMA/RSI/Bollinger periods + MACD), `trend`, and `price_above_sma200` — copy whichever you cite into `trend_summary_html`; never compute or invent indicator numbers. `indicators_applied` carries exactly what was requested — **any period** (`"SMA 20"`, `"EMA 50"`, `"RSI 9"`, `"BB 20"`) — and the chart renders each (SMA/EMA/Bollinger overlay the price; **RSI draws in a pane below**). Just copy `indicators_applied` through from the tool result; VWAP isn't charted on the daily timeframe.
 
 ## order_ticket
 

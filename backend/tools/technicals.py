@@ -24,6 +24,7 @@ import asyncio
 import base64
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -53,10 +54,52 @@ _INDICATOR_MAP: dict[str, tuple[str, dict[str, Any]]] = {
     "VWAP":    ("VWAP",                        {}),
 }
 
+# 054 — indicators are now period-parameterised ("SMA 20", "EMA 50", "RSI 9",
+# "BB 20") so the agent can request ANY length and the chart computes + draws it.
+# Families we chart from candles client-side. VWAP is intentionally NOT here — it's
+# an intraday measure and the chart is daily, so it isn't charted (per request).
+_MA_FULL = {
+    "SMA": "Moving Average Simple",
+    "EMA": "Moving Average Exponential",
+    "RSI": "Relative Strength Index",
+    "BB": "Bollinger Bands",
+}
+_IND_RE = re.compile(r"^(SMA|EMA|RSI|BB)\s+(\d+)$", re.IGNORECASE)
+_BB_MULT = 2  # standard Bollinger Band width (±2σ)
+
+
+def _parse_indicator(name: str) -> tuple[str, int] | None:
+    """('SMA', 50) for 'SMA 50' / 'EMA 20' / 'RSI 14' / 'BB 20' (case-insensitive),
+    else None (e.g. 'VWAP' — not charted on a daily timeframe)."""
+    m = _IND_RE.match((name or "").strip())
+    return (m.group(1).upper(), int(m.group(2))) if m else None
+
+
+def _renderable_applied(indicators: list[str] | None) -> list[str]:
+    """The requested indicators the chart can actually draw (SMA/EMA/RSI/BB of any
+    period), normalised; VWAP and unknowns dropped. Falls back to the SMA 50/200
+    staples when nothing chartable was requested."""
+    out: list[str] = []
+    for ind in indicators or []:
+        p = _parse_indicator(ind)
+        if p and (norm := f"{p[0]} {p[1]}") not in out:
+            out.append(norm)
+    return out or ["SMA 50", "SMA 200"]
+
 
 def _translate_indicator(short_name: str) -> tuple[str, dict[str, Any]]:
-    """Return (full_name, params) for a short-name indicator. Raises KeyError if unknown."""
-    return _INDICATOR_MAP[short_name]
+    """(full TradingView study name, params) for a short name — used by the local
+    TradingView-MCP path. Parses any period ("SMA 20" → length 20); BB carries the
+    ±2σ mult. Raises KeyError if unrecognised."""
+    s = (short_name or "").strip()
+    if s in _INDICATOR_MAP:
+        return _INDICATOR_MAP[s]
+    p = _parse_indicator(s)
+    if p:
+        fam, n = p
+        params = {"length": n, "mult": _BB_MULT} if fam == "BB" else {"length": n}
+        return _MA_FULL[fam], params
+    raise KeyError(short_name)
 
 
 # ---------------------------------------------------------------------------
@@ -98,7 +141,10 @@ async def _mock_technical_levels(
         "timeframe": timeframe,
         "current_price": price,
         "currency": "$",
-        "indicators_applied": list(sma_values.keys()),
+        # 054 — echo the requested (chartable) indicators so the chart draws what
+        # was asked for, not just the mock-valued ones (series come from real
+        # candles via /api/chart-data regardless of this mock path).
+        "indicators_applied": _renderable_applied(indicators),
         "indicator_values": sma_values,
         "key_levels": _key_levels(price),
         "trend": "bullish",
@@ -170,26 +216,49 @@ def _last(series) -> float | None:  # noqa: ANN001 — pandas Series
     return round(float(s.iloc[-1]), 2) if len(s) else None
 
 
-def _compute_indicators(closes) -> dict[str, float]:  # noqa: ANN001 — pandas Series of closes
-    """SMA 10/20/50/200, EMA 20, RSI 14 (Wilder), MACD 12/26/9 — from the close
-    series, using only pandas Series methods (no `import pandas`/ta-lib needed).
-    Keys absent when there isn't enough history for that indicator."""
+def _rsi_last(closes, period: int = 14):  # noqa: ANN001 — pandas Series of closes
+    """Last RSI value (Wilder's smoothing) for an arbitrary period, or None."""
+    delta = closes.diff()
+    gain = delta.clip(lower=0)
+    loss = (-delta).clip(lower=0)
+    avg_gain = gain.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+    avg_loss = loss.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+    # No-loss windows → avg_loss 0 → rs +inf → RSI 100 (the standard result); let it
+    # fall out naturally (don't NaN it, which dropped RSI for an all-gains series).
+    rs = avg_gain / avg_loss
+    return _last(100 - 100 / (1 + rs))
+
+
+def _compute_indicators(closes, indicators: list[str] | None = None) -> dict[str, float]:  # noqa: ANN001
+    """Last values for SMA/EMA/RSI/BB + MACD, for the trend-summary text. Computes
+    the **staple** periods (SMA 10/20/50/200, EMA 20, RSI 14) PLUS any extra periods
+    the caller requested via `indicators` ("SMA 20", "EMA 50", "RSI 9", "BB 20"), so
+    the agent can narrate exactly what was asked for. Pure pandas; keys absent when
+    there isn't enough history. (The CHART draws its own series client-side from the
+    candles — this dict is for the narrative, not the lines.)"""
     out: dict[str, float | None] = {}
     n = len(closes)
-    for w in (10, 20, 50, 200):
+    sma_p, ema_p, rsi_p, bb_p = {10, 20, 50, 200}, {20}, {14}, set()
+    for ind in indicators or []:
+        p = _parse_indicator(ind)
+        if not p:
+            continue
+        fam, w = p
+        {"SMA": sma_p, "EMA": ema_p, "RSI": rsi_p, "BB": bb_p}[fam].add(w)
+
+    for w in sorted(sma_p):
         out[f"SMA {w}"] = _last(closes.rolling(w).mean()) if n >= w else None
-    out["EMA 20"] = _last(closes.ewm(span=20, adjust=False).mean()) if n >= 20 else None
-    if n >= 15:  # RSI 14, Wilder's smoothing
-        delta = closes.diff()
-        gain = delta.clip(lower=0)
-        loss = (-delta).clip(lower=0)
-        avg_gain = gain.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
-        avg_loss = loss.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
-        # No-loss windows → avg_loss 0 → rs +inf → RSI 100 (the standard result),
-        # which falls out naturally; don't NaN it out (that dropped RSI entirely
-        # for an all-gains series).
-        rs = avg_gain / avg_loss
-        out["RSI 14"] = _last(100 - 100 / (1 + rs))
+    for w in sorted(ema_p):
+        out[f"EMA {w}"] = _last(closes.ewm(span=w, adjust=False).mean()) if n >= w else None
+    for w in sorted(rsi_p):
+        out[f"RSI {w}"] = _rsi_last(closes, w) if n >= w + 1 else None
+    for w in sorted(bb_p):  # Bollinger Bands (±2σ) — upper/mid/lower last values
+        if n >= w:
+            mid = closes.rolling(w).mean()
+            sd = closes.rolling(w).std()
+            out[f"BB {w} upper"] = _last(mid + _BB_MULT * sd)
+            out[f"BB {w} mid"] = _last(mid)
+            out[f"BB {w} lower"] = _last(mid - _BB_MULT * sd)
     if n >= 26:  # MACD 12/26/9
         macd_line = closes.ewm(span=12, adjust=False).mean() - closes.ewm(span=26, adjust=False).mean()
         signal = macd_line.ewm(span=9, adjust=False).mean()
@@ -254,14 +323,14 @@ async def _yfinance_technical_levels(
         return {"error": "insufficient_history", "ticker": ticker,
                 "message": f"only {len(closes)} bars for {ticker}"}
 
-    indicator_values = _compute_indicators(closes)
+    indicator_values = _compute_indicators(closes, indicators)
     last_close = round(float(closes.iloc[-1]), 2)
     key_levels = _swing_levels(df["High"], df["Low"], last_close)
     trend = _infer_trend(last_close, indicator_values)
     sma200 = indicator_values.get("SMA 200")
-    # indicators_applied drives the chart legend — the requested SMAs we have.
-    applied = [i for i in indicators if i in indicator_values] or \
-        [k for k in ("SMA 50", "SMA 200") if k in indicator_values]
+    # indicators_applied = the requested, chartable indicators (any SMA/EMA/RSI/BB
+    # period; RSI renders in a lower pane, BB as a band — see TAChart.tsx). 054.
+    applied = _renderable_applied(indicators)
     return {
         "ticker": ticker,
         "timeframe": timeframe,
@@ -829,12 +898,14 @@ register(
         description=(
             "Get technical analysis for one ticker: current price (in the ticker's "
             "own currency — see `currency`), indicator values (`indicator_values`: "
-            "SMA 10/20/50/200, EMA 20, RSI 14, and MACD/MACD signal/MACD hist), key "
-            "support and resistance levels, a trend label, `price_above_sma200`, and "
-            "(in local dev with TradingView) a chart screenshot. Works for US AND "
-            "non-US tickers — including Hong Kong, e.g. 1398.HK — computed from daily "
-            "candles. Use this to build a ta_chart widget; cite the indicator values "
-            "in `trend_summary_html`."
+            "the requested SMA/EMA/RSI/Bollinger periods + MACD), key support and "
+            "resistance levels, a trend label, `price_above_sma200`, and (in local "
+            "dev with TradingView) a chart screenshot. Pass `indicators` with ANY "
+            "period — e.g. 'SMA 20', 'SMA 100', 'EMA 50', 'RSI 9', 'BB 20' (Bollinger "
+            "Bands). The chart draws each: SMA/EMA/BB overlay the price, RSI renders "
+            "in a lower pane. (VWAP isn't charted on the daily timeframe.) Works for "
+            "US AND non-US tickers — including Hong Kong, e.g. 1398.HK. Use this to "
+            "build a ta_chart widget; cite the indicator values in `trend_summary_html`."
         ),
         input_schema={
             "type": "object",
@@ -847,8 +918,12 @@ register(
                 },
                 "indicators": {
                     "type": "array",
-                    "items": {"type": "string",
-                              "enum": ["SMA 50", "SMA 200", "EMA 20", "RSI 14", "VWAP"]},
+                    "items": {
+                        "type": "string",
+                        "description": ("An indicator with its period: 'SMA <n>', "
+                                        "'EMA <n>', 'RSI <n>', or 'BB <n>' (Bollinger "
+                                        "Bands, ±2σ). E.g. 'SMA 20', 'EMA 50', 'RSI 14'."),
+                    },
                     "default": ["SMA 50", "SMA 200"],
                 },
             },
@@ -865,8 +940,10 @@ register(
         name="chart_apply_indicator",
         description=(
             "Add or remove a technical indicator on the user's chart for one ticker. "
-            "Use when the user says things like 'add RSI' or 'remove the SMA 200'. "
-            "Returns the updated chart state — use it to emit an updated ta_chart widget."
+            "Use when the user says things like 'add the 20-day EMA' or 'remove the "
+            "SMA 200'. The indicator carries its period: 'SMA <n>', 'EMA <n>', "
+            "'RSI <n>', or 'BB <n>' (Bollinger Bands). Returns the updated chart state "
+            "— use it to emit an updated ta_chart widget."
         ),
         input_schema={
             "type": "object",
@@ -874,7 +951,7 @@ register(
                 "ticker": {"type": "string"},
                 "indicator": {
                     "type": "string",
-                    "enum": ["SMA 50", "SMA 200", "EMA 20", "RSI 14", "VWAP"],
+                    "description": "'SMA <n>', 'EMA <n>', 'RSI <n>', or 'BB <n>' — e.g. 'EMA 20'.",
                 },
                 "action": {"type": "string", "enum": ["add", "remove"], "default": "add"},
                 "timeframe": {
