@@ -14,7 +14,13 @@ export function ResearchCard({ data, sources }: { data: ResearchCardData; source
   // null.toFixed() / divide-by-null.
   const price =
     typeof data.current_price === 'number' && isFinite(data.current_price) ? data.current_price : null;
-  const upside = price !== null ? ((data.target_price - price) / price) * 100 : null;
+  // 055: `target_price` can also be null at runtime (FMP returns no consensus
+  // target) even though the type said `number` — a streamed/pinned card with a
+  // null target previously crashed on `null.toLocaleString()`. Guard it like 008
+  // did for current_price.
+  const target =
+    typeof data.target_price === 'number' && isFinite(data.target_price) ? data.target_price : null;
+  const upside = price !== null && target !== null ? ((target - price) / price) * 100 : null;
   const upPositive = upside !== null && upside >= 0;
 
   return (
@@ -42,7 +48,7 @@ export function ResearchCard({ data, sources }: { data: ResearchCardData; source
         </div>
         <div className="ml-auto text-right">
           <div className="text-[16px] font-semibold">
-            {data.currency}{data.target_price.toLocaleString()}
+            {target !== null ? `${data.currency}${target.toLocaleString()}` : '—'}
           </div>
           {upside !== null && (
             <div className={`text-[12.5px] font-semibold ${upPositive ? 'text-green-DEFAULT' : 'text-red-DEFAULT'}`}>

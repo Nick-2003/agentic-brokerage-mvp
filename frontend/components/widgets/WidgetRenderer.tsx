@@ -1,5 +1,6 @@
 'use client';
 
+import { Component, type ReactNode } from 'react';
 import type { Widget } from '@/lib/widgets';
 import { LiveTrade } from './LiveTrade';
 import { MorningBrief } from './MorningBrief';
@@ -17,7 +18,38 @@ type Props = {
   onOrderEdit?: () => void;
 };
 
-export function WidgetRenderer({ widget, onTrackerTap, onOrderConfirm, onOrderEdit }: Props) {
+// 055 — contain a single widget's render error so a malformed card (e.g. a null
+// numeric field hitting `.toFixed`/`.toLocaleString`) shows a small fallback
+// instead of crashing the whole page/turn (which previously white-screened the app).
+class WidgetErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch(error: unknown) {
+    console.error('widget render failed:', error);
+  }
+  render() {
+    if (this.state.failed) {
+      return (
+        <div className="bg-surface border border-border rounded-2xl p-4 text-[12.5px] text-text-3">
+          This card couldn’t be displayed.
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export function WidgetRenderer(props: Props) {
+  return (
+    <WidgetErrorBoundary>
+      <WidgetInner {...props} />
+    </WidgetErrorBoundary>
+  );
+}
+
+function WidgetInner({ widget, onTrackerTap, onOrderConfirm, onOrderEdit }: Props) {
   switch (widget.type) {
     case 'morning_brief':
       return <MorningBrief data={widget.data} sources={widget.sources} />;

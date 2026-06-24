@@ -1118,6 +1118,7 @@ A 3-task chat-UX/quality list — loading ring · input text-wrap · improve NER
 A briefing-product session against a 4-item list (news↔price correspondence · executed trades · visual chart · timing/timezone), then two feature requests (sample portfolio · alerts in the brief).
 
 **049–052 — daily-briefing upgrades, ALL APPLIED.**
+
 - **049 — news correspondence + wider window.** `BRIEFING_NEWS_MAX_AGE_DAYS` default widened (drafted 4; Nicholas tuned the applied value to **3**), `_NEWS_PER_TICKER` 2→3, and a new `_yf_symbol()` maps the IBKR Flex symbol → a yfinance ticker (HKD numeric `700`→`0700.HK`) so non-US/HK movers actually get news; `gather_market_context` fetches by the yf symbol then **re-keys results back to the Flex symbol** so `compute_brief_facts` attaches headlines to the right mover. `backend/briefing.py` only.
 - **050 — executed trades.** New `<Trades>` parse in `ibkr_flex.parse_flex_statement` (skips `CLOSED_LOT`/`LOT`), snapshot gains `trades`; `briefing._format_trades` + an "Executed: Bought 20 NVDA @ $1,175.30…" line + a mock-fixture `<Trades>` block + prompt rule #7. **Operator prereq:** enable the Trades section in the IBKR Flex Query (parser is null-safe until then).
 - **051 — day-P&L bar chart on the web brief.** `chart_data` jsonb on `published_briefs` (idempotent `add column`); `generate_briefing` emits per-holding day-P&L; `published_briefs`/`scheduler`/`brief_api` plumb it; `/b/[token]` renders pure-CSS diverging bars (green/red, no chart lib). WhatsApp/email stay text + link.
