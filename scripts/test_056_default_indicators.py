@@ -3,7 +3,7 @@
 
 Temp-applies the proposal's tools/technicals.py, asserts the no-default behavior,
 restores. Run with the backend venv:
-    backend/.venv/bin/python .proposed_changes/056-chart-default-no-indicators/scripts/test_056_default_indicators.py
+    backend/.venv/bin/python scripts/test_056_default_indicators.py
 """
 import os
 import shutil

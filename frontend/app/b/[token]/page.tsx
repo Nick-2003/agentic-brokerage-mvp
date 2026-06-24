@@ -12,34 +12,51 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { fetchBrief, type PublishedBrief, type BriefChartData } from '@/lib/brief';
 
-// 051 — per-holding day-P&L bar chart. Diverging bars from a centre axis:
-// gainers (green) extend right, losers (red) left; width ∝ |P&L| / max. Pure
-// CSS (no chart lib / no SVG); data comes pre-computed from the brief.
+// 051/057 — per-holding day-P&L bar chart. Diverging magnitude bars from a centre
+// axis: gainers (green) extend RIGHT, losers (red) extend LEFT; bar length ∝
+// |P&L| / max. Pure CSS (no chart lib / no SVG). 057: bar + value colors are
+// INLINE hex (not Tailwind `bg-green-DEFAULT`/`text-...` classes, which weren't
+// rendering on this route), bars are taller, and a tiny floor keeps small moves
+// visible — so the magnitude/direction reads clearly.
+const PNL_GREEN = '#0F6E56';
+const PNL_RED = '#C0392B';
+
 function DayPnlBars({ data }: { data: BriefChartData }) {
   const bars = data.bars ?? [];
   if (bars.length === 0) return null;
   const max = Math.max(...bars.map((b) => Math.abs(b.day_pnl)), 1);
   return (
     <div className="pt-4 mt-2 border-t border-border">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-text-3 mb-2">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-text-3 mb-3">
         Day P&amp;L by holding
       </div>
-      <div className="space-y-1.5">
+      <div className="space-y-2">
         {bars.map((b) => {
           const up = b.day_pnl >= 0;
-          const w = (Math.abs(b.day_pnl) / max) * 50; // % of the half-track
+          const color = up ? PNL_GREEN : PNL_RED;
+          // Bar length as a % of the half-track (each side is 50% of the track).
+          // Floor at ~2% so a non-zero move always shows a sliver; 0 → nothing.
+          const mag = Math.abs(b.day_pnl);
+          const w = mag === 0 ? 0 : Math.max((mag / max) * 50, 2);
           return (
             <div key={b.symbol} className="flex items-center gap-2 text-[12px]">
-              <span className="w-12 shrink-0 font-semibold text-text truncate">{b.symbol}</span>
-              <div className="relative flex-1 h-4">
+              <span className="w-14 shrink-0 font-semibold text-text truncate">{b.symbol}</span>
+              <div className="relative flex-1 h-5">
+                {/* centre axis */}
                 <div className="absolute inset-y-0 left-1/2 w-px bg-border" />
+                {/* the magnitude bar (inline color so it always renders) */}
                 <div
-                  className={`absolute inset-y-0 rounded-sm ${up ? 'bg-green-DEFAULT' : 'bg-red-DEFAULT'}`}
-                  style={up ? { left: '50%', width: `${w}%` } : { right: '50%', width: `${w}%` }}
+                  className="absolute top-1/2 -translate-y-1/2 h-3.5 rounded-[3px]"
+                  style={{
+                    backgroundColor: color,
+                    width: `${w}%`,
+                    ...(up ? { left: '50%' } : { right: '50%' }),
+                  }}
                 />
               </div>
               <span
-                className={`w-24 shrink-0 text-right tabular-nums ${up ? 'text-green-DEFAULT' : 'text-red-DEFAULT'}`}
+                className="w-24 shrink-0 text-right tabular-nums font-medium"
+                style={{ color }}
               >
                 {b.day_pnl_display}
               </span>
