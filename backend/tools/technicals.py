@@ -77,14 +77,15 @@ def _parse_indicator(name: str) -> tuple[str, int] | None:
 
 def _renderable_applied(indicators: list[str] | None) -> list[str]:
     """The requested indicators the chart can actually draw (SMA/EMA/RSI/BB of any
-    period), normalised; VWAP and unknowns dropped. Falls back to the SMA 50/200
-    staples when nothing chartable was requested."""
+    period), normalised; VWAP and unknowns dropped. **No default** (056): when no
+    indicator was requested the chart shows a clean candle chart (+ S/R) with no
+    overlays — indicators appear only when explicitly asked for."""
     out: list[str] = []
     for ind in indicators or []:
         p = _parse_indicator(ind)
         if p and (norm := f"{p[0]} {p[1]}") not in out:
             out.append(norm)
-    return out or ["SMA 50", "SMA 200"]
+    return out
 
 
 def _translate_indicator(short_name: str) -> tuple[str, dict[str, Any]]:
@@ -726,7 +727,8 @@ async def get_technical_levels(args: dict[str, Any], user_id: str) -> dict[str, 
     """
     ticker = (args.get("ticker") or "").upper()
     timeframe = args.get("timeframe", "1D")
-    indicators = args.get("indicators") or ["SMA 50", "SMA 200"]
+    # 056 — no default overlays: only draw indicators the user explicitly asked for.
+    indicators = args.get("indicators") or []
 
     # Source priority (043):
     #   1. Deterministic mock (USE_MOCK_TA=1) — offline/demo. Only covers the
@@ -924,7 +926,9 @@ register(
                                         "'EMA <n>', 'RSI <n>', or 'BB <n>' (Bollinger "
                                         "Bands, ±2σ). E.g. 'SMA 20', 'EMA 50', 'RSI 14'."),
                     },
-                    "default": ["SMA 50", "SMA 200"],
+                    # 056 — default to NONE. Only pass the indicators the user explicitly
+                    # asked for; a plain chart request gets a clean candle chart (no overlays).
+                    "default": [],
                 },
             },
             "required": ["ticker"],
