@@ -18,7 +18,7 @@ export type ResearchCardData = {
   current_price: number | null; // null when no live price source (yfinance down + no FMP profile price) — Proposal 008
   currency: string;
   rating: Rating;
-  target_price: number;
+  target_price: number | null; // 055: null when FMP returns no consensus target (guarded in ResearchCard)
   horizon_months: number;
   thesis_html: string;
   catalysts: string[];
