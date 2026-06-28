@@ -11,7 +11,7 @@ type Props = {
 };
 
 export function OrderTicket({ data, sources, onConfirm, onEdit }: Props) {
-  const sideClass = data.side === 'sell' ? 'text-red-DEFAULT' : 'text-green-DEFAULT';
+  const sideClass = data.side === 'sell' ? 'text-red' : 'text-green';
   const sideLabel = data.side === 'sell' ? 'Sell' : 'Buy';
 
   return (
@@ -47,7 +47,7 @@ export function OrderTicket({ data, sources, onConfirm, onEdit }: Props) {
             {data.sl_price && (
               <Cell
                 label="Stop loss"
-                labelColor="text-red-DEFAULT"
+                labelColor="text-red"
                 value={`${data.currency}${data.sl_price}`}
                 sub={`-${(((data.limit_price - data.sl_price) / data.limit_price) * 100).toFixed(1)}% · risk ${data.currency}${data.risk_amount?.toLocaleString() ?? '—'}`}
               />
@@ -55,7 +55,7 @@ export function OrderTicket({ data, sources, onConfirm, onEdit }: Props) {
             {data.tp_price && (
               <Cell
                 label="Take profit"
-                labelColor="text-green-DEFAULT"
+                labelColor="text-green"
                 value={`${data.currency}${data.tp_price}`}
                 sub={`+${(((data.tp_price - data.limit_price) / data.limit_price) * 100).toFixed(1)}% · reward ${data.currency}${data.reward_amount?.toLocaleString() ?? '—'}`}
               />

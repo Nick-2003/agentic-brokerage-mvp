@@ -21,15 +21,15 @@ export function Tracker({
     >
       <WidgetCard eyebrow={`${data.ticker} · Trade-setup tracker`} className="cursor-pointer">
         <div className="flex items-center justify-between mb-2.5">
-          <span className="text-[10px] font-bold tracking-[0.12em] uppercase text-green-DEFAULT flex items-center gap-1.5">
+          <span className="text-[10px] font-bold tracking-[0.12em] uppercase text-green flex items-center gap-1.5">
             <span className="live-dot inline-block" />
             Deployed · armed
           </span>
           <div className="text-right">
-            <div className={`text-[18px] font-semibold ${positive ? 'text-green-DEFAULT' : 'text-red-DEFAULT'}`}>
+            <div className={`text-[18px] font-semibold ${positive ? 'text-green' : 'text-red'}`}>
               {positive ? '+' : ''}${data.trade.unrealized_pnl.toFixed(2)}
             </div>
-            <div className={`text-[11.5px] font-medium ${positive ? 'text-green-DEFAULT' : 'text-red-DEFAULT'}`}>
+            <div className={`text-[11.5px] font-medium ${positive ? 'text-green' : 'text-red'}`}>
               {positive ? '+' : ''}{data.trade.unrealized_pnl_pct.toFixed(2)}% · unrealised
             </div>
           </div>
@@ -38,8 +38,8 @@ export function Tracker({
         <div className="grid grid-cols-4 gap-2 bg-bg border border-border rounded-lg px-3 py-2.5 mb-3 text-left">
           <Cell label="Entry" value={`$${data.trade.fill_price}`} />
           <Cell label="Current" value={`$${data.trade.current_price}`} />
-          {data.trade.sl !== undefined && <Cell label="SL" value={`$${data.trade.sl}`} accent="text-red-DEFAULT" />}
-          {data.trade.tp !== undefined && <Cell label="TP" value={`$${data.trade.tp}`} accent="text-green-DEFAULT" />}
+          {data.trade.sl !== undefined && <Cell label="SL" value={`$${data.trade.sl}`} accent="text-red" />}
+          {data.trade.tp !== undefined && <Cell label="TP" value={`$${data.trade.tp}`} accent="text-green" />}
         </div>
 
         <div className="text-[12.5px] leading-snug text-text-2 mb-2.5">

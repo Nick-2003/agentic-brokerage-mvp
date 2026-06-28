@@ -4,7 +4,7 @@ import { Sources, WidgetCard } from './Sources';
 export function LiveTrade({ data, sources }: { data: LiveTradeData; sources: Source[] }) {
   const positive = data.unrealized_pnl >= 0;
   const sideLabel = data.side === 'short' ? 'Short' : 'Long';
-  const sideClass = data.side === 'short' ? 'text-red-DEFAULT' : 'text-green-DEFAULT';
+  const sideClass = data.side === 'short' ? 'text-red' : 'text-green';
   const news = data.news_since_fill ?? [];
 
   return (
@@ -22,7 +22,7 @@ export function LiveTrade({ data, sources }: { data: LiveTradeData; sources: Sou
       <div className="flex items-center gap-3 px-3 py-2.5 bg-surface-2 rounded-xl mb-3">
         <span className="live-dot" />
         <div className="flex-1 text-[13px]">
-          <strong className={positive ? 'text-green-DEFAULT' : 'text-red-DEFAULT'}>
+          <strong className={positive ? 'text-green' : 'text-red'}>
             {positive ? '+' : ''}{data.currency}{data.unrealized_pnl.toFixed(2)} ({positive ? '+' : ''}{data.unrealized_pnl_pct.toFixed(2)}%)
           </strong>{' '}
           unrealised
@@ -34,7 +34,7 @@ export function LiveTrade({ data, sources }: { data: LiveTradeData; sources: Sou
       <div className="grid grid-cols-2 gap-px bg-border rounded-xl overflow-hidden">
         {data.sl_armed_at && (
           <div className="bg-surface px-3.5 py-2.5">
-            <div className="text-[10px] font-semibold uppercase tracking-[0.1em] text-red-DEFAULT">Stop loss · armed</div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.1em] text-red">Stop loss · armed</div>
             <div className="text-[14px] font-semibold mt-0.5">{data.currency}{data.sl_armed_at}</div>
             <div className="text-[11px] text-text-3 mt-0.5">
               {(((data.sl_armed_at / data.current_price - 1) * 100)).toFixed(1)}% away
@@ -43,7 +43,7 @@ export function LiveTrade({ data, sources }: { data: LiveTradeData; sources: Sou
         )}
         {data.tp_armed_at && (
           <div className="bg-surface px-3.5 py-2.5">
-            <div className="text-[10px] font-semibold uppercase tracking-[0.1em] text-green-DEFAULT">Take profit · armed</div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.1em] text-green">Take profit · armed</div>
             <div className="text-[14px] font-semibold mt-0.5">{data.currency}{data.tp_armed_at}</div>
             <div className="text-[11px] text-text-3 mt-0.5">
               +{(((data.tp_armed_at / data.current_price - 1) * 100)).toFixed(1)}% to go

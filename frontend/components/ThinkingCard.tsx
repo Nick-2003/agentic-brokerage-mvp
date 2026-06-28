@@ -16,13 +16,13 @@ export function ThinkingCard({ thoughts, done, elapsedMs }: Props) {
     <div className="bg-surface border border-border rounded-2xl p-4 mt-3 animate-slide-in">
       <div className="flex items-center gap-2 mb-3">
         {done ? (
-          <div className="w-3 h-3 rounded-full border border-green-DEFAULT flex items-center justify-center">
-            <span className="text-green-DEFAULT text-[10px] font-bold leading-none">✓</span>
+          <div className="w-3 h-3 rounded-full border border-green flex items-center justify-center">
+            <span className="text-green text-[10px] font-bold leading-none">✓</span>
           </div>
         ) : (
           <div className="w-3 h-3 rounded-full border border-accent border-t-transparent animate-spin-slow" />
         )}
-        <span className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${done ? 'text-green-DEFAULT' : 'text-accent'}`}>
+        <span className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${done ? 'text-green' : 'text-accent'}`}>
           {done ? `Done · ${Math.round((elapsedMs ?? 0) / 1000)}s` : 'Thinking'}
         </span>
       </div>
@@ -36,7 +36,7 @@ export function ThinkingCard({ thoughts, done, elapsedMs }: Props) {
           >
             <span className="w-3.5 flex justify-center text-[11px] leading-snug">
               {t.state === 'done' ? (
-                <span className="text-green-DEFAULT font-bold">✓</span>
+                <span className="text-green font-bold">✓</span>
               ) : (
                 <span className="text-accent font-semibold">→</span>
               )}

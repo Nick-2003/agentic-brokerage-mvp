@@ -11,14 +11,14 @@ export function PortfolioRisk({
   return (
     <WidgetCard eyebrow="Portfolio risk audit">
       {/* Big risk score */}
-      <div className="flex items-center gap-3.5 bg-red-bg/40 border border-red-DEFAULT/20 rounded-xl px-4 py-3 mb-3.5">
-        <div className="text-[28px] font-semibold text-red-DEFAULT -tracking-tight leading-none">
+      <div className="flex items-center gap-3.5 bg-red-bg/40 border border-red/20 rounded-xl px-4 py-3 mb-3.5">
+        <div className="text-[28px] font-semibold text-red -tracking-tight leading-none">
           {data.risk_score.toFixed(1)}
           <span className="text-sm text-text-3 font-normal">/10</span>
         </div>
         <div className="flex-1">
           <div className="text-[13px] font-semibold">
-            Risk score: <span className="text-red-DEFAULT">{data.risk_label}</span>
+            Risk score: <span className="text-red">{data.risk_label}</span>
           </div>
           <div className="text-[11.5px] text-text-2 mt-0.5">{data.risk_summary}</div>
         </div>
@@ -34,9 +34,9 @@ export function PortfolioRisk({
                 <div
                   className={`h-full rounded ${
                     s.severity === 'danger'
-                      ? 'bg-red-DEFAULT'
+                      ? 'bg-red'
                       : s.severity === 'warn'
-                        ? 'bg-amber-DEFAULT'
+                        ? 'bg-amber'
                         : 'bg-accent'
                   }`}
                   style={{ width: `${Math.min(100, s.pct)}%` }}
@@ -92,10 +92,10 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function FlagIcon({ severity }: { severity: 'low' | 'med' | 'high' }) {
   const [bg, color, sym] =
     severity === 'high'
-      ? ['bg-red-bg', 'text-red-DEFAULT', '⚠']
+      ? ['bg-red-bg', 'text-red', '⚠']
       : severity === 'med'
-        ? ['bg-amber-bg', 'text-amber-DEFAULT', '!']
-        : ['bg-green-bg', 'text-green-DEFAULT', '●'];
+        ? ['bg-amber-bg', 'text-amber', '!']
+        : ['bg-green-bg', 'text-green', '●'];
   return (
     <div className={`w-6 h-6 rounded-md ${bg} ${color} flex items-center justify-center text-[13px] flex-shrink-0`}>
       {sym}

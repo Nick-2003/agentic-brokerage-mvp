@@ -280,7 +280,7 @@ function ChatScreen() {
 
               {/* Error */}
               {t.error && (
-                <div className="mt-3 bg-red-bg text-red-DEFAULT text-sm px-3.5 py-2.5 rounded-2xl">
+                <div className="mt-3 bg-red-bg text-red text-sm px-3.5 py-2.5 rounded-2xl">
                   {t.error}
                 </div>
               )}
@@ -364,7 +364,7 @@ function Hero({ pinnedCount, portfolio }: { pinnedCount: number; portfolio: Port
       </div>
       <div className="text-4xl font-semibold -tracking-tight">{equityText}</div>
       {pnlText && (
-        <div className={`mt-1 text-sm font-medium ${up ? 'text-green-DEFAULT' : 'text-red-DEFAULT'}`}>
+        <div className={`mt-1 text-sm font-medium ${up ? 'text-green' : 'text-red'}`}>
           {pnlText}
         </div>
       )}
