@@ -196,7 +196,7 @@ function WaitlistCard() {
     <Card>
       <h2 className="text-base font-semibold">Join the waitlist</h2>
       {done ? (
-        <p className="mt-2 text-[13px] text-green-DEFAULT">You’re on the list — we’ll be in touch.</p>
+        <p className="mt-2 text-[13px] text-green">You’re on the list — we’ll be in touch.</p>
       ) : (
         <div className="mt-3 flex gap-2">
           <input
@@ -250,7 +250,7 @@ function SignInCard() {
       <h2 className="text-base font-semibold">Connect your broker</h2>
       <p className="mt-1 text-[13px] text-text-3">Sign in to connect IBKR — we’ll send a magic link.</p>
       {sent ? (
-        <p className="mt-3 text-[13px] text-green-DEFAULT">
+        <p className="mt-3 text-[13px] text-green">
           Magic link sent to <strong>{email.trim()}</strong>. Open it on this device.
         </p>
       ) : (
@@ -272,7 +272,7 @@ function SignInCard() {
           >
             {busy ? 'Sending…' : 'Send magic link'}
           </button>
-          {error && <div className="text-[12px] text-red-DEFAULT">{error}</div>}
+          {error && <div className="text-[12px] text-red">{error}</div>}
         </div>
       )}
     </Card>
@@ -313,7 +313,7 @@ function ConnectionCard({
         <h2 className="text-base font-semibold">IBKR connected</h2>
         <span
           className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${
-            conn.opt_in ? 'bg-green-bg text-green-DEFAULT' : 'bg-amber-bg text-amber-DEFAULT'
+            conn.opt_in ? 'bg-green-bg text-green' : 'bg-amber-bg text-amber'
           }`}
         >
           {conn.opt_in ? 'Briefings on' : 'Paused'}
@@ -467,7 +467,7 @@ function ConnectForm({
         >
           {busy ? 'Connecting…' : existing ? 'Save changes' : 'Connect & start briefings'}
         </button>
-        {error && <div className="text-[12px] text-red-DEFAULT">{error}</div>}
+        {error && <div className="text-[12px] text-red">{error}</div>}
         {onCancel && (
           <button
             type="button"

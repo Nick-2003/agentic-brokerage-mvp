@@ -179,7 +179,7 @@ function LoginScreen({ onDemo }: { onDemo?: () => void }) {
         </p>
 
         {sent ? (
-          <div className="mt-5 text-[13px] text-green-DEFAULT leading-relaxed">
+          <div className="mt-5 text-[13px] text-green leading-relaxed">
             Check your inbox — a magic link is on its way to <strong>{email.trim()}</strong>. Open it
             on this device to sign in.
           </div>
@@ -202,7 +202,7 @@ function LoginScreen({ onDemo }: { onDemo?: () => void }) {
             >
               {busy ? 'Sending…' : 'Send magic link'}
             </button>
-            {error && <div className="text-[12px] text-red-DEFAULT">{error}</div>}
+            {error && <div className="text-[12px] text-red">{error}</div>}
           </div>
         )}
 

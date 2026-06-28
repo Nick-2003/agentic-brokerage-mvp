@@ -278,8 +278,8 @@ function Legend({ color, label }: { color: string; label: string }) {
 }
 
 function LevelCell({ label, value, variant }: { label: string; value: string; variant: 'r' | 's' }) {
-  const bg = variant === 'r' ? 'bg-red-bg/40 border-red-DEFAULT/20' : 'bg-green-bg/50 border-green-DEFAULT/20';
-  const labelColor = variant === 'r' ? 'text-red-DEFAULT' : 'text-green-DEFAULT';
+  const bg = variant === 'r' ? 'bg-red-bg/40 border-red/20' : 'bg-green-bg/50 border-green/20';
+  const labelColor = variant === 'r' ? 'text-red' : 'text-green';
   return (
     <div className={`flex-1 rounded-lg border ${bg} px-2.5 py-2 text-center`}>
       <div className={`text-[9.5px] font-semibold uppercase tracking-[0.1em] ${labelColor}`}>{label}</div>

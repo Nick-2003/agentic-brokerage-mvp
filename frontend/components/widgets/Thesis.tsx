@@ -70,7 +70,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function Bullet({ kind, children }: { kind: 'up' | 'down' | 'accent'; children: React.ReactNode }) {
   const sym = kind === 'up' ? '▲' : kind === 'down' ? '▼' : '●';
-  const color = kind === 'up' ? 'text-green-DEFAULT' : kind === 'down' ? 'text-red-DEFAULT' : 'text-accent';
+  const color = kind === 'up' ? 'text-green' : kind === 'down' ? 'text-red' : 'text-accent';
   return (
     <li className="flex gap-2 items-start text-[13px] leading-snug">
       <span className={`${color} font-bold text-[11px] leading-snug`}>{sym}</span>

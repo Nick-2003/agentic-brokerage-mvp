@@ -2,9 +2,9 @@ import type { ResearchCardData, Source } from '@/lib/widgets';
 import { SafeHtml, Sources, WidgetCard } from './Sources';
 
 function ratingClasses(r: ResearchCardData['rating']) {
-  if (r === 'BUY') return 'bg-green-bg text-green-DEFAULT';
-  if (r === 'HOLD') return 'bg-amber-bg text-amber-DEFAULT';
-  return 'bg-red-bg text-red-DEFAULT';
+  if (r === 'BUY') return 'bg-green-bg text-green';
+  if (r === 'HOLD') return 'bg-amber-bg text-amber';
+  return 'bg-red-bg text-red';
 }
 
 export function ResearchCard({ data, sources }: { data: ResearchCardData; sources: Source[] }) {
@@ -51,7 +51,7 @@ export function ResearchCard({ data, sources }: { data: ResearchCardData; source
             {target !== null ? `${data.currency}${target.toLocaleString()}` : '—'}
           </div>
           {upside !== null && (
-            <div className={`text-[12.5px] font-semibold ${upPositive ? 'text-green-DEFAULT' : 'text-red-DEFAULT'}`}>
+            <div className={`text-[12.5px] font-semibold ${upPositive ? 'text-green' : 'text-red'}`}>
               {upPositive ? '▲' : '▼'} {Math.abs(upside).toFixed(1)}%
             </div>
           )}
@@ -72,7 +72,7 @@ export function ResearchCard({ data, sources }: { data: ResearchCardData; source
         <ul className="flex flex-col gap-1.5">
           {data.catalysts.map((c, i) => (
             <li key={i} className="flex gap-2 items-start text-[13px] leading-snug">
-              <span className="text-green-DEFAULT font-bold text-[11px] leading-snug">▲</span>
+              <span className="text-green font-bold text-[11px] leading-snug">▲</span>
               <span className="flex-1"><SafeHtml html={c} /></span>
             </li>
           ))}
@@ -85,7 +85,7 @@ export function ResearchCard({ data, sources }: { data: ResearchCardData; source
         <ul className="flex flex-col gap-1.5">
           {data.risks.map((r, i) => (
             <li key={i} className="flex gap-2 items-start text-[13px] leading-snug">
-              <span className="text-red-DEFAULT font-bold text-[11px] leading-snug">▼</span>
+              <span className="text-red font-bold text-[11px] leading-snug">▼</span>
               <span className="flex-1"><SafeHtml html={r} /></span>
             </li>
           ))}
