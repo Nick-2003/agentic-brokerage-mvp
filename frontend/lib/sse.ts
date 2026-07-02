@@ -17,12 +17,24 @@ export type ChatEvent =
 
 export type ChatEventHandler = (event: ChatEvent) => void;
 
+// 059 — one uploaded image for a chat turn. `data` is raw base64 (no
+// `data:<mime>;base64,` prefix — the client strips it before sending).
+export type ChatAttachment = {
+  kind: 'image';
+  media_type: string;
+  data: string;
+  name?: string;
+};
+
 export type ChatRequest = {
+  // 059: may be empty when at least one attachment is present (image-only turn).
   message: string;
   // P4.2: optional — when omitted, the backend creates a new conversation and
   // announces its id via the `conversation` SSE event. The frontend echoes the
   // id back on subsequent turns to continue the same thread.
   conversation_id?: string;
+  // 059: optional uploaded images for THIS turn (vision). Ephemeral server-side.
+  attachments?: ChatAttachment[];
   // No user_id — the backend derives identity from the JWT (P4.1).
 };
 

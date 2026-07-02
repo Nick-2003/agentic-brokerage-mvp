@@ -229,6 +229,38 @@ def _restore_screenshot_in_widget(
 
 
 # ---------------------------------------------------------------------------
+# 059 — build the current user turn's content (vision input)
+# ---------------------------------------------------------------------------
+
+
+def _build_user_content(
+    user_message: str, attachments: list[dict[str, Any]] | None
+) -> str | list[dict[str, Any]]:
+    """The `content` for the current user message.
+
+    No attachments → the plain string (unchanged pre-059 behaviour). With
+    attachment(s) → a list of content blocks: an optional leading text block
+    (omitted for an image-only turn) then one base64 `image` block per attachment.
+    Each attachment is ``{media_type, data (base64, no data: prefix), name?}``.
+    """
+    if not attachments:
+        return user_message
+    blocks: list[dict[str, Any]] = []
+    if user_message:
+        blocks.append({"type": "text", "text": user_message})
+    for att in attachments:
+        blocks.append({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": att["media_type"],
+                "data": att["data"],
+            },
+        })
+    return blocks
+
+
+# ---------------------------------------------------------------------------
 # Main agent loop
 # ---------------------------------------------------------------------------
 
@@ -239,6 +271,7 @@ async def run_agent(
     tracer: Tracer = NOOP_TRACER,
     memory_context: str = "",
     history: list[MessageParam] | None = None,
+    attachments: list[dict[str, Any]] | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Run one user turn through the Claude tool-use loop.
 
@@ -256,6 +289,15 @@ async def run_agent(
     earlier turns in the same chat. ``None`` (the default) → behaviour identical
     to pre-046 (single-message turn). ``main.py`` only supplies it for persisted
     (authenticated) conversations; demo turns stay historyless.
+
+    ``attachments`` (059 — vision input) are the user's uploaded image(s) for THIS
+    turn: a list of ``{media_type, data (base64, no data: prefix), name?}``. When
+    present, the current user message is built as a LIST of content blocks (text +
+    one ``image`` block per attachment) instead of a plain string — the Anthropic
+    SDK/model already accept this (it's the same list-content form used for
+    ``tool_result`` turns). EPHEMERAL by design: used only this turn, never
+    persisted or replayed (``main.py`` stores the message text only), so later turns
+    don't re-bill image tokens. ``None`` (the default) → the plain-string path.
     """
     start_time = time.monotonic()
     client = _get_client()
@@ -272,7 +314,11 @@ async def run_agent(
     # copies the caller's history so the in-loop appends (assistant/tool turns)
     # don't mutate it.
     messages: list[MessageParam] = list(history or [])
-    messages.append({"role": "user", "content": user_message})
+    # 059 — vision input. With attachment(s) the current turn is a list of content
+    # blocks (text + one `image` block per image); otherwise a plain string.
+    messages.append(  # type: ignore[typeddict-item]
+        {"role": "user", "content": _build_user_content(user_message, attachments)}
+    )
     iterations = 0
     # P5 (034): accumulate this turn's LLM token usage across iterations so the
     # `done` event can surface it for the per-user daily token budget.

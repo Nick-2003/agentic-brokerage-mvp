@@ -16,7 +16,7 @@ import {
   trackWidgetPinned,
 } from '@/lib/analytics';
 import { fetchPortfolio, type PortfolioSummary } from '@/lib/portfolio';
-import { streamChat, type ChatEvent, type ChatRequest } from '@/lib/sse';
+import { streamChat, type ChatAttachment, type ChatEvent, type ChatRequest } from '@/lib/sse';
 import { getAccessToken, signOut } from '@/lib/supabase';
 import type { Widget } from '@/lib/widgets';
 import { useEffect, useRef, useState } from 'react';
@@ -25,6 +25,9 @@ import { useEffect, useRef, useState } from 'react';
 type Turn = {
   id: string;
   userText: string;
+  // 059 — data URLs of the images the user attached to this turn, shown as
+  // thumbnails in the sent bubble so they can see what was included.
+  attachmentPreviews?: string[];
   thoughts: Thought[];
   done: boolean;
   elapsedMs?: number;
@@ -83,7 +86,7 @@ function ChatScreen() {
     };
   }, [userKey]);
 
-  async function handleSubmit(text: string) {
+  async function handleSubmit(text: string, attachments: ChatAttachment[] = []) {
     if (streaming) return;
     // Activation-funnel event — hash only, never the raw prompt text (PII rule).
     trackPromptSubmitted(classifyIntent(text), hashText(text));
@@ -91,18 +94,32 @@ function ChatScreen() {
     const turnId = crypto.randomUUID();
     const startedAt = performance.now();
 
+    // 059 — data URLs for the sent bubble's thumbnails (display only; the raw
+    // base64 goes to the backend in the request body).
+    const attachmentPreviews = attachments.map((a) => `data:${a.media_type};base64,${a.data}`);
+
     // Insert a fresh turn we'll keep mutating
     setTurns((prev) => [
       ...prev,
-      { id: turnId, userText: text, thoughts: [], done: false, widgets: [], messages: [] },
+      {
+        id: turnId,
+        userText: text,
+        attachmentPreviews: attachmentPreviews.length ? attachmentPreviews : undefined,
+        thoughts: [],
+        done: false,
+        widgets: [],
+        messages: [],
+      },
     ]);
 
     // Attach the Supabase JWT (null in demo mode → backend uses the "demo" user)
     const token = await getAccessToken();
 
-    const body: ChatRequest = conversationId
-      ? { message: text, conversation_id: conversationId }
-      : { message: text };
+    const body: ChatRequest = {
+      message: text,
+      ...(conversationId ? { conversation_id: conversationId } : {}),
+      ...(attachments.length ? { attachments } : {}),
+    };
 
     ctrlRef.current = streamChat(body, (ev: ChatEvent) => {
       // P4.2: capture the conversation id as soon as the backend announces it.
@@ -230,10 +247,26 @@ function ChatScreen() {
           {turns.map((t) => (
             <div key={t.id} className="px-4 mt-3">
               {/* User bubble */}
-              <div className="flex justify-end">
-                <div className="bg-accent text-white text-sm px-3.5 py-2 rounded-2xl rounded-br-md max-w-[85%]">
-                  {t.userText}
-                </div>
+              <div className="flex flex-col items-end gap-1.5">
+                {/* 059 — thumbnails of any images sent with this turn. */}
+                {t.attachmentPreviews && t.attachmentPreviews.length > 0 && (
+                  <div className="flex flex-wrap justify-end gap-1.5 max-w-[85%]">
+                    {t.attachmentPreviews.map((src, i) => (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        key={i}
+                        src={src}
+                        alt="attachment"
+                        className="w-24 h-24 object-cover rounded-xl border border-border"
+                      />
+                    ))}
+                  </div>
+                )}
+                {t.userText && (
+                  <div className="bg-accent text-white text-sm px-3.5 py-2 rounded-2xl rounded-br-md max-w-[85%]">
+                    {t.userText}
+                  </div>
+                )}
               </div>
 
               {/* Loading ring — only in the gap before the first SSE event

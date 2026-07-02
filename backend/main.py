@@ -34,12 +34,12 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any
+from typing import Any, Literal
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sse_starlette.sse import EventSourceResponse
 
 # Load .env before importing anything that reads env vars
@@ -141,14 +141,62 @@ async def healthz() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+# 059 — vision input. Constraints mirrored on the client (ChatBar) so the user
+# gets a friendly reject before upload; enforced here as the trust boundary.
+_ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+_MAX_ATTACHMENTS = 4
+# base64 inflates ~33%; ~5 MB binary → ~6.7 MB base64 per item, ~10 MB total.
+_MAX_ATTACHMENT_B64_CHARS = 7_000_000
+_MAX_ATTACHMENTS_TOTAL_B64_CHARS = 14_000_000
+
+
+class Attachment(BaseModel):
+    """One user-uploaded image for a single chat turn (059).
+
+    `data` is raw base64 (NO `data:<mime>;base64,` prefix — the client strips it).
+    Ephemeral: forwarded to the model for this turn only, never persisted.
+    """
+
+    kind: Literal["image"] = "image"
+    media_type: str = Field(..., max_length=64)
+    data: str = Field(..., min_length=1, max_length=_MAX_ATTACHMENT_B64_CHARS)
+    name: str | None = Field(default=None, max_length=200)
+
+    @field_validator("media_type")
+    @classmethod
+    def _allowed_media_type(cls, v: str) -> str:
+        if v not in _ALLOWED_IMAGE_TYPES:
+            raise ValueError(
+                f"unsupported media_type {v!r} (allowed: {sorted(_ALLOWED_IMAGE_TYPES)})"
+            )
+        return v
+
+
 class ChatRequest(BaseModel):
-    message: str = Field(..., min_length=1, max_length=4096)
+    # 059: message may be empty WHEN there's at least one attachment (an
+    # image-only turn is valid) — the min_length=1 invariant moves to the
+    # model-level validator below.
+    message: str = Field(default="", max_length=4096)
     # P4.2: optional — when omitted, a new conversation is created and its id
     # is announced via the `conversation` SSE event. The frontend echoes it
     # back on the next turn to continue the thread.
     conversation_id: str | None = Field(default=None, max_length=64)
+    # 059: optional uploaded images for THIS turn (vision). Ephemeral — not
+    # persisted/replayed. Count + total-size capped in the validator below.
+    attachments: list[Attachment] | None = Field(default=None)
     # No `user_id` here — identity is derived from the JWT (see auth.resolve_auth).
     # Any client-supplied user_id is silently ignored (Pydantic drops extra fields).
+
+    @model_validator(mode="after")
+    def _check(self) -> "ChatRequest":
+        atts = self.attachments or []
+        if not self.message.strip() and not atts:
+            raise ValueError("message must be non-empty unless an attachment is provided")
+        if len(atts) > _MAX_ATTACHMENTS:
+            raise ValueError(f"too many attachments (max {_MAX_ATTACHMENTS})")
+        if sum(len(a.data) for a in atts) > _MAX_ATTACHMENTS_TOTAL_B64_CHARS:
+            raise ValueError("attachments exceed the total size limit")
+        return self
 
 
 def _title_from(message: str) -> str:
@@ -201,7 +249,10 @@ async def chat(
                     conversation_id,
                     auth.user_id,
                     role="user",
-                    content=req.message,
+                    # 059: persist the text only (images are ephemeral). For an
+                    # image-only turn, store a short placeholder so the thread /
+                    # replay history isn't a blank user turn.
+                    content=req.message or "[image attached]",
                 )
         except Exception:
             # Don't break the stream on a DB hiccup; treat as if not persistable.
@@ -266,6 +317,12 @@ async def chat(
                     tracer=tracer,
                     memory_context=memory_context,
                     history=agent_history,
+                    # 059 — forward uploaded images for THIS turn only (ephemeral;
+                    # the API's usage numbers already include image tokens, so the
+                    # post-turn budget record needs no manual adjustment).
+                    attachments=(
+                        [a.model_dump() for a in req.attachments] if req.attachments else None
+                    ),
                 ):
                     if ev["event"] == "widget":
                         widget_acc.append(ev["data"])
