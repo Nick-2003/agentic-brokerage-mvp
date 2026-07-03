@@ -26,8 +26,11 @@ without a cause / drops a macro line rather than inventing one.
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timezone
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 
 def _yfinance_available() -> bool:
@@ -70,8 +73,51 @@ def _parse_yf_news_item(r: dict[str, Any]) -> dict[str, Any] | None:
     return {"headline": title, "source": source, "ts": ts, "url": url}
 
 
+def _merge_news(
+    yf_by_ticker: dict[str, list[dict[str, Any]]],
+    av_by_ticker: dict[str, list[dict[str, Any]]],
+    limit: int,
+) -> dict[str, list[dict[str, Any]]]:
+    """Union yfinance + Alpha Vantage headlines per ticker (060).
+
+    yfinance is the base; AV items are appended, then duplicates are dropped by
+    (normalised headline, url host) — keeping the FIRST seen (yfinance wins ties,
+    so a story present in both keeps yfinance's fields). Newest-first, capped at
+    `limit` per symbol. Pure/deterministic (unit-tested)."""
+    def _key(it: dict[str, Any]) -> tuple[str, str]:
+        title = (it.get("headline") or "").strip().lower()
+        url = it.get("url") or ""
+        host = ""
+        if url:
+            try:
+                from urllib.parse import urlparse
+
+                host = urlparse(url).netloc.lower().removeprefix("www.")
+            except ValueError:
+                host = ""
+        return (title, host)
+
+    out: dict[str, list[dict[str, Any]]] = {}
+    tickers = list(yf_by_ticker.keys()) + [k for k in av_by_ticker if k not in yf_by_ticker]
+    for sym in tickers:
+        merged: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+        for it in (yf_by_ticker.get(sym, []) + av_by_ticker.get(sym, [])):
+            k = _key(it)
+            if k in seen:
+                continue
+            seen.add(k)
+            merged.append(it)
+        merged.sort(key=lambda it: it.get("ts") or "", reverse=True)
+        out[sym] = merged[:limit]
+    return out
+
+
 async def fetch_recent_news(
-    tickers: list[str] | str, limit: int = 2, since: str | None = None
+    tickers: list[str] | str,
+    limit: int = 2,
+    since: str | None = None,
+    use_av: bool = False,
 ) -> dict[str, Any]:
     """REAL per-ticker headlines via yfinance. Always returns `is_mock: False`.
 
@@ -80,6 +126,13 @@ async def fetch_recent_news(
     `limit` per symbol. If yfinance isn't importable, returns an explicit
     `error: "yfinance_unavailable"` (still `is_mock: False`) so the caller can
     tell "no news today" apart from "no news source".
+
+    060 — `use_av` (default False) opts THIS caller into supplementing yfinance
+    with Alpha Vantage's NEWS_SENTIMENT feed. Only the daily **briefing** passes
+    `use_av=True`; the chat `get_company_news` tool leaves it False → yfinance-only
+    (off AV's free-tier quota). yfinance stays the base; AV is best-effort — any AV
+    failure/cap keeps the yfinance-only result. `source` becomes
+    `"yfinance+alphavantage"` when AV actually contributed.
     """
     if isinstance(tickers, str):
         tickers = [tickers]
@@ -100,7 +153,24 @@ async def fetch_recent_news(
             items = [it for it in items if (it.get("ts") or "") >= since]
         items.sort(key=lambda it: it.get("ts") or "", reverse=True)
         out[t.upper()] = items[:limit]
-    return {"news_by_ticker": out, "is_mock": False, "source": "yfinance"}
+
+    source = "yfinance"
+    # 060 — supplement with Alpha Vantage (briefing only, best-effort). Any AV
+    # error/cap is swallowed → the yfinance-only result stands (never breaks a brief).
+    if use_av:
+        try:
+            import alphavantage_client as av
+
+            if av.av_news_enabled():
+                av_res = await av.fetch_news(syms, limit=limit, since=since)
+                av_by = av_res.get("news_by_ticker", {})
+                if any(av_by.values()):
+                    out = _merge_news(out, av_by, limit)
+                    source = "yfinance+alphavantage"
+        except Exception as e:  # noqa: BLE001 — AV is a best-effort supplement
+            log.info("news_context: alphavantage supplement skipped: %s", e)
+
+    return {"news_by_ticker": out, "is_mock": False, "source": source}
 
 
 # --- macro context (the "what it means" layer) --------------------------------

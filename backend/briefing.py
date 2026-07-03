@@ -431,6 +431,9 @@ async def gather_market_context(snapshot: dict) -> dict:
                     list(yf_to_orig.keys()),
                     limit=_NEWS_PER_TICKER,
                     since=_news_since(snapshot.get("as_of")),
+                    # 060 — briefing is the ONLY caller that supplements yfinance
+                    # with Alpha Vantage (best-effort; yfinance-only if AV off/capped).
+                    use_av=True,
                 )
                 if _real_enough(res):
                     nb = res.get("news_by_ticker", {})
