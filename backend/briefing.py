@@ -35,10 +35,10 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo  # 052 — localize the freshness note to BRIEFING_TZ
 
 from anthropic import AsyncAnthropic
 
+import freshness  # 061 — shared freshness-note logic (was inline here, 052)
 import ibkr_flex
 from news_context import fetch_macro_context, fetch_recent_news
 from tools.market import get_company_news, get_macro_snapshot
@@ -146,47 +146,20 @@ def _pct(v: float | None, *, signed: bool = True) -> str | None:
     return f"{sign}{v:.2f}%"
 
 
+# 061 — the freshness-note logic moved to the shared `freshness` module so the
+# in-app morning_brief (tools/portfolio.py) shows the SAME note. These thin
+# wrappers keep 052's call sites + tests (which reference `_freshness_note`,
+# `_briefing_tz_name`) working unchanged.
 def _briefing_tz_name() -> str:
-    """Configured display timezone for the freshness note (052). Defaults to the
-    operator's locale; read per-call so env changes/tests take effect without reimport."""
-    return os.getenv("BRIEFING_TZ", "Asia/Hong_Kong")
+    return freshness.briefing_tz_name()
 
 
 def _tz_or_utc(tz_name: str):
-    """ZoneInfo for `tz_name`, falling back to UTC if the zone/tzdata is unavailable
-    (never crash the brief on a bad BRIEFING_TZ)."""
-    try:
-        return ZoneInfo(tz_name)
-    except Exception:  # noqa: BLE001 — bad zone name / missing tzdata
-        return timezone.utc
+    return freshness.tz_or_utc(tz_name)
 
 
 def _freshness_note(as_of: str | None, now: datetime, tz_name: str | None = None) -> str | None:
-    """One-line data-freshness disclosure (052). IBKR Flex is end-of-day (T+1): the
-    statement reflects the close of the `as_of` US session, not live/intraday prices.
-
-    Shows BOTH the configured local timezone AND GMT so a reader (e.g. in GMT+8)
-    can reconcile recency without mental arithmetic:
-      • the session date is the US trading day (`as_of`), labelled plainly;
-      • the generation instant (`now`, ≈ send time) is rendered in the local tz
-        (`BRIEFING_TZ`) and in GMT.
-    `tz_name` overrides the env (for tests). None as_of → None."""
-    if not as_of:
-        return None
-    tz_name = tz_name or _briefing_tz_name()
-    try:
-        sess_str = datetime.strptime(as_of[:10], "%Y-%m-%d").strftime("%a %d %b %Y")
-    except (TypeError, ValueError):
-        sess_str = as_of
-    local = now.astimezone(_tz_or_utc(tz_name))
-    local_abbr = local.tzname() or tz_name
-    gen_local = local.strftime("%d %b %H:%M")
-    gen_gmt = now.astimezone(timezone.utc).strftime("%d %b %H:%M")
-    return (
-        f"Figures are end-of-day — the close of the US session on {sess_str} "
-        f"(IBKR statement data, not live/intraday). "
-        f"Generated {gen_local} {local_abbr} / {gen_gmt} GMT."
-    )
+    return freshness.freshness_note(as_of, now, tz_name)
 
 
 def _qty_str(q: float | None) -> str:

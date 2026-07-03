@@ -23,7 +23,10 @@ from __future__ import annotations
 import logging
 import os
 import time
+from datetime import datetime, timezone
 from typing import Any
+
+import freshness  # 061 — shared "figures are end-of-day / generated at" note
 
 from . import ToolDef, register
 
@@ -181,6 +184,13 @@ def _map_ibkr_snapshot(snap: dict) -> dict[str, Any]:
         "base_currency": base,          # e.g. "HKD"
         "account_id": snap.get("account_id"),
         "as_of": snap.get("as_of"),     # statement date — Flex isn't intraday
+        # 061 — ready-made data-freshness line (same wording as the email/WhatsApp
+        # brief, via the shared `freshness` module). Computed server-side with the
+        # real current time so the agent copies it VERBATIM into the morning_brief
+        # widget's `as_of_note` (it must not fabricate a generation timestamp).
+        "freshness_note": freshness.freshness_note(
+            snap.get("as_of"), datetime.now(timezone.utc)
+        ),
         "source": "ibkr",
         "read_only": True,              # no trading via Flex
         "connected": True,              # 040: this user has an IBKR connection
@@ -204,6 +214,7 @@ def _nil_portfolio() -> dict[str, Any]:
         "base_currency": None,
         "account_id": None,
         "as_of": None,
+        "freshness_note": None,  # 061 — nil until connected
         "source": "ibkr",
         "read_only": True,
         "connected": False,
