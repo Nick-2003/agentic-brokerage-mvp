@@ -146,10 +146,13 @@ You call `get_portfolio`, `get_quote` (live prices on the holdings), and `get_ma
     "paragraphs": [
       "<strong>NVDA</strong> is at <strong>$942.50</strong> (<strong>+1.98%</strong>) on data-center strength.",
       "..."
-    ]
+    ],
+    "as_of_note": "<copied verbatim from get_portfolio.freshness_note>"
   },
   "sources": [{"name": "Your portfolio"}, {"name": "Live quotes"}, {"name": "Macro snapshot"}]
 }
 ```
 
 `$942.50` and `+1.98%` are copied digit-for-digit from the `get_quote` result — not `942`, not `940`, not a figure from memory. That is the standard for every number in every widget. The `sources` array names exactly the three tools called (none of which returned an explicit `sources` field, so one concise entry per tool per rule #7) — never four, never "Bloomberg", never with any tool removed.
+
+**`as_of_note`** — the portfolio figures come from IBKR Flex end-of-day statements (T+1), so a `morning_brief` should disclose *what day* they're from and *when* they were generated. `get_portfolio` returns a ready-made `freshness_note` string; **copy it verbatim into `data.as_of_note`.** Never compose or reformat the timestamp yourself — you don't know the real generation time, and inventing one would violate trust #1/#3. If `get_portfolio` has no `freshness_note` (null/absent), omit `as_of_note`.

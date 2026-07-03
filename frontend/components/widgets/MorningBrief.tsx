@@ -14,6 +14,13 @@ export function MorningBrief({ data, sources }: { data: MorningBriefData; source
           </p>
         ))}
       </div>
+      {/* 061 — data-freshness footnote: what day the figures are from + when
+          generated. Italic, muted; only shown when the agent copied it through. */}
+      {data.as_of_note && (
+        <p className="mt-3 text-[11.5px] italic leading-snug text-text-3">
+          <SafeHtml html={data.as_of_note} />
+        </p>
+      )}
       <Sources sources={sources} />
     </WidgetCard>
   );

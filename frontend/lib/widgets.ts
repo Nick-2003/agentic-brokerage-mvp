@@ -8,6 +8,9 @@ export type Source = { name: string; url?: string };
 export type MorningBriefData = {
   headline: string;
   paragraphs: string[];
+  // 061 — optional data-freshness footnote (what day the figures are from +
+  // when they were generated). Copied verbatim from get_portfolio.freshness_note.
+  as_of_note?: string;
 };
 
 // ── research_card ──

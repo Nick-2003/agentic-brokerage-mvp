@@ -19,7 +19,8 @@ Every widget has:
       "Led by **NVDA** (+1.98%) on strong data-center commentary at the AI conference and **TSLA** (+2.57%) on robotaxi headlines; **MSFT** slipped (-0.49%) on regulatory chatter.",
       "S&P futures point +0.4% higher, the **10Y yield** holds at 4.32%, and **DXY** is firm into the Fed minutes this afternoon.",
       "Watch **NVDA** for follow-through above $945 (next resistance $960) and **AMD** ahead of next week's earnings — flagged unusual call volume."
-    ]
+    ],
+    "as_of_note": "Figures are end-of-day — the close of the US session on Wed 01 Jul 2026 (IBKR statement data, not live/intraday). Generated 02 Jul 20:01 HKT / 02 Jul 12:01 GMT."
   },
   "sources": [
     {"name": "Your portfolio"},
@@ -28,6 +29,8 @@ Every widget has:
   ]
 }
 ```
+
+`as_of_note` (optional) is a data-freshness line rendered as a footnote under the brief — it tells the reader *what day* the figures are from and *when* they were generated. **Copy it VERBATIM from `get_portfolio`'s `freshness_note` field** — never write or reformat the timestamp yourself (you can't know the real generation time). Omit the field if `get_portfolio` returned no `freshness_note` (e.g. no `as_of`).
 
 ## research_card
 
