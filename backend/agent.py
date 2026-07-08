@@ -81,10 +81,77 @@ _JSON_BLOCK_RE = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL)
 _RAW_JSON_RE = re.compile(r"^\s*(\{.*\})\s*$", re.DOTALL)
 
 
+def _repair_json_quotes(s: str) -> str:
+    """Best-effort repair of the #1 widget-JSON failure: an **unescaped double
+    quote inside a string value** (063). The model writes prose like
+    ``… even with "infinite money." CoreWeave …`` inside a `"paragraphs"` entry;
+    those inner quotes break `json.loads`, the widget doesn't render, and the raw
+    JSON leaks to the user as a code block.
+
+    Heuristic: walk the text tracking string state. Inside a string, a `"` is a
+    REAL terminator only when the next non-whitespace char is structural
+    (`,` `]` `}` `:`) or end-of-input; otherwise it's a content quote and gets
+    escaped (`\\"`). This precisely fixes the observed case while leaving valid
+    JSON (and already-escaped quotes) untouched.
+
+    Imperfect by nature (prose containing `",` — a quote immediately before a
+    comma — can still be misread), so the caller re-parses AND re-validates the
+    shape; a bad repair simply fails to parse and falls back to the plain-text
+    path (never worse than today, never a corrupted widget).
+    """
+    out: list[str] = []
+    in_str = False
+    i, n = 0, len(s)
+    while i < n:
+        c = s[i]
+        if not in_str:
+            out.append(c)
+            if c == '"':
+                in_str = True
+            i += 1
+        elif c == "\\":  # keep any escape pair verbatim
+            out.append(c)
+            if i + 1 < n:
+                out.append(s[i + 1])
+                i += 2
+            else:
+                i += 1
+        elif c == '"':
+            j = i + 1
+            while j < n and s[j] in " \t\r\n":
+                j += 1
+            if j >= n or s[j] in ",]}:":
+                out.append('"')  # real terminator
+                in_str = False
+            else:
+                out.append('\\"')  # content quote → escape
+            i += 1
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def _loads_widget(raw: str) -> dict[str, Any] | None:
+    """`json.loads(raw)`, with a one-shot quote-repair retry on failure. Returns a
+    dict only if it parses AND matches the widget envelope (`type` + `data`);
+    otherwise None (fail-closed)."""
+    for candidate in (raw, _repair_json_quotes(raw)):
+        try:
+            obj = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict) and "type" in obj and "data" in obj:
+            return obj
+        return None  # parsed but not a widget → don't bother repairing further
+    return None
+
+
 def _extract_widget_json(text: str) -> dict[str, Any] | None:
     """Try to parse a widget JSON from the model's final message.
 
     Returns None if no widget found (fall through to plain markdown message).
+    063: tolerates an unescaped inner double quote via `_loads_widget`'s repair.
     """
     if not text:
         return None
@@ -92,13 +159,7 @@ def _extract_widget_json(text: str) -> dict[str, Any] | None:
     m = _JSON_BLOCK_RE.search(text) or _RAW_JSON_RE.match(text.strip())
     if not m:
         return None
-    try:
-        obj = json.loads(m.group(1))
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(obj, dict) or "type" not in obj or "data" not in obj:
-        return None
-    return obj
+    return _loads_widget(m.group(1))
 
 
 # ---------------------------------------------------------------------------
