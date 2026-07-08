@@ -2,6 +2,8 @@
 
 When your response is a widget, output a SINGLE JSON code block (no surrounding prose) matching ONE of the schemas below. The app validates against these — invalid JSON falls back to a plain text bubble.
 
+**The block MUST be valid JSON.** The most common break is a **raw double quote inside a string value** — e.g. writing `even with "infinite money."` inside a paragraph silently ends the string and corrupts the whole widget. Inside any string value: use single quotes for quoted phrases (`even with 'infinite money.'`), or escape the quote as `\"`. Never place a bare `"` inside prose. (Same for other control characters — no literal newlines inside a string; use spaces.)
+
 Every widget has:
 
 - `type` (string, required) — must be one of the listed types
