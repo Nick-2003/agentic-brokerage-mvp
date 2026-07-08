@@ -33,6 +33,7 @@ P4.3 (025):     each turn recalls this user's Mem0 memories (scoped by the
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Any, Literal
 
@@ -59,7 +60,9 @@ import security  # noqa: E402  (W6.6 — rate limit + security headers)
 import token_budget  # noqa: E402  (P5 / 034 — per-user daily LLM token budget)
 import waitlist_api  # noqa: E402  (W4 — IBKR connect + waitlist router)
 import webhooks  # noqa: E402  (W6 — Twilio inbound STOP/START webhook)
-from agent import MODEL, run_agent  # noqa: E402
+from agent import MODEL, _classify_agent_error, run_agent  # noqa: E402
+
+log = logging.getLogger(__name__)
 from auth import AuthCtx, auth_configured, require_auth, resolve_auth  # noqa: E402
 from tools import TOOL_REGISTRY  # noqa: E402
 from tools.portfolio import get_portfolio  # noqa: E402
@@ -336,9 +339,15 @@ async def chat(
                         "data": json.dumps(ev["data"], ensure_ascii=False),
                     }
             except Exception as e:
+                # 064: run_agent classifies its own errors and yields a safe
+                # `error` event; this is the last-resort net if it raises before
+                # yielding. Classify here too so a raw provider message (e.g.
+                # "credit balance is too low") never reaches the client.
+                user_msg, code = _classify_agent_error(e)
+                log.warning("chat stream failed [%s]: %s", code, e)
                 yield {
                     "event": "error",
-                    "data": json.dumps({"message": f"stream failed: {e}"}),
+                    "data": json.dumps({"message": user_msg, "code": code}),
                 }
 
             # ---- P5 (034): record this turn's tokens against the daily budget
