@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 import time
@@ -43,11 +44,20 @@ from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
 
-from anthropic import AsyncAnthropic
+from anthropic import (
+    APIConnectionError,
+    APIStatusError,
+    AsyncAnthropic,
+    AuthenticationError,
+    PermissionDeniedError,
+    RateLimitError,
+)
 from anthropic.types import MessageParam, ToolUseBlock
 
 from observability import NOOP_TRACER, Tracer
 from tools import TOOL_REGISTRY, anthropic_tool_specs, render_thought  # noqa: F401
+
+log = logging.getLogger(__name__)
 
 _PROMPT_DIR = Path(__file__).parent / "prompts"
 
@@ -322,6 +332,46 @@ def _build_user_content(
 
 
 # ---------------------------------------------------------------------------
+# 064 — provider-error classification. The Anthropic API can fail for reasons
+# the user must NOT see verbatim: an out-of-credit account returns
+# `400 … "Your credit balance is too low …"`, and leaking that (or a raw
+# request_id / model name) both confuses the user and exposes account state.
+# Map every failure to a short, safe, actionable message + a stable `code`;
+# the full exception is logged server-side (and to the tracer) for debugging.
+# ---------------------------------------------------------------------------
+
+# Substrings that mark a billing/quota problem regardless of the SDK error class
+# (the credit-balance error arrives as a plain 400 BadRequestError).
+_BILLING_MARKERS = ("credit balance", "billing", "quota", "insufficient", "payment")
+
+_MSG_UNAVAILABLE = (
+    "The assistant is temporarily unavailable. Our team has been notified — "
+    "please try again a little later."
+)
+_MSG_BUSY = "The assistant is busy right now — please try again in a moment."
+_MSG_GENERIC = "Something went wrong generating that. Please try again."
+
+
+def _classify_agent_error(e: Exception) -> tuple[str, str]:
+    """Map an exception to (user_message, code). NEVER leak provider text
+    (billing state, request_id, model, raw JSON) into the user_message."""
+    text = str(e).lower()
+    # Billing / quota — the account can't make calls. Show "unavailable", not why.
+    if any(m in text for m in _BILLING_MARKERS):
+        return _MSG_UNAVAILABLE, "provider_unavailable"
+    # Rate limited — transient; invite a retry.
+    if isinstance(e, RateLimitError) or "rate limit" in text or "429" in text:
+        return _MSG_BUSY, "rate_limited"
+    # Auth / permission / connectivity — config or provider outage, not the user.
+    if isinstance(e, (AuthenticationError, PermissionDeniedError, APIConnectionError)):
+        return _MSG_UNAVAILABLE, "provider_unavailable"
+    # Any other API status error (5xx, unexpected 4xx).
+    if isinstance(e, APIStatusError):
+        return _MSG_UNAVAILABLE, "provider_error"
+    return _MSG_GENERIC, "agent_error"
+
+
+# ---------------------------------------------------------------------------
 # Main agent loop
 # ---------------------------------------------------------------------------
 
@@ -530,8 +580,13 @@ async def run_agent(
             }
 
     except Exception as e:
-        tracer.set_output({"kind": "error", "message": str(e)})
-        yield {"event": "error", "data": {"message": f"agent error: {e}"}}
+        # 064: log the FULL error server-side (+ tracer) for debugging, but send
+        # the user only a safe, classified message — never the raw provider text
+        # (e.g. "credit balance is too low").
+        user_msg, code = _classify_agent_error(e)
+        log.warning("run_agent failed [%s]: %s", code, e)
+        tracer.set_output({"kind": "error", "code": code, "message": str(e)})
+        yield {"event": "error", "data": {"message": user_msg, "code": code}}
 
     elapsed_ms = int((time.monotonic() - start_time) * 1000)
     yield {
