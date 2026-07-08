@@ -344,6 +344,10 @@ def _build_user_content(
 # (the credit-balance error arrives as a plain 400 BadRequestError).
 _BILLING_MARKERS = ("credit balance", "billing", "quota", "insufficient", "payment")
 
+# 065 — VERBOSE mode (default on). Shows the specific error type + the provider's
+# own reason so the operator/tester can act (top up credits, fix the key, wait out
+# a rate limit). Set CHAT_VERBOSE_ERRORS=0 to fall back to the generic, non-leaky
+# messages below (recommended once real/untrusted users are on it).
 _MSG_UNAVAILABLE = (
     "The assistant is temporarily unavailable. Our team has been notified — "
     "please try again a little later."
@@ -351,23 +355,96 @@ _MSG_UNAVAILABLE = (
 _MSG_BUSY = "The assistant is busy right now — please try again in a moment."
 _MSG_GENERIC = "Something went wrong generating that. Please try again."
 
+_DETAIL_MAX = 300  # cap a provider message so it can't dump a huge blob
+
+
+def _verbose_errors() -> bool:
+    return os.getenv("CHAT_VERBOSE_ERRORS", "1") != "0"
+
+
+def _provider_detail(e: Exception) -> tuple[int | None, str | None, str | None]:
+    """Best-effort (http_status, provider_error_type, provider_message) from an
+    Anthropic APIStatusError. (None, None, None) for non-API errors."""
+    status = getattr(e, "status_code", None)
+    etype = pmsg = None
+    body = getattr(e, "body", None)
+    if isinstance(body, dict):
+        err = body.get("error")
+        if isinstance(err, dict):
+            etype = err.get("type")
+            pmsg = err.get("message")
+    return status, etype, pmsg
+
 
 def _classify_agent_error(e: Exception) -> tuple[str, str]:
-    """Map an exception to (user_message, code). NEVER leak provider text
-    (billing state, request_id, model, raw JSON) into the user_message."""
+    """Map an exception to (user_message, code).
+
+    Default (CHAT_VERBOSE_ERRORS != "0"): the message NAMES the specific error and
+    WHY it's happening (e.g. "Anthropic API — billing/credits: Your credit balance
+    is too low …"). With CHAT_VERBOSE_ERRORS=0 it returns the generic, non-leaky
+    copy so provider/billing detail never reaches untrusted users. The full
+    exception is always logged server-side + on the tracer regardless."""
     text = str(e).lower()
-    # Billing / quota — the account can't make calls. Show "unavailable", not why.
+    status, etype, pmsg = _provider_detail(e)
+    verbose = _verbose_errors()
+
+    def _reason(fallback: str) -> str:
+        return (pmsg or fallback).strip()[:_DETAIL_MAX]
+
+    # Billing / quota — the account can't make calls.
     if any(m in text for m in _BILLING_MARKERS):
+        if verbose:
+            return (
+                f"Anthropic API — billing/credits: {_reason('your credit balance is too low.')} "
+                "(Fix: add credits at console.anthropic.com → Plans & Billing, then retry.)",
+                "provider_unavailable",
+            )
         return _MSG_UNAVAILABLE, "provider_unavailable"
+
     # Rate limited — transient; invite a retry.
     if isinstance(e, RateLimitError) or "rate limit" in text or "429" in text:
+        if verbose:
+            return (
+                f"Anthropic API — rate limited (HTTP {status or 429}): too many requests. "
+                "Wait a moment and try again.",
+                "rate_limited",
+            )
         return _MSG_BUSY, "rate_limited"
-    # Auth / permission / connectivity — config or provider outage, not the user.
-    if isinstance(e, (AuthenticationError, PermissionDeniedError, APIConnectionError)):
-        return _MSG_UNAVAILABLE, "provider_unavailable"
+
+    # Auth / permission — a key/config problem, not the user.
+    if isinstance(e, (AuthenticationError, PermissionDeniedError)):
+        return (
+            (
+                f"Anthropic API — authentication (HTTP {status or 401}): the API key was "
+                f"rejected. {_reason('Check ANTHROPIC_API_KEY.')}"
+                if verbose
+                else _MSG_UNAVAILABLE
+            ),
+            "provider_unavailable",
+        )
+
+    # Connectivity — couldn't reach the provider.
+    if isinstance(e, APIConnectionError):
+        return (
+            (
+                f"Anthropic API — connection failed ({type(e).__name__}): couldn't reach the "
+                "provider. Check connectivity and retry."
+                if verbose
+                else _MSG_UNAVAILABLE
+            ),
+            "provider_unavailable",
+        )
+
     # Any other API status error (5xx, unexpected 4xx).
     if isinstance(e, APIStatusError):
+        if verbose:
+            label = f"HTTP {status}" + (f" {etype}" if etype else "")
+            return (f"Anthropic API error ({label}): {_reason(str(e))}", "provider_error")
         return _MSG_UNAVAILABLE, "provider_error"
+
+    # Non-provider failure (a bug in our loop / an unexpected crash).
+    if verbose:
+        return (f"Error: {type(e).__name__}: {str(e)[:_DETAIL_MAX]}", "agent_error")
     return _MSG_GENERIC, "agent_error"
 
 
