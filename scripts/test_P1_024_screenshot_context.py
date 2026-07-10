@@ -65,6 +65,17 @@ _sys.modules["tools"].TOOL_REGISTRY = {}
 _sys.modules["tools"].anthropic_tool_specs = lambda: []
 _sys.modules["tools"].render_thought = lambda *a, **k: ""
 _sys.modules["anthropic"].AsyncAnthropic = object
+# 064/065 added error classes to agent.py's top-level `from anthropic import (...)`.
+# The stub must export them or `exec_module` dies with ImportError — this test went
+# red on main the day 064 was applied. Keep in sync with agent.py's import list.
+for _err in (
+    "APIConnectionError",
+    "APIStatusError",
+    "AuthenticationError",
+    "PermissionDeniedError",
+    "RateLimitError",
+):
+    setattr(_sys.modules["anthropic"], _err, type(_err, (Exception,), {}))
 _sys.modules["anthropic.types"].MessageParam = object
 _sys.modules["anthropic.types"].ToolUseBlock = object
 

@@ -54,6 +54,7 @@ from anthropic import (
 )
 from anthropic.types import MessageParam, ToolUseBlock
 
+import validation  # 067 — numeric-provenance validator (trust #1/#3)
 from observability import NOOP_TRACER, Tracer
 from tools import TOOL_REGISTRY, anthropic_tool_specs, render_thought  # noqa: F401
 
@@ -516,6 +517,9 @@ async def run_agent(
     # `data:image/png;base64,…` URL we stripped from the LLM-bound payload.
     # Restored into the terminal widget below.
     screenshot_urls_by_tool: dict[str, str] = {}
+    # 067 — every successful tool result this turn, kept RAW (pre-`_compact_for_llm`)
+    # so the numeric-provenance validator sees exactly what the tool returned.
+    tool_facts: list[dict[str, Any]] = []
 
     try:
         while iterations < MAX_ITERATIONS:
@@ -579,8 +583,52 @@ async def run_agent(
                     # in (the LLM emitted the empty sentinel because we stripped
                     # the real URL from its context to avoid the 200K cap).
                     _restore_screenshot_in_widget(widget, screenshot_urls_by_tool)
-                    tracer.set_output({"kind": "widget", "widget": widget})
-                    yield {"event": "widget", "data": widget}
+
+                    # 067 — trust #1/#3: every hard market/account number in the
+                    # widget must trace back to a tool result from THIS turn.
+                    mode = validation.validator_mode()
+                    blocked = False
+                    audit: dict[str, Any] | None = None
+                    if mode != validation.MODE_OFF:
+                        vres = validation.validate_widget(widget, tool_facts)
+                        audit = {
+                            "mode": mode,
+                            "ok": vres.ok,
+                            "checked": vres.checked,
+                            "violations": [str(v) for v in vres.violations],
+                            "provenance": vres.provenance,
+                            "warn_unverified": vres.warn_unverified[:20],
+                        }
+                        if vres.violations or vres.warn_unverified:
+                            log.warning(
+                                "widget validation [%s] type=%s checked=%d violations=%s warn=%s",
+                                mode, widget.get("type"), vres.checked,
+                                [str(v) for v in vres.violations], vres.warn_unverified[:8],
+                            )
+                        if mode == validation.MODE_ENFORCE and not vres.ok:
+                            # FAIL CLOSED — never render an unverifiable number.
+                            blocked = True
+                            fields = ", ".join(v.path for v in vres.violations)
+                            detail = f" Unverified: {fields}." if _verbose_errors() else ""
+                            msg = (
+                                "I couldn't verify some figures in that card against the "
+                                f"data my tools returned, so I'm not showing it.{detail} "
+                                "Please try again."
+                            )
+                            tracer.set_output(
+                                {"kind": "error", "code": "widget_unverified", "validation": audit}
+                            )
+                            yield {
+                                "event": "error",
+                                "data": {"message": msg, "code": "widget_unverified"},
+                            }
+
+                    if not blocked:
+                        out: dict[str, Any] = {"kind": "widget", "widget": widget}
+                        if audit is not None:
+                            out["validation"] = audit
+                        tracer.set_output(out)
+                        yield {"event": "widget", "data": widget}
                 elif full_text:
                     tracer.set_output({"kind": "message", "text": full_text})
                     yield {"event": "message", "data": {"text": full_text}}
@@ -607,6 +655,12 @@ async def run_agent(
             # Emit results + build tool_result message for next turn
             tool_results_payload = []
             for tu, (ok, result) in zip(tool_uses, results, strict=True):
+                # 067 — remember the RAW result (before `_compact_for_llm` strips
+                # screenshots) so the validator can trace widget numbers back to
+                # the tool_use id that produced them. Only successful calls count
+                # as a source of truth.
+                if ok:
+                    tool_facts.append({"id": tu.id, "name": tu.name, "result": result})
                 # Record one tool span per call.
                 tracer.record_tool(
                     name=tu.name,
