@@ -34,6 +34,8 @@ type Turn = {
   widgets: Widget[];
   messages: string[];
   error?: string;
+  // 069 — which model answered this turn (+ whether it was a fallback).
+  provider?: { label: string; fallback: boolean; reason: string | null };
 };
 
 export default function Home() {
@@ -159,6 +161,13 @@ function ChatScreen() {
                 ? { ...th, state: 'done' as const }
                 : th,
             );
+          } else if (ev.event === 'provider') {
+            // 069 — which model is answering (updated again on failover).
+            next.provider = {
+              label: ev.data.label,
+              fallback: ev.data.fallback,
+              reason: ev.data.reason,
+            };
           } else if (ev.event === 'widget') {
             next.widgets = [...next.widgets, ev.data];
           } else if (ev.event === 'message') {
@@ -288,7 +297,7 @@ function ChatScreen() {
 
               {/* Thinking */}
               {t.thoughts.length > 0 && (
-                <ThinkingCard thoughts={t.thoughts} done={t.done} elapsedMs={t.elapsedMs} />
+                <ThinkingCard thoughts={t.thoughts} done={t.done} elapsedMs={t.elapsedMs} provider={t.provider} />
               )}
 
               {/* Widgets — pin button beneath each */}

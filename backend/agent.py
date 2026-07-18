@@ -54,11 +54,60 @@ from anthropic import (
 )
 from anthropic.types import MessageParam, ToolUseBlock
 
+import deepseek_client  # 069 — DeepSeek fallback rail
 import validation  # 067 — numeric-provenance validator (trust #1/#3)
 from observability import NOOP_TRACER, Tracer
 from tools import TOOL_REGISTRY, anthropic_tool_specs, render_thought  # noqa: F401
 
 log = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# 069 — provider failover (Anthropic → DeepSeek on a usage-limit error)
+# ---------------------------------------------------------------------------
+
+
+class ProviderFailover(Exception):
+    """Raised inside the Anthropic loop when the turn should restart on DeepSeek.
+    Carries the classified `reason` (billing/rate_limit/overloaded) for the UI."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+def _failover_reasons() -> set[str]:
+    raw = os.getenv("LLM_FAILOVER_ON", "billing,rate_limit,overloaded")
+    return {r.strip() for r in raw.split(",") if r.strip()}
+
+
+def _failover_reason(e: Exception) -> str | None:
+    """Map an Anthropic error to a coarse failover reason, or None if it's not a
+    usage-limit failure (auth/bad-request/etc. must NOT fail over — a config bug
+    should stay loud, and a genuine 400 would just fail on DeepSeek too)."""
+    text = str(e).lower()
+    if any(m in text for m in _BILLING_MARKERS):
+        return "billing"
+    if isinstance(e, RateLimitError) or "rate limit" in text or "429" in text:
+        return "rate_limit"
+    status = getattr(e, "status_code", None)
+    if status in (503, 529) or "overloaded" in text:
+        return "overloaded"
+    return None
+
+
+def _should_failover(e: Exception, attachments: list[dict[str, Any]] | None) -> str | None:
+    """The reason to fail over, or None. Requires: fallback on, DeepSeek usable,
+    this turn is fall-back-eligible (no images — DeepSeek has no vision), and the
+    error is a configured usage-limit reason."""
+    if not deepseek_client.fallback_enabled() or not deepseek_client.deepseek_available():
+        return None
+    if not deepseek_client.can_fall_back(attachments):
+        return None
+    reason = _failover_reason(e)
+    if reason and reason in _failover_reasons():
+        return reason
+    return None
 
 _PROMPT_DIR = Path(__file__).parent / "prompts"
 
@@ -259,20 +308,26 @@ def _compact_for_llm(result: Any) -> Any:
     """Return a copy of ``result`` with heavy opaque fields replaced by short
     placeholders so the LLM context doesn't blow past 200K tokens.
 
-    Today only ``screenshot_url`` is large enough to need stripping; we
-    replace it with an empty string ("" — the canonical "no real screenshot,
-    frontend renders MockChartSvg" sentinel from proposals 019/023). The full
-    data URL is held in ``screenshot_urls_by_tool`` inside ``run_agent`` and
-    re-attached when the terminal widget is emitted.
+    Two things are removed before a tool result enters the LLM context:
+    - ``screenshot_url`` — large data URLs (blow past 200K tokens); replaced with
+      "" (the "frontend renders MockChartSvg" sentinel, 019/023) and held in
+      ``screenshot_urls_by_tool`` for re-attach on the terminal widget.
+    - ``account_id`` (069) — `get_portfolio`'s IBKR account number. The model
+      never needs it and it must not leak to ANY provider (Anthropic today,
+      DeepSeek on fallback). Redacted here; the raw value still reaches the 067
+      validator via `tool_facts`, but never the LLM.
 
     Idempotent: returns the input unchanged when nothing needs stripping.
     """
     if not isinstance(result, dict):
         return result
+    out = result
     su = result.get("screenshot_url")
     if isinstance(su, str) and su.startswith("data:") and len(su) > _SCREENSHOT_STRIP_THRESHOLD:
-        return {**result, "screenshot_url": ""}
-    return result
+        out = {**out, "screenshot_url": ""}
+    if result.get("account_id") not in (None, ""):
+        out = {**out, "account_id": "[redacted]"}
+    return out
 
 
 def _restore_screenshot_in_widget(
@@ -298,6 +353,70 @@ def _restore_screenshot_in_widget(
     # the user is looking at right now.
     data["screenshot_url"] = next(reversed(urls_by_tool_id.values()))
     return widget
+
+
+# ---------------------------------------------------------------------------
+# 069 — shared terminal emission (widget/message + 067 trust validation).
+# Extracted so BOTH provider loops (Anthropic and DeepSeek) run the IDENTICAL
+# trust check + fail-closed behaviour — a weaker fallback model must not get a
+# weaker validator. Behaviour is byte-for-byte the pre-069 Anthropic path.
+# ---------------------------------------------------------------------------
+
+
+async def _finalize_terminal_widget(
+    full_text: str,
+    tool_facts: list[dict[str, Any]],
+    screenshot_urls_by_tool: dict[str, str],
+    tracer: Tracer,
+) -> AsyncGenerator[dict[str, Any], None]:
+    """Parse the terminal message → widget/plain-text, restore screenshots, run
+    the 067 numeric-provenance validator, and emit the right SSE event."""
+    widget = _extract_widget_json(full_text)
+    if widget is not None:
+        _restore_screenshot_in_widget(widget, screenshot_urls_by_tool)
+
+        mode = validation.validator_mode()
+        blocked = False
+        audit: dict[str, Any] | None = None
+        if mode != validation.MODE_OFF:
+            vres = validation.validate_widget(widget, tool_facts)
+            audit = {
+                "mode": mode,
+                "ok": vres.ok,
+                "checked": vres.checked,
+                "violations": [str(v) for v in vres.violations],
+                "provenance": vres.provenance,
+                "warn_unverified": vres.warn_unverified[:20],
+            }
+            if vres.violations or vres.warn_unverified:
+                log.warning(
+                    "widget validation [%s] type=%s checked=%d violations=%s warn=%s",
+                    mode, widget.get("type"), vres.checked,
+                    [str(v) for v in vres.violations], vres.warn_unverified[:8],
+                )
+            if mode == validation.MODE_ENFORCE and not vres.ok:
+                blocked = True
+                fields = ", ".join(v.path for v in vres.violations)
+                detail = f" Unverified: {fields}." if _verbose_errors() else ""
+                msg = (
+                    "I couldn't verify some figures in that card against the "
+                    f"data my tools returned, so I'm not showing it.{detail} "
+                    "Please try again."
+                )
+                tracer.set_output(
+                    {"kind": "error", "code": "widget_unverified", "validation": audit}
+                )
+                yield {"event": "error", "data": {"message": msg, "code": "widget_unverified"}}
+
+        if not blocked:
+            out: dict[str, Any] = {"kind": "widget", "widget": widget}
+            if audit is not None:
+                out["validation"] = audit
+            tracer.set_output(out)
+            yield {"event": "widget", "data": widget}
+    elif full_text:
+        tracer.set_output({"kind": "message", "text": full_text})
+        yield {"event": "message", "data": {"text": full_text}}
 
 
 # ---------------------------------------------------------------------------
@@ -574,64 +693,14 @@ async def run_agent(
             # Append the full assistant turn to message history
             messages.append({"role": "assistant", "content": final_msg.content})
 
-            # Terminal turn — no more tool calls. Emit widget or text.
+            # Terminal turn — no more tool calls. Emit widget or text (069: via the
+            # shared finalizer so the Anthropic + DeepSeek rails validate identically).
             if not tool_uses:
                 full_text = "".join(text_parts).strip()
-                widget = _extract_widget_json(full_text)
-                if widget is not None:
-                    # Proposal 024: substitute the real screenshot data URL back
-                    # in (the LLM emitted the empty sentinel because we stripped
-                    # the real URL from its context to avoid the 200K cap).
-                    _restore_screenshot_in_widget(widget, screenshot_urls_by_tool)
-
-                    # 067 — trust #1/#3: every hard market/account number in the
-                    # widget must trace back to a tool result from THIS turn.
-                    mode = validation.validator_mode()
-                    blocked = False
-                    audit: dict[str, Any] | None = None
-                    if mode != validation.MODE_OFF:
-                        vres = validation.validate_widget(widget, tool_facts)
-                        audit = {
-                            "mode": mode,
-                            "ok": vres.ok,
-                            "checked": vres.checked,
-                            "violations": [str(v) for v in vres.violations],
-                            "provenance": vres.provenance,
-                            "warn_unverified": vres.warn_unverified[:20],
-                        }
-                        if vres.violations or vres.warn_unverified:
-                            log.warning(
-                                "widget validation [%s] type=%s checked=%d violations=%s warn=%s",
-                                mode, widget.get("type"), vres.checked,
-                                [str(v) for v in vres.violations], vres.warn_unverified[:8],
-                            )
-                        if mode == validation.MODE_ENFORCE and not vres.ok:
-                            # FAIL CLOSED — never render an unverifiable number.
-                            blocked = True
-                            fields = ", ".join(v.path for v in vres.violations)
-                            detail = f" Unverified: {fields}." if _verbose_errors() else ""
-                            msg = (
-                                "I couldn't verify some figures in that card against the "
-                                f"data my tools returned, so I'm not showing it.{detail} "
-                                "Please try again."
-                            )
-                            tracer.set_output(
-                                {"kind": "error", "code": "widget_unverified", "validation": audit}
-                            )
-                            yield {
-                                "event": "error",
-                                "data": {"message": msg, "code": "widget_unverified"},
-                            }
-
-                    if not blocked:
-                        out: dict[str, Any] = {"kind": "widget", "widget": widget}
-                        if audit is not None:
-                            out["validation"] = audit
-                        tracer.set_output(out)
-                        yield {"event": "widget", "data": widget}
-                elif full_text:
-                    tracer.set_output({"kind": "message", "text": full_text})
-                    yield {"event": "message", "data": {"text": full_text}}
+                async for ev in _finalize_terminal_widget(
+                    full_text, tool_facts, screenshot_urls_by_tool, tracer
+                ):
+                    yield ev
                 break
 
             # Non-terminal turn — execute tool calls (in parallel for batches).
@@ -710,7 +779,16 @@ async def run_agent(
                 "data": {"message": f"agent stopped after {MAX_ITERATIONS} iterations"},
             }
 
+    except ProviderFailover:
+        raise  # 069 — let run_chat restart the turn on DeepSeek
     except Exception as e:
+        # 069 — usage-limit failure + fallback armed → restart this turn on
+        # DeepSeek (run_chat catches). Only for eligible reasons and non-image
+        # turns; otherwise fall through to the safe classified error below.
+        reason = _should_failover(e, attachments)
+        if reason is not None:
+            log.warning("run_agent failing over to DeepSeek [%s]: %s", reason, e)
+            raise ProviderFailover(reason) from e
         # 064: log the FULL error server-side (+ tracer) for debugging, but send
         # the user only a safe, classified message — never the raw provider text
         # (e.g. "credit balance is too low").
@@ -730,3 +808,185 @@ async def run_agent(
             "output_tokens": total_output_tokens,
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# 069 — DeepSeek fallback loop (turn-restart). A structurally-parallel loop that
+# talks OpenAI-format via deepseek_client and builds NEUTRAL history as it goes.
+# It reuses every shared leaf (_call_tool, _compact_for_llm, _finalize_terminal_
+# widget, tool_facts/screenshot bookkeeping, tracer), so the trust check and tool
+# handling are identical to the Anthropic rail. Reached ONLY via run_chat after a
+# ProviderFailover; the turn is restarted from scratch (tools re-run — safe, all
+# reads). No image handling: fallback turns are guaranteed attachment-free.
+# ---------------------------------------------------------------------------
+
+
+async def run_agent_deepseek(
+    user_message: str,
+    user_id: str = "demo",
+    tracer: Tracer = NOOP_TRACER,
+    memory_context: str = "",
+    history: list[dict[str, Any]] | None = None,
+) -> AsyncGenerator[dict[str, Any], None]:
+    start_time = time.monotonic()
+    system_prompt = (
+        f"{SYSTEM_PROMPT}{memory_context}"
+        if isinstance(memory_context, str) and memory_context
+        else SYSTEM_PROMPT
+    )
+    # Neutral history (db.to_agent_history → text-only dicts) + this turn's text.
+    messages: list[dict[str, Any]] = list(history or [])
+    messages.append({"role": "user", "content": user_message})
+    tools = deepseek_client.to_openai_tools(anthropic_tool_specs())
+
+    iterations = 0
+    total_input_tokens = 0
+    total_output_tokens = 0
+    screenshot_urls_by_tool: dict[str, str] = {}
+    tool_facts: list[dict[str, Any]] = []
+
+    try:
+        while iterations < MAX_ITERATIONS:
+            iterations += 1
+            iter_started = time.monotonic()
+            resp = await deepseek_client.complete(
+                system_prompt, messages, tools=tools, max_tokens=4096
+            )
+            text = resp.get("text") or ""
+            tool_calls = resp.get("tool_calls") or []
+            usage = resp.get("usage") or {}
+            total_input_tokens += int(usage.get("input_tokens") or 0)
+            total_output_tokens += int(usage.get("output_tokens") or 0)
+            tracer.record_generation(
+                name=f"deepseek.iter_{iterations}",
+                model=deepseek_client.deepseek_model(),
+                input=list(messages),
+                output=[{"type": "text", "text": text}] + [
+                    {"type": "tool_use", "id": t["id"], "name": t["name"], "input": t["input"]}
+                    for t in tool_calls
+                ],
+                usage_details={"input": total_input_tokens, "output": total_output_tokens},
+                metadata={"iteration": iterations, "latency_ms": int((time.monotonic() - iter_started) * 1000)},
+            )
+
+            # Terminal turn — emit via the SHARED finalizer (identical trust check).
+            if not tool_calls:
+                messages.append({"role": "assistant", "content": text})
+                async for ev in _finalize_terminal_widget(
+                    text.strip(), tool_facts, screenshot_urls_by_tool, tracer
+                ):
+                    yield ev
+                break
+
+            # Record the assistant turn (with its tool_calls) BEFORE the tool msgs.
+            messages.append({"role": "assistant", "content": text or None, "tool_calls": tool_calls})
+
+            tool_tasks = []
+            for tc in tool_calls:
+                yield {"event": "thought", "data": {"text": render_thought(tc["name"], tc["input"] or {})}}
+                yield {"event": "tool_call", "data": {"id": tc["id"], "name": tc["name"], "args": tc["input"]}}
+                tool_tasks.append(_call_tool(tc["name"], tc["input"] or {}, user_id))
+
+            tools_started = time.monotonic()
+            results = await asyncio.gather(*tool_tasks)
+            tools_elapsed_ms = int((time.monotonic() - tools_started) * 1000)
+
+            for tc, (ok, result) in zip(tool_calls, results, strict=True):
+                if ok:
+                    tool_facts.append({"id": tc["id"], "name": tc["name"], "result": result})
+                tracer.record_tool(
+                    name=tc["name"], args=tc["input"] or {}, result=result, ok=ok,
+                    latency_ms=tools_elapsed_ms, metadata={"tool_use_id": tc["id"]},
+                )
+                yield {
+                    "event": "tool_result",
+                    "data": {"id": tc["id"], "ok": ok, "summary": _summarize_tool_result(tc["name"], ok, result)},
+                }
+                # Proposal 024 screenshot bookkeeping (same as the Anthropic rail).
+                if (
+                    isinstance(result, dict)
+                    and isinstance(result.get("screenshot_url"), str)
+                    and result["screenshot_url"].startswith("data:")
+                    and len(result["screenshot_url"]) > _SCREENSHOT_STRIP_THRESHOLD
+                ):
+                    screenshot_urls_by_tool[tc["id"]] = result["screenshot_url"]
+                compact = _compact_for_llm(result)
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "content": json.dumps(compact),
+                })
+        else:
+            yield {"event": "error", "data": {"message": f"agent stopped after {MAX_ITERATIONS} iterations"}}
+
+    except Exception as e:
+        # DeepSeek is the fallback of last resort — no further failover. Classify
+        # and surface a safe message (same posture as the Anthropic rail).
+        user_msg, code = _classify_agent_error(e)
+        log.warning("run_agent_deepseek failed [%s]: %s", code, e)
+        tracer.set_output({"kind": "error", "code": code, "message": str(e)})
+        yield {"event": "error", "data": {"message": user_msg, "code": code}}
+
+    elapsed_ms = int((time.monotonic() - start_time) * 1000)
+    yield {
+        "event": "done",
+        "data": {
+            "elapsed_ms": elapsed_ms,
+            "iterations": iterations,
+            "input_tokens": total_input_tokens,
+            "output_tokens": total_output_tokens,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# 069 — run_chat: the entry point main.py calls. Emits a `provider` event so the
+# UI shows which model answered, runs the Anthropic rail, and on a ProviderFailover
+# restarts the turn on DeepSeek (announcing the switch).
+# ---------------------------------------------------------------------------
+
+_MODEL_LABELS = {
+    "claude-opus-4-5": "Claude Opus 4.5",
+    "deepseek-chat": "DeepSeek V3",
+}
+
+
+def _provider_label(model: str) -> str:
+    return _MODEL_LABELS.get(model, model)
+
+
+async def run_chat(
+    user_message: str,
+    user_id: str = "demo",
+    tracer: Tracer = NOOP_TRACER,
+    memory_context: str = "",
+    history: list[Any] | None = None,
+    attachments: list[dict[str, Any]] | None = None,
+) -> AsyncGenerator[dict[str, Any], None]:
+    """Provider-aware chat turn. Yields the same events as run_agent PLUS a
+    `provider` event (and a second one if it fails over to DeepSeek)."""
+    yield {
+        "event": "provider",
+        "data": {"provider": "anthropic", "model": MODEL,
+                 "label": _provider_label(MODEL), "fallback": False, "reason": None},
+    }
+    try:
+        async for ev in run_agent(
+            user_message, user_id, tracer=tracer, memory_context=memory_context,
+            history=history, attachments=attachments,
+        ):
+            yield ev
+    except ProviderFailover as pf:
+        ds_model = deepseek_client.deepseek_model()
+        yield {
+            "event": "provider",
+            "data": {"provider": "deepseek", "model": ds_model,
+                     "label": _provider_label(ds_model), "fallback": True,
+                     "reason": f"anthropic_{pf.reason}"},
+        }
+        # Turn-restart: DeepSeek gets the text history + user message only (never
+        # images — the failover guard guarantees this turn is attachment-free).
+        async for ev in run_agent_deepseek(
+            user_message, user_id, tracer=tracer, memory_context=memory_context, history=history,
+        ):
+            yield ev

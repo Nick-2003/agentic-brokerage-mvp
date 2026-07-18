@@ -60,7 +60,7 @@ import security  # noqa: E402  (W6.6 — rate limit + security headers)
 import token_budget  # noqa: E402  (P5 / 034 — per-user daily LLM token budget)
 import waitlist_api  # noqa: E402  (W4 — IBKR connect + waitlist router)
 import webhooks  # noqa: E402  (W6 — Twilio inbound STOP/START webhook)
-from agent import MODEL, _classify_agent_error, run_agent  # noqa: E402
+from agent import MODEL, _classify_agent_error, run_chat  # noqa: E402  (069: run_chat wraps run_agent + DeepSeek failover)
 
 log = logging.getLogger(__name__)
 from auth import AuthCtx, auth_configured, require_auth, resolve_auth  # noqa: E402
@@ -314,7 +314,7 @@ async def chat(
             turn_input_tokens = 0
             turn_output_tokens = 0
             try:
-                async for ev in run_agent(
+                async for ev in run_chat(
                     req.message,
                     auth.user_id,
                     tracer=tracer,
