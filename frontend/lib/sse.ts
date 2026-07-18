@@ -10,6 +10,17 @@ export type ChatEvent =
   // P4.2: emitted once at the start of an authenticated turn so the client
   // can capture the conversation id and reuse it on subsequent turns.
   | { event: 'conversation'; data: { id: string; title?: string | null } }
+  // 069 — which model is answering this turn; re-emitted if it fails over.
+  | {
+      event: 'provider';
+      data: {
+        provider: 'anthropic' | 'deepseek';
+        model: string;
+        label: string;
+        fallback: boolean;
+        reason: string | null;
+      };
+    }
   | { event: 'widget'; data: Widget }
   | { event: 'message'; data: { text: string } }
   | { event: 'error'; data: { message: string } }
