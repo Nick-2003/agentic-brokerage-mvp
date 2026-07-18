@@ -20,14 +20,16 @@ Covers:
   D. validator_mode() env parsing.
   E. wiring — agent.py imports validation, records raw tool_facts, fails closed.
 
-Self-contained: temp-applies backend/{validation.py [new], agent.py} over live,
-imports, asserts, restores (deleting the new file) in a finally.
+Runs against the LIVE backend (067 is applied). It used to temp-apply from
+`.proposed_changes/067-…/`, which broke the moment that staging dir was deleted
+post-apply; now it imports the live `validation` / `tools.portfolio` and reads the
+live prompts, so it keeps working as a permanent regression guard. Read-only —
+touches no file. Anchored on backend/auth.py.
 
 Run with the backend venv:
     backend/.venv/bin/python scripts/test_067_widget_validator.py
 """
 import os
-import shutil
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -46,11 +48,6 @@ def _find_repo(start: str) -> str:
 
 REPO = _find_repo(HERE)
 BACKEND = os.path.join(REPO, "backend")
-PROP = os.path.join(REPO, ".proposed_changes", "067-widget-numeric-validator")
-FILES = [
-    (os.path.join(BACKEND, "validation.py"), os.path.join(PROP, "backend", "validation.py")),
-    (os.path.join(BACKEND, "agent.py"), os.path.join(PROP, "backend", "agent.py")),
-]
 
 PASS, FAIL = "\033[92mPASS\033[0m", "\033[91mFAIL\033[0m"
 results: list[bool] = []
@@ -174,26 +171,8 @@ def run() -> None:
 
 
 def main() -> int:
-    backups: list[tuple[str, str, bool]] = []
-    try:
-        for live, prop in FILES:
-            if not os.path.isfile(prop):
-                print(f"missing proposal file: {prop}")
-                return 1
-            existed = os.path.isfile(live)
-            bak = live + ".067bak"
-            if existed:
-                shutil.copy2(live, bak)
-            backups.append((live, bak, existed))
-            shutil.copy2(prop, live)
-        run()
-    finally:
-        for live, bak, existed in backups:
-            if existed:
-                shutil.copy2(bak, live)
-                os.remove(bak)
-            elif os.path.isfile(live):
-                os.remove(live)  # new validation.py
+    # Runs against the live backend — nothing to apply or restore.
+    run()
 
     total, passed = len(results), sum(results)
     print(f"\n{passed}/{total} checks passed")

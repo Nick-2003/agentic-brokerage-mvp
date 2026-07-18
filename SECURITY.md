@@ -112,6 +112,19 @@ Attacker intercepts the magic-link email and signs in as the user.
 - Single-use tokens (Supabase default)
 - Sensitive ops (e.g. trade confirmation) require recent auth (re-prompt if session >24h old) — deferred to v2, accepted risk for MVP
 
+### Threat 9 · LLM sub-processor / data residency (069)
+
+Chat turns are processed by an LLM that receives the turn's context — which for a portfolio turn includes the signed-in user's positions, NAV, and (until 069) their IBKR account id.
+
+**Mitigations:**
+
+- **Primary processor is Anthropic.** When `LLM_FALLBACK_ENABLED=1` and Anthropic is usage-limited (billing / rate-limit / overloaded), a turn is restarted on **DeepSeek** (`deepseek-chat`, **PRC jurisdiction**) to complete it. This is a deliberate sub-processor choice, gated behind an env flag that is **OFF by default**.
+- **`account_id` is redacted** from all LLM context (069, `_compact_for_llm`) — the IBKR account number never leaves to *any* provider, primary or fallback. The raw value still reaches the numeric validator (server-side only).
+- **Image turns never fall back** — DeepSeek has no vision, and a turn carrying user-uploaded images is completed only by Anthropic (or errors), so image content is never sent to the fallback.
+- **The numeric validator (067) must be in `enforce`** before the fallback is enabled — a weaker model's fabricated figures are blocked rather than rendered.
+- **Disable** at any time by unsetting `LLM_FALLBACK_ENABLED`; the fallback then never fires and no user data reaches DeepSeek.
+- Residual accepted risk: when enabled, a user's holdings/NAV (not account id) transit DeepSeek during an Anthropic outage. Documented here; revisit if a non-PRC fallback (e.g. Vertex-Claude, proposal 068) becomes available.
+
 ## Pre-launch lockdown checklist
 
 Every item must be checked before sharing the URL with any tester.

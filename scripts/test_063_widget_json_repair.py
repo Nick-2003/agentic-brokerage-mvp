@@ -18,14 +18,16 @@ Covers:
   E. the known-imperfect `",` case fails closed (None, not a corrupted widget);
   F. widget_contract.md carries the no-raw-quote rule.
 
-Self-contained: temp-applies backend/{agent.py, prompts/widget_contract.md} over
-live, imports, asserts, restores in a finally. Anchored on backend/auth.py.
+Runs against the LIVE backend (063 is applied). It used to temp-apply from
+`.proposed_changes/063-…/`, which broke the moment that staging dir was deleted
+post-apply; now it simply imports the live `agent` and reads the live prompt, so
+it keeps working as a permanent regression guard. Read-only — touches no file.
+Anchored on backend/auth.py.
 
 Run with the backend venv:
     backend/.venv/bin/python scripts/test_063_widget_json_repair.py
 """
 import os
-import shutil
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -44,12 +46,6 @@ def _find_repo(start: str) -> str:
 
 REPO = _find_repo(HERE)
 BACKEND = os.path.join(REPO, "backend")
-PROP = os.path.join(REPO, ".proposed_changes", "063-widget-json-repair")
-FILES = [
-    (os.path.join(BACKEND, "agent.py"), os.path.join(PROP, "backend", "agent.py")),
-    (os.path.join(BACKEND, "prompts", "widget_contract.md"),
-     os.path.join(PROP, "backend", "prompts", "widget_contract.md")),
-]
 
 PASS, FAIL = "\033[92mPASS\033[0m", "\033[91mFAIL\033[0m"
 results: list[bool] = []
@@ -134,21 +130,8 @@ def run() -> None:
 
 
 def main() -> int:
-    backups: list[tuple[str, str]] = []
-    try:
-        for live, prop in FILES:
-            if not os.path.isfile(prop):
-                print(f"missing proposal file: {prop}")
-                return 1
-            bak = live + ".063bak"
-            shutil.copy2(live, bak)
-            backups.append((live, bak))
-            shutil.copy2(prop, live)
-        run()
-    finally:
-        for live, bak in backups:
-            shutil.copy2(bak, live)
-            os.remove(bak)
+    # Runs against the live backend — nothing to apply or restore.
+    run()
 
     total, passed = len(results), sum(results)
     print(f"\n{passed}/{total} checks passed")
