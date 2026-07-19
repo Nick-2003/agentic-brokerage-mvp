@@ -38,6 +38,7 @@ from typing import Any
 
 from anthropic import AsyncAnthropic
 
+import deepseek_client  # 070 — DeepSeek fallback when Anthropic is usage-limited
 import freshness  # 061 — shared freshness-note logic (was inline here, 052)
 import ibkr_flex
 from news_context import fetch_macro_context, fetch_recent_news
@@ -98,6 +99,42 @@ def _get_client() -> AsyncAnthropic:
 def _model() -> str:
     # Reuse the chat model by default; allow a cheaper narrative-only override.
     return os.getenv("BRIEFING_MODEL") or os.getenv("ANTHROPIC_MODEL", "claude-opus-4-5")
+
+
+# --- 070: DeepSeek fallback for the daily brief --------------------------------
+# The brief is a single TOOL-LESS `messages.create` (no agent loop, no widget JSON,
+# no images), so failover here is far simpler than the chat rail (069): re-issue the
+# same system+facts prompt to DeepSeek and use its prose.
+#
+# Gate: `BRIEFING_FALLBACK_ENABLED` — defaults to whatever `LLM_FALLBACK_ENABLED`
+# is, so one flag normally arms both rails. Set it to 0 to keep the chat fallback
+# on while refusing to SEND a DeepSeek-written brief to users (external comms are a
+# higher bar than an in-app answer — see the README's trust note).
+
+# Same markers as agent._classify_agent_error; duplicated deliberately so the cron
+# service never has to import the whole agent module (tool registry + Anthropic
+# client) just to classify one error. DRY follow-up noted in the README.
+_USAGE_LIMIT_MARKERS = ("credit balance", "billing", "quota", "insufficient", "payment")
+
+
+def _brief_fallback_enabled() -> bool:
+    raw = os.getenv("BRIEFING_FALLBACK_ENABLED")
+    if raw is None:
+        raw = os.getenv("LLM_FALLBACK_ENABLED", "0")
+    return raw == "1"
+
+
+def _is_usage_limit_error(e: Exception) -> bool:
+    """True for the failures worth retrying on another provider: billing/quota,
+    rate limit, overload. Auth / bad-request are config bugs — they must stay loud
+    and would fail on DeepSeek too."""
+    text = str(e).lower()
+    if any(m in text for m in _USAGE_LIMIT_MARKERS):
+        return True
+    if "rate limit" in text or "429" in text:
+        return True
+    status = getattr(e, "status_code", None)
+    return status in (503, 529) or "overloaded" in text
 
 
 # --- money formatting ----------------------------------------------------------
@@ -520,32 +557,66 @@ async def generate_briefing(snapshot: dict, market_context: dict | None = None) 
     facts = compute_brief_facts(snapshot, market_context, now=now)
     snap_mock = bool(snapshot.get("is_mock"))
     gen_mock = briefing_mock_enabled()
+    fallback_used = False  # 070 — set when DeepSeek wrote this brief
 
     if gen_mock:
         text = _render_mock_briefing(facts)
         model = "mock"
     else:
         system = _PROMPT.read_text()
+        user_msg = _facts_user_message(facts)
         try:
             resp = await _get_client().messages.create(
                 model=_model(),
                 max_tokens=1024,
                 system=system,
-                messages=[{"role": "user", "content": _facts_user_message(facts)}],
+                messages=[{"role": "user", "content": user_msg}],
             )
+            text = "".join(
+                b.text for b in resp.content if getattr(b, "type", None) == "text"
+            ).strip()
+            model = _model()
         except Exception as e:  # noqa: BLE001
-            raise BriefingError(f"Claude call failed: {e}") from e
-        text = "".join(
-            b.text for b in resp.content if getattr(b, "type", None) == "text"
-        ).strip()
+            # 070 — Anthropic is usage-limited: re-issue the SAME prompt to
+            # DeepSeek rather than skipping the brief entirely. Any other error
+            # (auth, bad request) still fails loudly, as before.
+            if not (
+                _brief_fallback_enabled()
+                and deepseek_client.deepseek_available()
+                and _is_usage_limit_error(e)
+            ):
+                raise BriefingError(f"Claude call failed: {e}") from e
+            log.warning("briefing failing over to DeepSeek: %s", e)
+            try:
+                ds = await deepseek_client.complete(
+                    system, [{"role": "user", "content": user_msg}], max_tokens=1024
+                )
+            except Exception as de:  # noqa: BLE001 — fallback is last resort
+                raise BriefingError(
+                    f"Claude call failed ({e}); DeepSeek fallback also failed ({de})"
+                ) from de
+            text = (ds.get("text") or "").strip()
+            model = deepseek_client.deepseek_model()
+            fallback_used = True
+            if text:
+                # Say so IN the delivered brief. The recipient gets this over
+                # WhatsApp/email and cannot inspect logs — they deserve to know a
+                # different model wrote it (same honesty rule as the "(mocked)"
+                # source pills and the freshness note).
+                text = (
+                    f"{text}\n\n_Written by {model} — the usual model was "
+                    "unavailable. Figures are unchanged; wording may differ._"
+                )
         if not text:
-            raise BriefingError("Claude returned an empty briefing", code="briefing_empty")
-        model = _model()
+            raise BriefingError("LLM returned an empty briefing", code="briefing_empty")
 
     return {
         "text": text,
         "is_mock": snap_mock or gen_mock,
         "model": model,
+        # 070 — True when the DeepSeek fallback wrote this brief (the delivered
+        # text says so too). Additive: existing consumers ignore it.
+        "fallback": fallback_used,
         "as_of": facts.get("as_of"),
         "account_id": facts.get("account_id"),
         "base_currency": facts.get("base_currency"),
