@@ -112,24 +112,66 @@ Attacker intercepts the magic-link email and signs in as the user.
 - Single-use tokens (Supabase default)
 - Sensitive ops (e.g. trade confirmation) require recent auth (re-prompt if session >24h old) — deferred to v2, accepted risk for MVP
 
-### Threat 9 · LLM sub-processor / data residency (069)
+### Threat 9 · LLM sub-processor / data residency (069, revised 2026-07-20)
 
-Chat turns are processed by an LLM that receives the turn's context — which for a portfolio turn includes the signed-in user's positions, NAV, and (until 069) their IBKR account id.
+Chat turns are processed by an LLM that receives the turn's context — which for a portfolio turn includes the signed-in user's positions, NAV, and (until 069) their IBKR account id. The same applies to the daily brief, which sends holdings + P&L to an LLM for narrative generation.
 
-**Mitigations:**
+> ## ⚠️ MATERIAL CHANGE (2026-07-20) — DeepSeek is no longer an *outage* fallback
+>
+> 069 framed DeepSeek as a rare, transient fallback, and **every mitigation below was calibrated on "rare."** That assumption is now dead:
+>
+> - **068 confirmed Claude-via-Vertex is geo-ineligible** for this HK-billed account — the non-PRC alternative this section pointed at as the fix is **not available**.
+> - **The Anthropic-direct credit balance is exhausted with no near-term resolution.**
+>
+> So with `LLM_FALLBACK_ENABLED=1`, DeepSeek becomes the **de facto primary processor for every chat turn and every daily brief**, not an occasional one. The residual risk below is therefore **continuous, not incidental**. Treat the register as describing a routine data flow.
 
-- **Primary processor is Anthropic.** When `LLM_FALLBACK_ENABLED=1` and Anthropic is usage-limited (billing / rate-limit / overloaded), a turn is restarted on **DeepSeek** (`deepseek-chat`, **PRC jurisdiction**) to complete it. This is a deliberate sub-processor choice, gated behind an env flag that is **OFF by default**.
-- **`account_id` is redacted** from all LLM context (069, `_compact_for_llm`) — the IBKR account number never leaves to *any* provider, primary or fallback. The raw value still reaches the numeric validator (server-side only).
-- **Image turns never fall back** — DeepSeek has no vision, and a turn carrying user-uploaded images is completed only by Anthropic (or errors), so image content is never sent to the fallback.
-- **The numeric validator (067) must be in `enforce`** before the fallback is enabled — a weaker model's fabricated figures are blocked rather than rendered.
-- **Disable** at any time by unsetting `LLM_FALLBACK_ENABLED`; the fallback then never fires and no user data reaches DeepSeek.
-- Residual accepted risk: when enabled, a user's holdings/NAV (not account id) transit DeepSeek during an Anthropic outage. Documented here; revisit if a non-PRC fallback (e.g. Vertex-Claude, proposal 068) becomes available.
+**Mitigations (still in force):**
+
+- **`account_id` is redacted** from all LLM context — `_compact_for_llm` replaces it with `[redacted]` before any tool result enters the model's context, for *every* provider. **Verified empirically 2026-07-20**, not just by reading: `{'account_id':'U19883362'} → {'account_id':'[redacted]'}`. The raw value still reaches the 067 validator server-side, so provenance checking is unaffected.
+- **Image turns never reach DeepSeek** — it has no vision, and `can_fall_back()` returns False for any turn carrying attachments, so the turn errors rather than silently dropping the image. User-uploaded chart images therefore never transit the PRC.
+- **The numeric validator (067) is in `enforce`** (Railway, 2026-07-19) — the gate 069 required. A weaker model's fabricated figures are suppressed rather than rendered.
+- **Kill switch:** unset `LLM_FALLBACK_ENABLED` (and `BRIEFING_FALLBACK_ENABLED`) and no user data reaches DeepSeek at all. `BRIEFING_FALLBACK_ENABLED=0` alone stops holdings data reaching it via the *brief* while leaving chat fallback on — external comms held to a higher bar (070).
+
+**Residual accepted risk (now continuous):** a signed-in user's holdings, position sizes, NAV and P&L — in their account base currency — are transmitted to and processed by a **PRC-jurisdiction** provider on every turn while this configuration is live. Account identifiers are not. This is accepted deliberately as the alternative to the product being **fully unavailable**, and is intended to be **temporary** — proposal 071 adds a US/EU rail (OpenAI) precisely to end it.
+
+## Sub-processor register
+
+Every third party that receives user data, what it gets, and how to stop it. Keep this current — it is the artifact a user or regulator would ask for, and it is also the fastest way to answer "what breaks if we cut X off."
+
+| Sub-processor | Purpose | User data it receives | Jurisdiction | Gate / kill switch | Status |
+| --- | --- | --- | --- | --- | --- |
+| **Anthropic** | Primary LLM — chat turns + daily brief narrative | Holdings, position sizes, NAV, P&L, chat text, uploaded images. **No** `account_id`. | US | `ANTHROPIC_API_KEY` | Live (credits exhausted) |
+| **DeepSeek** (`deepseek-chat`) | Fallback LLM — chat + brief when the primary is usage-limited | Holdings, position sizes, NAV, P&L, chat text. **No** `account_id`, **no images**. | **PRC** ⚠️ | `LLM_FALLBACK_ENABLED=0`; `BRIEFING_FALLBACK_ENABLED=0` for the brief only | **Being armed 2026-07-20 — see the material-change note above** |
+| **OpenAI** | Intended US/EU primary to replace the DeepSeek dependency | Same as Anthropic (incl. images if vision on) | US | `LLM_RAIL=anthropic`; `OPENAI_API_KEY` | Proposal 071 — **staged, not applied** |
+| **Interactive Brokers** | Read-only holdings/NAV via Flex Web Service | The user's own account data (source of truth) | US | Per-user Flex token; user can disconnect | Live |
+| **Twilio** | WhatsApp delivery of the daily brief | Phone number + brief text (holdings figures) | US | Per-user opt-out (STOP) | Live |
+| **Resend** | Email delivery of the daily brief | Email address + brief text | US | One-click unsubscribe | Live |
+| **Supabase** | Auth + Postgres (RLS) | Email, chat history, encrypted Flex token | US | — (system of record) | Live |
+| **Mem0** | Per-user fact recall across conversations | Chat-derived facts, scoped by `user_id` | US | `MEM0_API_KEY` unset → no-op | Live |
+| **Langfuse** | Agent tracing | Prompts, tool args/results, `user.id` | Configurable (US/EU/HK) | `LANGFUSE_*` unset → no-op | Live |
+| **PostHog** | Product analytics | Event names + properties, PII-scrubbed (W6.2b) | EU | `NEXT_PUBLIC_POSTHOG_KEY` unset → no-op | Live |
+| **FMP / Alpha Vantage / yfinance** | Market + research data | **Ticker symbols only** — no user identity or position sizes | US | Per-provider key / mock mode | Live |
+
+### ⚠️ MUST VERIFY before DeepSeek carries production traffic
+
+I have **not** verified these against DeepSeek's current terms, and they should not be assumed. Read the actual DPA/privacy policy and record the answers here:
+
+1. **Does the API retain inputs, and for how long?** Consumer-app terms and API terms often differ.
+2. **Are API inputs used for model training,** and is there an opt-out (a "zero data retention" or non-training tier)?
+3. **Is there a DPA / standard contractual clauses** available for a non-PRC controller?
+4. **Where is data stored at rest**, and is any region choice offered?
+
+If (2) has no opt-out, note that user portfolio data may be incorporated into training — which is a materially different disclosure obligation to your waitlist users than "processed and discarded."
+
+### Disclosure obligation
+
+The waitlist product is **live and handling real user brokerage data**. Before DeepSeek carries production traffic, the connect-flow privacy copy must name the LLM sub-processors and their jurisdictions. Users consented to a service that sends their holdings to a US processor; a PRC processor is a change they are entitled to know about. **Non-code task — tracked in `OPERATOR_CHECKLIST.md`, and it should land before or with the flag flip, not after.**
 
 ## Pre-launch lockdown checklist
 
 Every item must be checked before sharing the URL with any tester.
 
-> **Status (2026-06-11):** the **waitlist-product subset is DONE & live** (the product is deployed). Specifically: auth on `/api/*` + RLS two-account isolation (P4.1/P4.2); per-IP rate limit + CSP/HSTS + security headers + dep-audit (incl. **pyjwt ≥2.13.0**) + bundle secret scan (W6.6); DOMPurify `SafeHtml` (032); per-user token budget (034); PostHog PII scrub (W6.2b); IBKR token encryption (W4); email/WhatsApp opt-out (W6.1b / 038). **Deliberately NOT built:** the widget numeric validator (trust #3) — "Bug B" was a misdiagnosis; building it would risk false-failing `order_ticket`'s legit computed fields. The boxes below remain the full chat-MVP gate for when chat resumes; ✅ = already satisfied by the above.
+> **Status (2026-06-11):** the **waitlist-product subset is DONE & live** (the product is deployed). Specifically: auth on `/api/*` + RLS two-account isolation (P4.1/P4.2); per-IP rate limit + CSP/HSTS + security headers + dep-audit (incl. **pyjwt ≥2.13.0**) + bundle secret scan (W6.6); DOMPurify `SafeHtml` (032); per-user token budget (034); PostHog PII scrub (W6.2b); IBKR token encryption (W4); email/WhatsApp opt-out (W6.1b / 038). ~~**Deliberately NOT built:** the widget numeric validator (trust #3)~~ — **superseded 2026-07-10 (proposal 067): the validator EXISTS and is in `enforce` on Railway as of 2026-07-19.** The old concern (false-failing `order_ticket`'s legit computed fields) was addressed by *tiering* — only tier-1 hard market/account numbers gate the result, so agent-derived figures don't trip it. See `backend/validation.py`. The boxes below remain the full chat-MVP gate for when chat resumes; ✅ = already satisfied by the above.
 
 ### Keys + secrets
 
