@@ -38,7 +38,8 @@ from typing import Any
 
 from anthropic import AsyncAnthropic
 
-import deepseek_client  # 070 — DeepSeek fallback when Anthropic is usage-limited
+import deepseek_client  # 070 — DeepSeek fallback when the primary is usage-limited
+import openai_client  # 071 — OpenAI as a selectable primary for the brief too
 import freshness  # 061 — shared freshness-note logic (was inline here, 052)
 import ibkr_flex
 from news_context import fetch_macro_context, fetch_recent_news
@@ -122,6 +123,23 @@ def _brief_fallback_enabled() -> bool:
     if raw is None:
         raw = os.getenv("LLM_FALLBACK_ENABLED", "0")
     return raw == "1"
+
+
+# 071 — the brief honours the SAME `LLM_RAIL` select as chat. 070's whole lesson
+# was that wiring only the agent loop leaves the WhatsApp/email brief dead (it
+# builds its own client and never touches run_chat), so the rail select has to
+# land in both places or the cron stays broken. Duplicated rather than imported
+# for the same reason `_USAGE_LIMIT_MARKERS` is: the cron service must never have
+# to import the whole agent module (tool registry + Anthropic client) to send a brief.
+_VALID_RAILS = ("anthropic", "openai")
+
+
+def _brief_rail() -> str:
+    raw = (os.getenv("LLM_RAIL", "anthropic") or "anthropic").strip().lower()
+    if raw not in _VALID_RAILS:
+        log.warning("unknown LLM_RAIL=%r — falling back to 'anthropic'", raw)
+        return "anthropic"
+    return raw
 
 
 def _is_usage_limit_error(e: Exception) -> bool:
@@ -565,19 +583,29 @@ async def generate_briefing(snapshot: dict, market_context: dict | None = None) 
     else:
         system = _PROMPT.read_text()
         user_msg = _facts_user_message(facts)
+        rail = _brief_rail()  # 071 — same select as chat
         try:
-            resp = await _get_client().messages.create(
-                model=_model(),
-                max_tokens=1024,
-                system=system,
-                messages=[{"role": "user", "content": user_msg}],
-            )
-            text = "".join(
-                b.text for b in resp.content if getattr(b, "type", None) == "text"
-            ).strip()
-            model = _model()
+            if rail == "openai":
+                # 071 — tool-less single completion, exactly like the Anthropic
+                # path; no widget JSON, no images, so nothing else changes.
+                oa = await openai_client.complete(
+                    system, [{"role": "user", "content": user_msg}], max_tokens=1024
+                )
+                text = (oa.get("text") or "").strip()
+                model = openai_client.model()
+            else:
+                resp = await _get_client().messages.create(
+                    model=_model(),
+                    max_tokens=1024,
+                    system=system,
+                    messages=[{"role": "user", "content": user_msg}],
+                )
+                text = "".join(
+                    b.text for b in resp.content if getattr(b, "type", None) == "text"
+                ).strip()
+                model = _model()
         except Exception as e:  # noqa: BLE001
-            # 070 — Anthropic is usage-limited: re-issue the SAME prompt to
+            # 070 — the primary is usage-limited: re-issue the SAME prompt to
             # DeepSeek rather than skipping the brief entirely. Any other error
             # (auth, bad request) still fails loudly, as before.
             if not (
@@ -585,15 +613,15 @@ async def generate_briefing(snapshot: dict, market_context: dict | None = None) 
                 and deepseek_client.deepseek_available()
                 and _is_usage_limit_error(e)
             ):
-                raise BriefingError(f"Claude call failed: {e}") from e
-            log.warning("briefing failing over to DeepSeek: %s", e)
+                raise BriefingError(f"{rail} call failed: {e}") from e
+            log.warning("briefing failing over from %s to DeepSeek: %s", rail, e)
             try:
                 ds = await deepseek_client.complete(
                     system, [{"role": "user", "content": user_msg}], max_tokens=1024
                 )
             except Exception as de:  # noqa: BLE001 — fallback is last resort
                 raise BriefingError(
-                    f"Claude call failed ({e}); DeepSeek fallback also failed ({de})"
+                    f"{rail} call failed ({e}); DeepSeek fallback also failed ({de})"
                 ) from de
             text = (ds.get("text") or "").strip()
             model = deepseek_client.deepseek_model()
