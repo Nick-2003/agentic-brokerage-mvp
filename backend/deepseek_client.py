@@ -27,12 +27,13 @@ attachments must NOT fall back — see `can_fall_back()`.
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
 from typing import Any
 
 import httpx
+
+import openai_compat
 
 log = logging.getLogger(__name__)
 
@@ -67,6 +68,18 @@ def fallback_enabled() -> bool:
     return os.getenv("LLM_FALLBACK_ENABLED", "0") == "1"
 
 
+# 071 — uniform accessors so the rail dispatcher can hold either provider module
+# without branching (`openai_client` exposes the same three names).
+model = deepseek_model
+available = deepseek_available
+
+
+def supports_vision() -> bool:
+    """Always False — DeepSeek's chat API takes no image blocks. Kept as a real
+    function (not a constant) so both rail modules present an identical surface."""
+    return False
+
+
 def can_fall_back(attachments: list[dict[str, Any]] | None) -> bool:
     """Whether THIS turn is eligible to fall back to DeepSeek. False when the turn
     carries image attachments — DeepSeek can't see them, and silently dropping a
@@ -80,84 +93,13 @@ class DeepSeekError(Exception):
 
 
 # --- translations -------------------------------------------------------------
-def to_openai_tools(anthropic_specs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """`anthropic_tool_specs()` → OpenAI `tools` array."""
-    return [
-        {
-            "type": "function",
-            "function": {
-                "name": t["name"],
-                "description": t.get("description", ""),
-                "parameters": t.get("input_schema", {"type": "object", "properties": {}}),
-            },
-        }
-        for t in anthropic_specs
-    ]
-
-
-def to_openai_messages(
-    system: str, neutral: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    """Neutral message history → OpenAI `messages`.
-
-    `neutral` items use the SAME plain-dict shape the loop builds for the DeepSeek
-    rail (turn-restart rebuilds history from text, so there are no Anthropic SDK
-    objects here):
-      {"role":"user"|"assistant", "content": str}
-      {"role":"assistant", "tool_calls":[{id,name,input}]}
-      {"role":"tool", "tool_call_id":…, "content": str}
-    A leading system message is prepended.
-    """
-    out: list[dict[str, Any]] = [{"role": "system", "content": system}]
-    for m in neutral:
-        role = m.get("role")
-        if role == "tool":
-            out.append({
-                "role": "tool",
-                "tool_call_id": m.get("tool_call_id", ""),
-                "content": m.get("content", ""),
-            })
-        elif role == "assistant" and m.get("tool_calls"):
-            out.append({
-                "role": "assistant",
-                "content": m.get("content") or None,
-                "tool_calls": [
-                    {
-                        "id": tc["id"],
-                        "type": "function",
-                        "function": {"name": tc["name"], "arguments": json.dumps(tc.get("input") or {})},
-                    }
-                    for tc in m["tool_calls"]
-                ],
-            })
-        else:
-            out.append({"role": role or "user", "content": m.get("content", "")})
-    return out
-
-
-def _parse_choice(data: dict[str, Any]) -> dict[str, Any]:
-    """OpenAI chat-completion response → the loop's uniform shape."""
-    choices = data.get("choices") or []
-    msg = (choices[0].get("message") if choices else {}) or {}
-    text = msg.get("content") or ""
-    tool_calls: list[dict[str, Any]] = []
-    for tc in msg.get("tool_calls") or []:
-        fn = tc.get("function") or {}
-        raw = fn.get("arguments") or "{}"
-        try:
-            args = json.loads(raw) if isinstance(raw, str) else (raw or {})
-        except json.JSONDecodeError:
-            args = {}
-        tool_calls.append({"id": tc.get("id") or "", "name": fn.get("name") or "", "input": args})
-    usage = data.get("usage") or {}
-    return {
-        "text": text,
-        "tool_calls": tool_calls,
-        "usage": {
-            "input_tokens": int(usage.get("prompt_tokens") or 0),
-            "output_tokens": int(usage.get("completion_tokens") or 0),
-        },
-    }
+# 071: the wire translations moved to `openai_compat` so the DeepSeek and OpenAI
+# rails can never drift in how they present tools/history — both feed the SAME
+# 067 trust check. These are thin delegators; behaviour is unchanged (same house
+# pattern as 061 moving 052's freshness logic to `freshness.py`).
+to_openai_tools = openai_compat.to_openai_tools
+to_openai_messages = openai_compat.to_openai_messages
+_parse_choice = openai_compat.parse_choice
 
 
 def _mock_complete(messages: list[dict[str, Any]]) -> dict[str, Any]:

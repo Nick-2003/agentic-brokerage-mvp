@@ -55,6 +55,7 @@ from anthropic import (
 from anthropic.types import MessageParam, ToolUseBlock
 
 import deepseek_client  # 069 — DeepSeek fallback rail
+import openai_client  # 071 — OpenAI rail (selectable primary)
 import validation  # 067 — numeric-provenance validator (trust #1/#3)
 from observability import NOOP_TRACER, Tracer
 from tools import TOOL_REGISTRY, anthropic_tool_specs, render_thought  # noqa: F401
@@ -81,17 +82,42 @@ def _failover_reasons() -> set[str]:
     return {r.strip() for r in raw.split(",") if r.strip()}
 
 
+# 071 — OpenAI-specific usage-limit markers. The 068 README flagged exactly this
+# trap for Vertex: 065's markers are Anthropic-DIRECT phrasing, so a rail that
+# words exhaustion differently would never trigger failover — the failure mode
+# would be invisible on the very rail we moved to. OpenAI says `insufficient_quota`
+# / "exceeded your current quota", neither of which matches `_BILLING_MARKERS`.
+_OPENAI_BILLING_MARKERS = (
+    "insufficient_quota",
+    "exceeded your current quota",
+    "billing_hard_limit_reached",
+)
+
+
 def _failover_reason(e: Exception) -> str | None:
-    """Map an Anthropic error to a coarse failover reason, or None if it's not a
+    """Map a PRIMARY-rail error to a coarse failover reason, or None if it's not a
     usage-limit failure (auth/bad-request/etc. must NOT fail over — a config bug
-    should stay loud, and a genuine 400 would just fail on DeepSeek too)."""
+    should stay loud, and a genuine 400 would just fail on the fallback too).
+
+    Handles BOTH primaries (071): Anthropic SDK exceptions and OpenAI HTTP errors,
+    whose bodies `openai_client.complete` preserves for exactly this reason.
+    """
     text = str(e).lower()
-    if any(m in text for m in _BILLING_MARKERS):
+    if any(m in text for m in _BILLING_MARKERS) or any(
+        m in text for m in _OPENAI_BILLING_MARKERS
+    ):
         return "billing"
     if isinstance(e, RateLimitError) or "rate limit" in text or "429" in text:
         return "rate_limit"
     status = getattr(e, "status_code", None)
     if status in (503, 529) or "overloaded" in text:
+        return "overloaded"
+    # OpenAI surfaces 5xx/429 through httpx, where the status lives on .response.
+    resp = getattr(e, "response", None)
+    rstatus = getattr(resp, "status_code", None)
+    if rstatus == 429:
+        return "rate_limit"
+    if rstatus in (500, 502, 503, 529):
         return "overloaded"
     return None
 
@@ -108,6 +134,35 @@ def _should_failover(e: Exception, attachments: list[dict[str, Any]] | None) -> 
     if reason and reason in _failover_reasons():
         return reason
     return None
+
+
+# ---------------------------------------------------------------------------
+# 071 — RAIL SELECT. `LLM_RAIL` picks the PRIMARY provider; DeepSeek stays the
+# fallback beneath whichever primary is chosen.
+#
+# Why this exists: 069 hardcoded Anthropic-first, which was right when Anthropic
+# was healthy and DeepSeek covered rare outages. With 068 confirmed geo-ineligible
+# and Anthropic credits durably empty, "call Anthropic, watch it fail, restart on
+# DeepSeek" would run on 100% of turns — a doomed API call per turn and a UI that
+# permanently claims to be a transient "fallback". Selecting the primary directly
+# is both cheaper and honest.
+#
+#   LLM_RAIL=anthropic  (default — unchanged 069 behaviour)
+#   LLM_RAIL=openai     (071 — OpenAI primary; vision-capable, US/EU jurisdiction)
+# ---------------------------------------------------------------------------
+
+_VALID_RAILS = ("anthropic", "openai")
+
+
+def _rail() -> str:
+    """The configured primary rail. Falls back to `anthropic` on an unknown value
+    (fail-safe: a typo must not silently route a live product to a rail nobody
+    intended) and logs loudly."""
+    raw = (os.getenv("LLM_RAIL", "anthropic") or "anthropic").strip().lower()
+    if raw not in _VALID_RAILS:
+        log.warning("unknown LLM_RAIL=%r — falling back to 'anthropic'", raw)
+        return "anthropic"
+    return raw
 
 _PROMPT_DIR = Path(__file__).parent / "prompts"
 
@@ -811,22 +866,34 @@ async def run_agent(
 
 
 # ---------------------------------------------------------------------------
-# 069 — DeepSeek fallback loop (turn-restart). A structurally-parallel loop that
-# talks OpenAI-format via deepseek_client and builds NEUTRAL history as it goes.
-# It reuses every shared leaf (_call_tool, _compact_for_llm, _finalize_terminal_
-# widget, tool_facts/screenshot bookkeeping, tracer), so the trust check and tool
-# handling are identical to the Anthropic rail. Reached ONLY via run_chat after a
-# ProviderFailover; the turn is restarted from scratch (tools re-run — safe, all
-# reads). No image handling: fallback turns are guaranteed attachment-free.
+# 069/071 — OpenAI-format agent loop. A structurally-parallel loop to the
+# Anthropic one that talks OpenAI wire format via a PROVIDER MODULE and builds
+# NEUTRAL history as it goes. It reuses every shared leaf (_call_tool,
+# _compact_for_llm, _finalize_terminal_widget, tool_facts/screenshot bookkeeping,
+# tracer), so the trust check and tool handling are identical to the Anthropic rail.
+#
+# 071 parameterises the provider (`client`) instead of hardcoding DeepSeek, so
+# OpenAI reuses this loop verbatim rather than adding a THIRD copy — deliberate,
+# because a third loop is a third place the 067 trust check could drift. Any module
+# exposing `complete/to_openai_tools/model/supports_vision` can drive it.
+#
+# Reached either as the selected primary (`LLM_RAIL=openai`) or via run_chat after
+# a ProviderFailover, in which case the turn is restarted from scratch (tools
+# re-run — safe, all reads while TRADING_ENABLED=0).
+#
+# Images: only passed through when the provider `supports_vision()`. DeepSeek
+# never does, and run_chat guarantees its turns are attachment-free.
 # ---------------------------------------------------------------------------
 
 
-async def run_agent_deepseek(
+async def run_agent_openai_compat(
     user_message: str,
     user_id: str = "demo",
     tracer: Tracer = NOOP_TRACER,
     memory_context: str = "",
     history: list[dict[str, Any]] | None = None,
+    attachments: list[dict[str, Any]] | None = None,
+    client: Any = deepseek_client,
 ) -> AsyncGenerator[dict[str, Any], None]:
     start_time = time.monotonic()
     system_prompt = (
@@ -836,8 +903,15 @@ async def run_agent_deepseek(
     )
     # Neutral history (db.to_agent_history → text-only dicts) + this turn's text.
     messages: list[dict[str, Any]] = list(history or [])
-    messages.append({"role": "user", "content": user_message})
-    tools = deepseek_client.to_openai_tools(anthropic_tool_specs())
+    user_turn: dict[str, Any] = {"role": "user", "content": user_message}
+    # 071 — attach images only on a vision-capable rail. Silently dropping an
+    # attached chart would be a correctness failure (069's rule); run_chat refuses
+    # the turn upstream instead, so reaching here with attachments on a blind rail
+    # is a bug, not a user-visible path.
+    if attachments and client.supports_vision():
+        user_turn["attachments"] = attachments
+    messages.append(user_turn)
+    tools = client.to_openai_tools(anthropic_tool_specs())
 
     iterations = 0
     total_input_tokens = 0
@@ -849,7 +923,7 @@ async def run_agent_deepseek(
         while iterations < MAX_ITERATIONS:
             iterations += 1
             iter_started = time.monotonic()
-            resp = await deepseek_client.complete(
+            resp = await client.complete(
                 system_prompt, messages, tools=tools, max_tokens=4096
             )
             text = resp.get("text") or ""
@@ -858,8 +932,8 @@ async def run_agent_deepseek(
             total_input_tokens += int(usage.get("input_tokens") or 0)
             total_output_tokens += int(usage.get("output_tokens") or 0)
             tracer.record_generation(
-                name=f"deepseek.iter_{iterations}",
-                model=deepseek_client.deepseek_model(),
+                name=f"{client.model()}.iter_{iterations}",
+                model=client.model(),
                 input=list(messages),
                 output=[{"type": "text", "text": text}] + [
                     {"type": "tool_use", "id": t["id"], "name": t["name"], "input": t["input"]}
@@ -920,10 +994,18 @@ async def run_agent_deepseek(
             yield {"event": "error", "data": {"message": f"agent stopped after {MAX_ITERATIONS} iterations"}}
 
     except Exception as e:
-        # DeepSeek is the fallback of last resort — no further failover. Classify
-        # and surface a safe message (same posture as the Anthropic rail).
+        # 071 — when THIS rail is the selected primary (OpenAI), a usage-limit
+        # failure should still drop to DeepSeek, exactly as the Anthropic rail
+        # does. When this loop IS DeepSeek it is the last resort and must not
+        # fail over to itself — guarded by the `client is not deepseek_client`
+        # check, which also prevents an infinite restart loop.
+        if client is not deepseek_client:
+            reason = _should_failover(e, attachments)
+            if reason is not None:
+                log.warning("run_agent_openai_compat failing over to DeepSeek [%s]: %s", reason, e)
+                raise ProviderFailover(reason) from e
         user_msg, code = _classify_agent_error(e)
-        log.warning("run_agent_deepseek failed [%s]: %s", code, e)
+        log.warning("run_agent_openai_compat[%s] failed [%s]: %s", client.model(), code, e)
         tracer.set_output({"kind": "error", "code": code, "message": str(e)})
         yield {"event": "error", "data": {"message": user_msg, "code": code}}
 
@@ -939,15 +1021,37 @@ async def run_agent_deepseek(
     }
 
 
+# 069 back-compat: the DeepSeek fallback is just this loop bound to that client.
+# Kept so existing callers/tests (`test_069_phase2_failover.py`) keep working.
+async def run_agent_deepseek(
+    user_message: str,
+    user_id: str = "demo",
+    tracer: Tracer = NOOP_TRACER,
+    memory_context: str = "",
+    history: list[dict[str, Any]] | None = None,
+) -> AsyncGenerator[dict[str, Any], None]:
+    async for ev in run_agent_openai_compat(
+        user_message, user_id, tracer=tracer, memory_context=memory_context,
+        history=history, attachments=None, client=deepseek_client,
+    ):
+        yield ev
+
+
 # ---------------------------------------------------------------------------
-# 069 — run_chat: the entry point main.py calls. Emits a `provider` event so the
-# UI shows which model answered, runs the Anthropic rail, and on a ProviderFailover
-# restarts the turn on DeepSeek (announcing the switch).
+# 069/071 — run_chat: the entry point main.py calls. Emits a `provider` event so
+# the UI shows which model answered, runs the SELECTED primary rail (`LLM_RAIL`),
+# and on a ProviderFailover restarts the turn on DeepSeek (announcing the switch).
 # ---------------------------------------------------------------------------
 
 _MODEL_LABELS = {
     "claude-opus-4-5": "Claude Opus 4.5",
     "deepseek-chat": "DeepSeek V3",
+    # 071 — OpenAI ids are configurable; label the ones we expect and fall through
+    # to the raw id for anything else (better an honest id than a wrong name).
+    "gpt-5": "GPT-5",
+    "gpt-5-mini": "GPT-5 mini",
+    "gpt-4.1": "GPT-4.1",
+    "gpt-4o": "GPT-4o",
 }
 
 
@@ -964,29 +1068,66 @@ async def run_chat(
     attachments: list[dict[str, Any]] | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Provider-aware chat turn. Yields the same events as run_agent PLUS a
-    `provider` event (and a second one if it fails over to DeepSeek)."""
+    `provider` event (and a second one if it fails over to DeepSeek).
+
+    071: the primary is chosen by `LLM_RAIL` rather than hardcoded to Anthropic.
+    """
+    rail = _rail()
+    if rail == "openai":
+        primary_model = openai_client.model()
+        # A vision-incapable pinned model must REFUSE an image turn, never drop
+        # the image silently (069's non-negotiable rule, applied per-rail).
+        if attachments and not openai_client.can_fall_back(attachments):
+            yield {
+                "event": "provider",
+                "data": {"provider": "openai", "model": primary_model,
+                         "label": _provider_label(primary_model),
+                         "fallback": False, "reason": None},
+            }
+            yield {
+                "event": "error",
+                "data": {
+                    "message": (
+                        "Image analysis isn't available on the current model. "
+                        "Remove the attachment and try again."
+                    ),
+                    "code": "vision_unavailable",
+                },
+            }
+            return
+    else:
+        primary_model = MODEL
+
     yield {
         "event": "provider",
-        "data": {"provider": "anthropic", "model": MODEL,
-                 "label": _provider_label(MODEL), "fallback": False, "reason": None},
+        "data": {"provider": rail, "model": primary_model,
+                 "label": _provider_label(primary_model), "fallback": False, "reason": None},
     }
     try:
-        async for ev in run_agent(
-            user_message, user_id, tracer=tracer, memory_context=memory_context,
-            history=history, attachments=attachments,
-        ):
-            yield ev
+        if rail == "openai":
+            async for ev in run_agent_openai_compat(
+                user_message, user_id, tracer=tracer, memory_context=memory_context,
+                history=history, attachments=attachments, client=openai_client,
+            ):
+                yield ev
+        else:
+            async for ev in run_agent(
+                user_message, user_id, tracer=tracer, memory_context=memory_context,
+                history=history, attachments=attachments,
+            ):
+                yield ev
     except ProviderFailover as pf:
         ds_model = deepseek_client.deepseek_model()
         yield {
             "event": "provider",
             "data": {"provider": "deepseek", "model": ds_model,
                      "label": _provider_label(ds_model), "fallback": True,
-                     "reason": f"anthropic_{pf.reason}"},
+                     "reason": f"{rail}_{pf.reason}"},
         }
         # Turn-restart: DeepSeek gets the text history + user message only (never
         # images — the failover guard guarantees this turn is attachment-free).
-        async for ev in run_agent_deepseek(
-            user_message, user_id, tracer=tracer, memory_context=memory_context, history=history,
+        async for ev in run_agent_openai_compat(
+            user_message, user_id, tracer=tracer, memory_context=memory_context,
+            history=history, attachments=None, client=deepseek_client,
         ):
             yield ev
