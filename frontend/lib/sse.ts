@@ -14,7 +14,9 @@ export type ChatEvent =
   | {
       event: 'provider';
       data: {
-        provider: 'anthropic' | 'deepseek';
+        // 073 — 'openai' added: the backend has emitted it since 071's LLM_RAIL
+        // select (agent.py `run_chat`), so the union was understating reality.
+        provider: 'anthropic' | 'deepseek' | 'openai';
         model: string;
         label: string;
         fallback: boolean;

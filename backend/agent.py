@@ -55,6 +55,7 @@ from anthropic import (
 from anthropic.types import MessageParam, ToolUseBlock
 
 import deepseek_client  # 069 — DeepSeek fallback rail
+import llm_limits  # 073 — shared, env-driven output-token caps
 import openai_client  # 071 — OpenAI rail (selectable primary)
 import validation  # 067 — numeric-provenance validator (trust #1/#3)
 from observability import NOOP_TRACER, Tracer
@@ -706,7 +707,7 @@ async def run_agent(
             messages_snapshot = list(messages)
             async with client.messages.stream(
                 model=MODEL,
-                max_tokens=4096,
+                max_tokens=llm_limits.max_output_tokens("anthropic"),  # 073
                 system=system_prompt,
                 tools=anthropic_tool_specs(),
                 messages=messages,
@@ -924,13 +925,20 @@ async def run_agent_openai_compat(
             iterations += 1
             iter_started = time.monotonic()
             resp = await client.complete(
-                system_prompt, messages, tools=tools, max_tokens=4096
+                system_prompt, messages, tools=tools,
+                max_tokens=llm_limits.max_output_tokens(client.provider_name()),  # 073
             )
             text = resp.get("text") or ""
             tool_calls = resp.get("tool_calls") or []
             usage = resp.get("usage") or {}
-            total_input_tokens += int(usage.get("input_tokens") or 0)
-            total_output_tokens += int(usage.get("output_tokens") or 0)
+            # 073 — THIS iteration's tokens. Previously the cumulative running
+            # totals were handed to `record_generation`, so a multi-iteration turn
+            # over-counted in Langfuse (iter2 logged t1+t2, iter3 logged t1+t2+t3).
+            # The Anthropic rail passes per-iteration deltas; both now match.
+            iter_input_tokens = int(usage.get("input_tokens") or 0)
+            iter_output_tokens = int(usage.get("output_tokens") or 0)
+            total_input_tokens += iter_input_tokens
+            total_output_tokens += iter_output_tokens
             tracer.record_generation(
                 name=f"{client.model()}.iter_{iterations}",
                 model=client.model(),
@@ -939,7 +947,7 @@ async def run_agent_openai_compat(
                     {"type": "tool_use", "id": t["id"], "name": t["name"], "input": t["input"]}
                     for t in tool_calls
                 ],
-                usage_details={"input": total_input_tokens, "output": total_output_tokens},
+                usage_details={"input": iter_input_tokens, "output": iter_output_tokens},
                 metadata={"iteration": iterations, "latency_ms": int((time.monotonic() - iter_started) * 1000)},
             )
 
@@ -991,6 +999,9 @@ async def run_agent_openai_compat(
                     "content": json.dumps(compact),
                 })
         else:
+            # 073 — mirror the Anthropic rail's `set_output` on this path; without
+            # it a max-iteration stall was invisible in Langfuse on this rail only.
+            tracer.set_output({"kind": "error", "message": f"max iterations ({MAX_ITERATIONS})"})
             yield {"event": "error", "data": {"message": f"agent stopped after {MAX_ITERATIONS} iterations"}}
 
     except Exception as e:

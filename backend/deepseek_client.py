@@ -33,6 +33,7 @@ from typing import Any
 
 import httpx
 
+import llm_limits
 import openai_compat
 
 log = logging.getLogger(__name__)
@@ -72,6 +73,11 @@ def fallback_enabled() -> bool:
 # without branching (`openai_client` exposes the same three names).
 model = deepseek_model
 available = deepseek_available
+
+
+def provider_name() -> str:
+    """073 — env-var prefix for this rail's token-cap lookup."""
+    return "deepseek"
 
 
 def supports_vision() -> bool:
@@ -115,13 +121,18 @@ async def complete(
     system: str,
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
-    max_tokens: int = 4096,
+    max_tokens: int | None = None,
 ) -> dict[str, Any]:
     """One DeepSeek turn. Returns the loop's uniform response shape.
 
     `messages` are NEUTRAL dicts (see `to_openai_messages`); `tools` are OpenAI-shaped
     (see `to_openai_tools`). Raises `DeepSeekError` on any transport/HTTP/parse failure.
+
+    073: `max_tokens=None` resolves the cap from env via `llm_limits` (default
+    4096, unchanged). An explicit value still wins.
     """
+    if max_tokens is None:
+        max_tokens = llm_limits.max_output_tokens(provider_name())
     if not deepseek_available():
         return _mock_complete(messages)
 

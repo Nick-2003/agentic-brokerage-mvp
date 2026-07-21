@@ -35,7 +35,8 @@ type Turn = {
   messages: string[];
   error?: string;
   // 069 — which model answered this turn (+ whether it was a fallback).
-  provider?: { label: string; fallback: boolean; reason: string | null };
+  // 073 — `primaryLabel` = the rail this turn STARTED on, kept across a failover.
+  provider?: { label: string; fallback: boolean; reason: string | null; primaryLabel?: string };
 };
 
 export default function Home() {
@@ -163,10 +164,14 @@ function ChatScreen() {
             );
           } else if (ev.event === 'provider') {
             // 069 — which model is answering (updated again on failover).
+            // 073 — keep the FIRST label as `primaryLabel`. The second event
+            // used to overwrite the whole object, so the rail we started on was
+            // lost and the fallback notice had to hardcode a guess ("Claude").
             next.provider = {
               label: ev.data.label,
               fallback: ev.data.fallback,
               reason: ev.data.reason,
+              primaryLabel: next.provider?.primaryLabel ?? next.provider?.label ?? ev.data.label,
             };
           } else if (ev.event === 'widget') {
             next.widgets = [...next.widgets, ev.data];

@@ -10,14 +10,26 @@ type Props = {
   done?: boolean;
   elapsedMs?: number;
   // 069 — which model answered this turn.
-  provider?: { label: string; fallback: boolean; reason: string | null };
+  // 073 — `primaryLabel` is the rail we STARTED on, retained across a failover so
+  // the notice can name it. Without it the copy has to guess, and it guessed "Claude".
+  provider?: {
+    label: string;
+    fallback: boolean;
+    reason: string | null;
+    primaryLabel?: string;
+  };
 };
 
 // 069 — map the failover reason code to a short human phrase for the notice.
+// 073 — the backend emits `{rail}_{reason}` (agent.py `run_chat`), so the rail
+// prefix varies: `anthropic_billing`, `openai_billing`, … Matching whole strings
+// meant every non-Anthropic failover fell through to the generic "unavailable".
+// Match on the SUFFIX so any current or future rail renders the real reason.
 function reasonPhrase(reason: string | null): string {
-  if (reason === 'anthropic_billing') return 'usage limit reached';
-  if (reason === 'anthropic_rate_limit') return 'rate limited';
-  if (reason === 'anthropic_overloaded') return 'overloaded';
+  if (!reason) return 'unavailable';
+  if (reason.endsWith('billing')) return 'usage limit reached';
+  if (reason.endsWith('rate_limit')) return 'rate limited';
+  if (reason.endsWith('overloaded')) return 'overloaded';
   return 'unavailable';
 }
 
@@ -51,8 +63,8 @@ export function ThinkingCard({ thoughts, done, elapsedMs, provider }: Props) {
       {/* 069 — honest one-line notice when the fallback answered. */}
       {provider?.fallback && (
         <div className="mb-3 text-[11.5px] text-text-2 leading-snug">
-          Claude was {reasonPhrase(provider.reason)} — this answer came from{' '}
-          <span className="font-medium">{provider.label}</span>.
+          {provider.primaryLabel ?? 'The usual model'} was {reasonPhrase(provider.reason)} —
+          this answer came from <span className="font-medium">{provider.label}</span>.
         </div>
       )}
       <div className="flex flex-col gap-1.5">
