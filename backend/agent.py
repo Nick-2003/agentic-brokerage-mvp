@@ -150,9 +150,12 @@ def _should_failover(e: Exception, attachments: list[dict[str, Any]] | None) -> 
 #
 #   LLM_RAIL=anthropic  (default — unchanged 069 behaviour)
 #   LLM_RAIL=openai     (071 — OpenAI primary; vision-capable, US/EU jurisdiction)
+#   LLM_RAIL=deepseek   (074 — DeepSeek AS primary; the bridge while both frontier
+#                        rails are credit-blocked. No vision, and it's the last
+#                        resort so nothing falls back beneath it.)
 # ---------------------------------------------------------------------------
 
-_VALID_RAILS = ("anthropic", "openai")
+_VALID_RAILS = ("anthropic", "openai", "deepseek")
 
 
 def _rail() -> str:
@@ -1082,32 +1085,36 @@ async def run_chat(
     `provider` event (and a second one if it fails over to DeepSeek).
 
     071: the primary is chosen by `LLM_RAIL` rather than hardcoded to Anthropic.
+    074: `deepseek` joins the select. The primary is now resolved to a client
+    MODULE (or None for the Anthropic SDK path) so all OpenAI-format rails —
+    OpenAI and DeepSeek-as-primary — share one dispatch and one vision guard.
     """
     rail = _rail()
-    if rail == "openai":
-        primary_model = openai_client.model()
-        # A vision-incapable pinned model must REFUSE an image turn, never drop
-        # the image silently (069's non-negotiable rule, applied per-rail).
-        if attachments and not openai_client.can_fall_back(attachments):
-            yield {
-                "event": "provider",
-                "data": {"provider": "openai", "model": primary_model,
-                         "label": _provider_label(primary_model),
-                         "fallback": False, "reason": None},
-            }
-            yield {
-                "event": "error",
-                "data": {
-                    "message": (
-                        "Image analysis isn't available on the current model. "
-                        "Remove the attachment and try again."
-                    ),
-                    "code": "vision_unavailable",
-                },
-            }
-            return
-    else:
-        primary_model = MODEL
+    # 074 — resolve the primary once. `None` = the Anthropic SDK loop (run_agent);
+    # any other value is an OpenAI-format client module driving run_agent_openai_compat.
+    primary_client = {"openai": openai_client, "deepseek": deepseek_client}.get(rail)
+    primary_model = primary_client.model() if primary_client is not None else MODEL
+
+    # A vision-incapable primary must REFUSE an image turn, never drop the image
+    # silently (069's non-negotiable rule, applied per-rail). `can_fall_back` is
+    # False for OpenAI only when OPENAI_VISION=0, and ALWAYS False for DeepSeek.
+    if primary_client is not None and attachments and not primary_client.can_fall_back(attachments):
+        yield {
+            "event": "provider",
+            "data": {"provider": rail, "model": primary_model,
+                     "label": _provider_label(primary_model), "fallback": False, "reason": None},
+        }
+        yield {
+            "event": "error",
+            "data": {
+                "message": (
+                    "Image analysis isn't available on the current model. "
+                    "Remove the attachment and try again."
+                ),
+                "code": "vision_unavailable",
+            },
+        }
+        return
 
     yield {
         "event": "provider",
@@ -1115,10 +1122,13 @@ async def run_chat(
                  "label": _provider_label(primary_model), "fallback": False, "reason": None},
     }
     try:
-        if rail == "openai":
+        if primary_client is not None:
+            # 074 — when the primary IS DeepSeek, run_agent_openai_compat's
+            # `client is not deepseek_client` guard means it never raises
+            # ProviderFailover, so there is (correctly) nothing beneath it.
             async for ev in run_agent_openai_compat(
                 user_message, user_id, tracer=tracer, memory_context=memory_context,
-                history=history, attachments=attachments, client=openai_client,
+                history=history, attachments=attachments, client=primary_client,
             ):
                 yield ev
         else:

@@ -120,7 +120,11 @@ async def healthz() -> dict[str, Any]:
     # SECURITY: booleans only — never a key, a length, or a prefix beyond the
     # existing shape test. This endpoint is unauthenticated.
     rail = _rail()
-    active_model = openai_client.model() if rail == "openai" else MODEL
+    # 074 — deepseek can now be the chosen primary; report its model, not MODEL.
+    active_model = {
+        "openai": openai_client.model,
+        "deepseek": deepseek_client.deepseek_model,
+    }.get(rail, lambda: MODEL)()
     return {
         "ok": True,
         "rail": rail,

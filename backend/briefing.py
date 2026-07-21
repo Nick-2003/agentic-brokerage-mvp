@@ -78,13 +78,24 @@ class BriefingError(Exception):
 # --- mock gate / client --------------------------------------------------------
 
 def briefing_mock_enabled() -> bool:
-    """True iff the deterministic template path should be used instead of Claude.
+    """True iff the deterministic template path should be used instead of an LLM.
 
-    Forced by `USE_MOCK_BRIEFING=1`, or implied when there's no Anthropic key
+    Forced by `USE_MOCK_BRIEFING=1`, or implied when the ACTIVE rail has no key
     (so offline dev / a keyless probe still produces a brief).
+
+    074 — this MUST key off the active rail, not always Anthropic. Pre-074 it
+    checked `ANTHROPIC_API_KEY` unconditionally: with `LLM_RAIL=deepseek` (or
+    `openai`) and Anthropic deprovisioned, every brief would silently fall to the
+    mock template even though a real LLM was configured. That was a latent trap
+    the moment 071 made a non-Anthropic rail selectable; 074 closes it.
     """
     if os.getenv("USE_MOCK_BRIEFING") == "1":
         return True
+    rail = _brief_rail()
+    if rail == "deepseek":
+        return not deepseek_client.deepseek_available()
+    if rail == "openai":
+        return not openai_client.openai_available()
     return not (os.getenv("ANTHROPIC_API_KEY") or "").strip()
 
 
@@ -132,7 +143,7 @@ def _brief_fallback_enabled() -> bool:
 # land in both places or the cron stays broken. Duplicated rather than imported
 # for the same reason `_USAGE_LIMIT_MARKERS` is: the cron service must never have
 # to import the whole agent module (tool registry + Anthropic client) to send a brief.
-_VALID_RAILS = ("anthropic", "openai")
+_VALID_RAILS = ("anthropic", "openai", "deepseek")  # 074 — DeepSeek as primary
 
 
 def _brief_rail() -> str:
@@ -595,6 +606,19 @@ async def generate_briefing(snapshot: dict, market_context: dict | None = None) 
                 )
                 text = (oa.get("text") or "").strip()
                 model = openai_client.model()
+            elif rail == "deepseek":
+                # 074 — DeepSeek AS the chosen primary (not a fallback). Same
+                # tool-less shape. A LIGHT attribution note is appended below;
+                # the heavier "the usual model was unavailable" fallback
+                # disclosure would be FALSE here — this is a deliberate choice.
+                ds = await deepseek_client.complete(
+                    system, [{"role": "user", "content": user_msg}],
+                    max_tokens=llm_limits.brief_max_output_tokens("deepseek"),
+                )
+                text = (ds.get("text") or "").strip()
+                model = deepseek_client.deepseek_model()
+                if text:
+                    text = f"{text}\n\n_Written by {model}._"
             else:
                 resp = await _get_client().messages.create(
                     model=_model(),
@@ -610,8 +634,12 @@ async def generate_briefing(snapshot: dict, market_context: dict | None = None) 
             # 070 — the primary is usage-limited: re-issue the SAME prompt to
             # DeepSeek rather than skipping the brief entirely. Any other error
             # (auth, bad request) still fails loudly, as before.
+            # 074 — when DeepSeek IS the primary, there is nothing to fall back
+            # to (it's the last resort); a failure raises directly rather than
+            # pointlessly re-issuing the same doomed call to the same provider.
             if not (
-                _brief_fallback_enabled()
+                rail != "deepseek"
+                and _brief_fallback_enabled()
                 and deepseek_client.deepseek_available()
                 and _is_usage_limit_error(e)
             ):
