@@ -122,8 +122,11 @@ Chat turns are processed by an LLM that receives the turn's context — which fo
 >
 > - **068 confirmed Claude-via-Vertex is geo-ineligible** for this HK-billed account — the non-PRC alternative this section pointed at as the fix is **not available**.
 > - **The Anthropic-direct credit balance is exhausted with no near-term resolution.**
+> - **OpenAI (073) is a valid key with no credits** (`429 insufficient_quota`) — the US/EU primary intended to end the PRC dependency cannot yet carry traffic.
 >
 > So with `LLM_FALLBACK_ENABLED=1`, DeepSeek becomes the **de facto primary processor for every chat turn and every daily brief**, not an occasional one. The residual risk below is therefore **continuous, not incidental**. Treat the register as describing a routine data flow.
+>
+> **Update (2026-07-21, proposal 074):** DeepSeek is now **explicitly selectable as the primary** (`LLM_RAIL=deepseek`), and that is the intended live configuration while both frontier rails are unfunded — so this is no longer "de facto via fallback" but the **configured** primary. The disclosure obligation below is therefore a **precondition** of running `LLM_RAIL=deepseek`, not a follow-up. The intended exit is `LLM_RAIL=openai` once OpenAI is funded (easier billing than Anthropic).
 
 **Mitigations (still in force):**
 
@@ -141,7 +144,7 @@ Every third party that receives user data, what it gets, and how to stop it. Kee
 | Sub-processor | Purpose | User data it receives | Jurisdiction | Gate / kill switch | Status |
 | --- | --- | --- | --- | --- | --- |
 | **Anthropic** | Primary LLM — chat turns + daily brief narrative | Holdings, position sizes, NAV, P&L, chat text, uploaded images. **No** `account_id`. | US | `ANTHROPIC_API_KEY` | Live (credits exhausted) |
-| **DeepSeek** (`deepseek-chat`) | Fallback LLM — chat + brief when the primary is usage-limited | Holdings, position sizes, NAV, P&L, chat text. **No** `account_id`, **no images**. | **PRC** ⚠️ | `LLM_FALLBACK_ENABLED=0`; `BRIEFING_FALLBACK_ENABLED=0` for the brief only | **LIVE and continuous since 2026-07-20** — with Anthropic credits exhausted this is the *de facto* primary for every chat turn, not an occasional fallback. See the material-change note above. Intended to revert to genuine fallback status once 073 puts OpenAI on the primary rail. |
+| **DeepSeek** (`deepseek-chat`) | Fallback LLM — chat + brief when the primary is usage-limited | Holdings, position sizes, NAV, P&L, chat text. **No** `account_id`, **no images**. | **PRC** ⚠️ | `LLM_RAIL=anthropic`/`openai` (074) to stop selecting it as primary; `LLM_FALLBACK_ENABLED=0` to disarm it as a fallback; `BRIEFING_FALLBACK_ENABLED=0` for the brief only | **LIVE, continuous, and CONFIGURED primary as of 2026-07-21 (074).** With Anthropic exhausted and OpenAI unfunded, `LLM_RAIL=deepseek` makes this the explicit primary for every chat turn and brief. See the material-change note above. Reverts to genuine fallback the moment a funded frontier rail is selected. |
 | **OpenAI** | Intended US/EU primary, to end the continuous DeepSeek dependency | Same as Anthropic (incl. images if vision on) | US | `LLM_RAIL=anthropic`; `OPENAI_API_KEY` unset | **Code APPLIED (071); NOT yet carrying traffic.** Receives nothing until `LLM_RAIL=openai` **and** a real `OPENAI_API_KEY` are set (proposal 073). ⚠️ Flip this row to *Live* at 073 cutover step 7 — and the connect-flow privacy copy must name it **before** that, not after. |
 | **Interactive Brokers** | Read-only holdings/NAV via Flex Web Service | The user's own account data (source of truth) | US | Per-user Flex token; user can disconnect | Live |
 | **Twilio** | WhatsApp delivery of the daily brief | Phone number + brief text (holdings figures) | US | Per-user opt-out (STOP) | Live |
