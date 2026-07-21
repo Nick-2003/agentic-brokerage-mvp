@@ -39,6 +39,7 @@ from typing import Any
 from anthropic import AsyncAnthropic
 
 import deepseek_client  # 070 — DeepSeek fallback when the primary is usage-limited
+import llm_limits  # 073 — shared output caps (stdlib-only; keeps the cron light)
 import openai_client  # 071 — OpenAI as a selectable primary for the brief too
 import freshness  # 061 — shared freshness-note logic (was inline here, 052)
 import ibkr_flex
@@ -589,14 +590,15 @@ async def generate_briefing(snapshot: dict, market_context: dict | None = None) 
                 # 071 — tool-less single completion, exactly like the Anthropic
                 # path; no widget JSON, no images, so nothing else changes.
                 oa = await openai_client.complete(
-                    system, [{"role": "user", "content": user_msg}], max_tokens=1024
+                    system, [{"role": "user", "content": user_msg}],
+                    max_tokens=llm_limits.brief_max_output_tokens("openai"),  # 073
                 )
                 text = (oa.get("text") or "").strip()
                 model = openai_client.model()
             else:
                 resp = await _get_client().messages.create(
                     model=_model(),
-                    max_tokens=1024,
+                    max_tokens=llm_limits.brief_max_output_tokens("anthropic"),  # 073
                     system=system,
                     messages=[{"role": "user", "content": user_msg}],
                 )
@@ -617,7 +619,8 @@ async def generate_briefing(snapshot: dict, market_context: dict | None = None) 
             log.warning("briefing failing over from %s to DeepSeek: %s", rail, e)
             try:
                 ds = await deepseek_client.complete(
-                    system, [{"role": "user", "content": user_msg}], max_tokens=1024
+                    system, [{"role": "user", "content": user_msg}],
+                    max_tokens=llm_limits.brief_max_output_tokens("deepseek"),  # 073
                 )
             except Exception as de:  # noqa: BLE001 — fallback is last resort
                 raise BriefingError(

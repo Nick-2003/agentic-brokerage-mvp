@@ -36,6 +36,7 @@ from typing import Any
 
 import httpx
 
+import llm_limits
 import openai_compat
 
 log = logging.getLogger(__name__)
@@ -57,6 +58,12 @@ def openai_model() -> str:
 
 # Uniform name so `agent.py` can ask any rail module for its model id.
 model = openai_model
+
+
+def provider_name() -> str:
+    """073 — the rail's env-var prefix, so the parameterised loop can resolve this
+    provider's token cap without an identity check against the module object."""
+    return "openai"
 
 
 def _timeout() -> float:
@@ -111,7 +118,7 @@ async def complete(
     system: str,
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
-    max_tokens: int = 4096,
+    max_tokens: int | None = None,
 ) -> dict[str, Any]:
     """One OpenAI turn. Returns the agent loop's uniform response shape.
 
@@ -119,7 +126,12 @@ async def complete(
     are OpenAI-shaped. Raises `OpenAIError` on any transport/HTTP/parse failure.
     Signature is IDENTICAL to `deepseek_client.complete` so the loop can hold
     either module without branching.
+
+    073: `max_tokens=None` resolves the cap from env via `llm_limits` (default
+    4096, unchanged). An explicit value still wins, so no caller is forced to change.
     """
+    if max_tokens is None:
+        max_tokens = llm_limits.max_output_tokens(provider_name())
     if not openai_available():
         return _mock_complete(messages)
 

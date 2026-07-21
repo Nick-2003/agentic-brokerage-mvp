@@ -60,7 +60,10 @@ import security  # noqa: E402  (W6.6 — rate limit + security headers)
 import token_budget  # noqa: E402  (P5 / 034 — per-user daily LLM token budget)
 import waitlist_api  # noqa: E402  (W4 — IBKR connect + waitlist router)
 import webhooks  # noqa: E402  (W6 — Twilio inbound STOP/START webhook)
-from agent import MODEL, _classify_agent_error, run_chat  # noqa: E402  (069: run_chat wraps run_agent + DeepSeek failover)
+from agent import MODEL, _classify_agent_error, _rail, run_chat  # noqa: E402  (069: run_chat wraps run_agent + DeepSeek failover; 073: _rail for /healthz)
+import deepseek_client  # noqa: E402  — 073: /healthz key-presence only
+import llm_limits  # noqa: E402  — 073: report the active cap
+import openai_client  # noqa: E402  — 073: /healthz rail + key-presence
 
 log = logging.getLogger(__name__)
 from auth import AuthCtx, auth_configured, require_auth, resolve_auth  # noqa: E402
@@ -110,9 +113,22 @@ app.include_router(email_api.router)
 @app.get("/healthz")
 async def healthz() -> dict[str, Any]:
     """Liveness probe — returns config diagnostics so we can spot mis-configured deploys."""
+    # 073 — rail diagnostics. Pre-073 this reported `MODEL` (the hardcoded
+    # Anthropic constant) regardless of LLM_RAIL, which would be actively
+    # misleading during a cutover: /healthz would claim Claude while OpenAI
+    # served every turn. `model` now names the ACTIVE primary.
+    # SECURITY: booleans only — never a key, a length, or a prefix beyond the
+    # existing shape test. This endpoint is unauthenticated.
+    rail = _rail()
+    active_model = openai_client.model() if rail == "openai" else MODEL
     return {
         "ok": True,
-        "model": MODEL,
+        "rail": rail,
+        "model": active_model,
+        "max_output_tokens": llm_limits.max_output_tokens(rail),
+        "openai_key_present": openai_client.openai_available(),
+        "deepseek_key_present": deepseek_client.deepseek_available(),
+        "fallback_enabled": deepseek_client.fallback_enabled(),
         "tools_registered": list(TOOL_REGISTRY.keys()),
         "alpaca_configured": bool(
             os.getenv("ALPACA_API_KEY", "").startswith("PK")
@@ -332,8 +348,15 @@ async def chat(
                     elif ev["event"] == "message":
                         text_acc.append(ev["data"].get("text", ""))
                     elif ev["event"] == "done":
-                        turn_input_tokens = int(ev["data"].get("input_tokens") or 0)
-                        turn_output_tokens = int(ev["data"].get("output_tokens") or 0)
+                        # 073 — ACCUMULATE, don't assign. A turn that fails over
+                        # (069/071) emits TWO `done` events: the primary's aborted
+                        # attempt and the fallback's. Assigning discarded the
+                        # primary's spend, so a user repeatedly tripping a usage
+                        # limit got free retries against the daily cap. Post-
+                        # cutover, failover is the common path, so silently
+                        # under-counting defeats the cap's purpose.
+                        turn_input_tokens += int(ev["data"].get("input_tokens") or 0)
+                        turn_output_tokens += int(ev["data"].get("output_tokens") or 0)
                     yield {
                         "event": ev["event"],
                         "data": json.dumps(ev["data"], ensure_ascii=False),

@@ -63,26 +63,54 @@ def check(name, cond, detail=""):
     results.append(bool(cond))
 
 
-# --- temp-apply -------------------------------------------------------------
+# --- temp-apply / live mode --------------------------------------------------
+# ⚠️ FIXED BY 073 — this used to be DESTRUCTIVE.
+#
+# Originally the test copied the staged proposal over the live tree and, in its
+# `finally`, deleted every NET_NEW file unconditionally. That was safe only while
+# 071 was unapplied. Once 071 was applied and committed, `openai_client.py` and
+# `openai_compat.py` became LIVE production modules that `agent.py` imports at
+# startup — and the staged dir was removed (only `applied/README-071-openai-rail.md`
+# remains). So `apply_proposal` raised FileNotFoundError, `finally` still ran, and
+# **merely running this test deleted two modules the backend needs to boot.**
+#
+# Two rules now, both worth copying into any future proposal test:
+#   1. If the staged dir is gone, the proposal IS the live tree → run in LIVE
+#      MODE: assert against what's installed, apply and restore nothing.
+#      (Same posture `test_070_briefing_fallback` documents as "post-apply".)
+#   2. Never delete a file this run did not create.
 OVERWRITE = ["agent.py", "briefing.py", "deepseek_client.py"]
 NET_NEW = ["openai_client.py", "openai_compat.py"]
 
+LIVE_MODE = not os.path.isdir(PROP)
+_created: list[str] = []
+
 
 def apply_proposal(backup_dir: str) -> None:
+    if LIVE_MODE:
+        print("  (staged dir absent — 071 is applied; asserting against the LIVE tree)")
+        return
     for f in OVERWRITE:
         shutil.copy2(os.path.join(BACKEND, f), os.path.join(backup_dir, f))
         shutil.copy2(os.path.join(PROP, f), os.path.join(BACKEND, f))
     for f in NET_NEW:
-        shutil.copy2(os.path.join(PROP, f), os.path.join(BACKEND, f))
+        dst = os.path.join(BACKEND, f)
+        if os.path.isfile(dst):
+            shutil.copy2(dst, os.path.join(backup_dir, f))
+            OVERWRITE.append(f)
+        else:
+            _created.append(dst)
+        shutil.copy2(os.path.join(PROP, f), dst)
 
 
 def restore(backup_dir: str) -> None:
+    if LIVE_MODE:
+        return
     for f in OVERWRITE:
         b = os.path.join(backup_dir, f)
         if os.path.isfile(b):
             shutil.copy2(b, os.path.join(BACKEND, f))
-    for f in NET_NEW:
-        p = os.path.join(BACKEND, f)
+    for p in _created:  # ONLY what this run created
         if os.path.isfile(p):
             os.remove(p)
 
