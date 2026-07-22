@@ -4,7 +4,7 @@ A prompt-first mobile brokerage where every action — research, charting, tradi
 
 > ## ⚠️ ACTIVE PIVOT (2026-06-05) — IBKR + WhatsApp/email waitlist briefing
 >
-> The chat MVP above is **PAUSED**. The **live, deployed** product is a pre-launch **waitlist briefing**: land → join waitlist → magic-link sign-in → **connect Interactive Brokers** via a one-time Flex token → a daily **WhatsApp + email** narrative briefing of what moved in your portfolio (Claude writes it; Twilio + Resend deliver it; a web permalink holds the full text).
+> The chat MVP above is **PAUSED**. The **live, deployed** product is a pre-launch **waitlist briefing**: land → join waitlist → magic-link sign-in → **connect Interactive Brokers** via a one-time Flex token → a daily **WhatsApp + email** narrative briefing of what moved in your portfolio (the LLM rail writes it — Anthropic/OpenAI/DeepSeek per `LLM_RAIL`, currently DeepSeek; Twilio + Resend deliver it; a web permalink holds the full text).
 >
 > **Live URLs:** frontend **<https://agentic-brokerage-mvp-front.vercel.app>** (`/connect`) · backend **<https://agentic-brokerage-mvp-production.up.railway.app>** (`/healthz`).
 >
@@ -31,7 +31,7 @@ A prompt-first mobile brokerage where every action — research, charting, tradi
 
 | Service | Why | How to get the key |
 | --- | --- | --- |
-| Anthropic | Claude API (chat + the brief narrative) | console.anthropic.com → API Keys → new key |
+| **LLM rail** (pick ≥1) | Powers chat + the brief narrative. Selectable via `LLM_RAIL`: **Anthropic** (console.anthropic.com → API Keys), **OpenAI** (platform.openai.com → API keys), or **DeepSeek** (platform.deepseek.com → API keys). A usage-limit on the Anthropic rail auto-fails-over to DeepSeek. **Live: running on DeepSeek** (Anthropic + OpenAI credits exhausted). | any one provider's key + set `LLM_RAIL` accordingly |
 | Supabase | Auth + Postgres + RLS + magic links | supabase.com → new project → free tier → URL + anon key + **service key** |
 | **Interactive Brokers** | **Read-only holdings/NAV (Flex Web Service)** — the live product + the main-page portfolio | IBKR Account Mgmt → set up an *Activity* Flex Query + a Flex Web Service token (see `backend/.env.example` "Holdings") |
 | **Twilio** | **WhatsApp delivery** of the daily brief (system-side) | twilio.com → Messaging → WhatsApp (Sandbox to start; Business sender = W6.4a, see `.self_management/WHATSAPP_BUSINESS_SENDER.md`) |
@@ -45,7 +45,8 @@ A prompt-first mobile brokerage where every action — research, charting, tradi
 
 **Copy `backend/.env.example` → `backend/.env` and fill it in — it's the canonical, commented list.** Everything is **mock-first**, so the app boots with no keys (deterministic demo). The variable groups:
 
-- **Core:** `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` (default `claude-opus-4-5`), `SUPABASE_URL` / `SUPABASE_SERVICE_KEY`, `REQUIRE_AUTH`.
+- **Core — LLM rail:** `LLM_RAIL` (`anthropic` default | `openai` | `deepseek`) selects the primary; supply that rail's key — `ANTHROPIC_API_KEY` + `ANTHROPIC_MODEL` (default `claude-opus-4-5`), `OPENAI_API_KEY` + `OPENAI_MODEL`, or `DEEPSEEK_API_KEY`. `LLM_FALLBACK_ENABLED=1` adds automatic DeepSeek fallback on an Anthropic usage-limit. Every rail is **mock-first** (`USE_MOCK_DEEPSEEK`/`USE_MOCK_OPENAI`), so the app still boots keyless. See the rail block in `backend/.env.example`.
+- **Core — rest:** `SUPABASE_URL` / `SUPABASE_SERVICE_KEY`, `REQUIRE_AUTH`.
 - **Holdings / portfolio (live):** `IBKR_FLEX_TOKEN`, `IBKR_FLEX_QUERY_ID`, `USE_MOCK_IBKR`; `PORTFOLIO_SOURCE` (default `ibkr`, per-user), `TRADING_ENABLED` (default `0`).
 - **Brief delivery (live):** `TWILIO_ACCOUNT_SID`/`_AUTH_TOKEN`/`_WHATSAPP_FROM` + `USE_MOCK_WHATSAPP`; `RESEND_API_KEY` + `EMAIL_FROM`/`EMAIL_FROM_NAME` + `EMAIL_UNSUBSCRIBE_SECRET` + `USE_MOCK_EMAIL`; `PUBLIC_BASE_URL`/`PUBLIC_BACKEND_URL` (permalink + unsubscribe).
 - **Chat (paused):** `ALPACA_API_KEY`/`_SECRET`, `FMP_API_KEY`, `MEM0_API_KEY`, `LANGFUSE_*`, the `USE_MOCK_TA` TradingView block (see below).
@@ -86,7 +87,7 @@ Onboarding is the `/connect` page (waitlist → magic-link sign-in → connect I
 USE_MOCK_IBKR=1 USE_MOCK_BRIEFING=1 USE_MOCK_WHATSAPP=1 USE_MOCK_EMAIL=1 \
   backend/.venv/bin/python scripts/run_briefings.py --dry-run
 
-# REAL run (IBKR fetch → Claude → WhatsApp/email send → log), capped + idempotent:
+# REAL run (IBKR fetch → LLM narrative → WhatsApp/email send → log), capped + idempotent:
 backend/.venv/bin/python scripts/run_briefings.py --max-users 1
 #   --force bypasses the W6.5 12h resend guard (e.g. to re-test the same day)
 ```

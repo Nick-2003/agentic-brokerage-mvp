@@ -41,11 +41,13 @@ Keep the SECRET-named ones (`ALPACA_API_SECRET`, `SUPABASE_SERVICE_KEY`) **out**
 
 ---
 
-## 1 · Anthropic API key
+## 1 · LLM rail API key (pick one)
 
-The brain. Without this, no Claude calls.
+The brain. The agent runs on **one** LLM rail, chosen by `LLM_RAIL` (default `anthropic`): **Anthropic** (`ANTHROPIC_API_KEY`), **OpenAI** (`OPENAI_API_KEY`), or **DeepSeek** (`DEEPSEEK_API_KEY`). An Anthropic usage-limit auto-fails-over to DeepSeek when `LLM_FALLBACK_ENABLED=1`. Every rail is mock-first, so the app also boots keyless in demo mode. **Live today the product runs on DeepSeek** (Anthropic + OpenAI credits exhausted) — so if you only get one key, get **DeepSeek** (`platform.deepseek.com` → API keys) and set `LLM_RAIL=deepseek`.
 
-**Steps:**
+The Anthropic steps below still apply if you choose the Anthropic rail; the OpenAI/DeepSeek keys are created the same way at each provider's console (see `backend/.env.example`).
+
+**Steps (Anthropic rail):**
 
 1. Go to **<https://console.anthropic.com>**
 2. Sign in (or sign up — they'll need a phone number for verification)
@@ -249,7 +251,7 @@ The build session will:
 2. Write them to `~/Code/agentic-brokerage-mvp/backend/.env`
 3. Verify `.env` is gitignored
 4. Initialise the backend with real credentials
-5. Run a smoke test (one real Claude call + one real Alpaca portfolio fetch)
+5. Run a smoke test (one real LLM call + one real Alpaca portfolio fetch)
 
 ⚠ **Don't paste your keys into a public channel.** Send them inside Claude Code (same session) — that's the safest path.
 

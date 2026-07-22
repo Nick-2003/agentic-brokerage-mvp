@@ -159,8 +159,12 @@ Twilio must call **stable** URLs and the signature must match the **exact** publ
 
 | Variable | B | C | V | Prod value / note |
 | --- | :-: | :-: | :-: | --- |
-| `ANTHROPIC_API_KEY` | ✅ | ✅ | | real key (briefing + chat) |
-| `ANTHROPIC_MODEL` | ✅ | ✅ | | `claude-opus-4-5` (or set `BRIEFING_MODEL` cheaper) |
+| `LLM_RAIL` | ✅ | ✅ | | active primary: `anthropic` \| `openai` \| `deepseek`. **Set on BOTH B and C** or the brief diverges from chat (070). **Live: `deepseek`.** |
+| `ANTHROPIC_API_KEY` | ⚠️ | ⚠️ | | needed only when `LLM_RAIL=anthropic` (or as the fallback source with `LLM_FALLBACK_ENABLED=1`). Currently exhausted. |
+| `ANTHROPIC_MODEL` | ⚠️ | ⚠️ | | `claude-opus-4-5` when on the Anthropic rail (or set `BRIEFING_MODEL` cheaper) |
+| `OPENAI_API_KEY` / `OPENAI_MODEL` | ⚠️ | ⚠️ | | needed only when `LLM_RAIL=openai` (071/073) |
+| `DEEPSEEK_API_KEY` | ✅ | ✅ | | the live rail; also the fallback target. `USE_MOCK_DEEPSEEK=0`. |
+| `LLM_FALLBACK_ENABLED` | ✅ | ✅ | | `1` = auto-fail-over to DeepSeek on an Anthropic usage-limit (069/070). Irrelevant once `LLM_RAIL=deepseek`. |
 | `SUPABASE_URL` | ✅ | ✅ | | project URL |
 | `SUPABASE_ANON_KEY` | ✅ | ✅ | | anon key |
 | `SUPABASE_SERVICE_KEY` | ✅ | ✅ | | **service key** — admin read for connect-storage + cron; backend-only, never on V |
@@ -168,7 +172,7 @@ Twilio must call **stable** URLs and the signature must match the **exact** publ
 | `FLEX_TOKEN_ENC_KEY` | ✅ | ✅ | | Fernet key — **must match the key used to write existing rows** |
 | `REQUIRE_AUTH` | `1` | | | reject unauthenticated `/api/chat` |
 | `USE_MOCK_IBKR` | `0` | `0` | | real Flex (per-user tokens from the DB) |
-| `USE_MOCK_BRIEFING` | `0` | `0` | | real Claude narrative |
+| `USE_MOCK_BRIEFING` | `0` | `0` | | real LLM-written narrative (on the active `LLM_RAIL`) |
 | `USE_MOCK_WHATSAPP` | `0` | `0` | | real Twilio send |
 | `USE_MOCK_TA` | `1` | | | **stays 1** — no TradingView Desktop on Railway |
 | `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` | ✅ | ✅ | | real creds |

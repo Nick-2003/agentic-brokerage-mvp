@@ -23,10 +23,10 @@ The validated experience lives at `~/Downloads/agentic_brokerage_demo.html` (moc
 ```
 Frontend (Next.js on Vercel)
   ↕ HTTPS + SSE
-Backend (Python FastAPI + Anthropic SDK [direct] on Railway)
+Backend (Python FastAPI on Railway; LLM rail = Anthropic | OpenAI | DeepSeek via LLM_RAIL)
   ↕ tool calls
   IBKR Flex (read-only holdings) · Alpaca Paper API · yfinance · FMP research ·
-  Anthropic web search · TradingView MCP · Supabase Postgres
+  web-search news · TradingView MCP · Supabase Postgres
 ```
 
 **Backend orchestrates the agent loop and exposes one SSE chat endpoint.** Frontend is a thin renderer that streams thinking breadcrumbs and widget JSON from the backend. No business logic in the frontend.
@@ -73,8 +73,8 @@ These are non-negotiable. They're what distinguishes us from a chat-with-PDF wra
 
 | Layer | Choice | Why |
 | --- | --- | --- |
-| LLM | Claude Opus 4.x — backend default **`claude-opus-4-5`** (`ANTHROPIC_MODEL`; originally specced 4.7) | Best at structured, cited finance synthesis |
-| Agent runtime | **Anthropic SDK directly** (Python) — *not* `claude-agent-sdk` (rejected) | Simpler SSE streaming control; MCP via backend-side stdio clients |
+| LLM | **Multi-rail, selectable via `LLM_RAIL`** — `anthropic` (default, `claude-opus-4-5` via `ANTHROPIC_MODEL`) · `openai` (`OPENAI_MODEL`, 071/073) · `deepseek` (`deepseek-chat`, 074). On an Anthropic **usage-limit** error the turn auto-fails-over to **DeepSeek** (069/070). See `backend/.env.example` (the rail block) + `backend/agent.py` `_rail()`/`run_chat`. **⚠️ Live state (2026-07): Anthropic + OpenAI credits are exhausted, so the app runs on DeepSeek** — via the fallback today; `LLM_RAIL=deepseek` (074) makes that the explicit primary. | Best-available structured, cited finance synthesis; keeps the product live when a provider's billing lapses |
+| Agent runtime | **Anthropic SDK directly** for the Anthropic rail; **raw `httpx` OpenAI-format loop** (`run_agent_openai_compat`) for the OpenAI + DeepSeek rails — *not* `claude-agent-sdk` (rejected). MCP via backend-side stdio clients | Simpler SSE streaming control; one shared tool/trust loop across every rail |
 | Backend | FastAPI + uvicorn | SSE-first, fast cold start |
 | Frontend | Next.js 15 on Vercel | Free hosting, magic link auth, SSE-friendly |
 | Auth + DB | Supabase | Magic link + Postgres + RLS in one |
@@ -85,7 +85,7 @@ These are non-negotiable. They're what distinguishes us from a chat-with-PDF wra
 | Email delivery | **Resend** (`backend/email_delivery.py`, 038) | System-side email of the same brief over `httpx` (no new dep). Per-user opt-in + one-click unsubscribe. *(Twilio funding does not subsidise SendGrid → Resend's free tier chosen)* |
 | Token-at-rest | **Fernet** (`backend/token_crypto.py`, W4, via existing `cryptography`) | App-level encryption of each user's IBKR Flex token before storage |
 | Market data | yfinance | 15-min delayed, free, no rate limits in practice |
-| News | Anthropic web search | Already in Claude API, no separate provider |
+| News | yfinance headlines + Alpha Vantage (`backend/news_context.py`, 045/060); Anthropic web-search only on the Anthropic rail | Real, cited headlines independent of the LLM rail — so news survives a provider cutover |
 | Charts | TradingView MCP (`tradesdontlie/tradingview-mcp`) | The talk-to-charts wedge. Real chart in local dev; mock in production until containerised TV Desktop (v2). **Live charts need BOTH `USE_MOCK_TA=0` AND TV Desktop open on the debug port** (`open -a "TradingView" --args --remote-debugging-port=9222`); if TV Desktop is closed the card silently degrades to mock data, labelled `(mocked — live data unavailable)` since proposal 029. See README "Talk-to-your-charts". |
 | Indicators math | ta-lib (Python) | For portfolio risk / correlation, not chart rendering |
 | Memory | Mem0 hosted platform (`mem0ai>=2.0.0,<3.0.0`, `AsyncMemoryClient`) | Per-user fact recall across conversations (P4.3, proposals 025+026). Optional `memory` dep group; no-op when `MEM0_API_KEY` unset. Scoped by the authenticated `user_id` — `search(filters={"user_id":…}, top_k=…)`, `add(messages, user_id=…)`. |
