@@ -1,7 +1,7 @@
 'use client';
 
 import type { Source, TrackerData } from '@/lib/widgets';
-import { SafeHtml, Sources, WidgetCard } from './Sources';
+import { AccountBadge, SafeHtml, Sources, WidgetCard } from './Sources';
 
 export function Tracker({
   data,
@@ -19,7 +19,7 @@ export function Tracker({
       className="block w-full text-left active:scale-[0.99] transition-transform"
       type="button"
     >
-      <WidgetCard eyebrow={`${data.ticker} · Trade-setup tracker`} className="cursor-pointer">
+      <WidgetCard eyebrow={`${data.ticker} · Trade-setup tracker`} headerRight={<AccountBadge label={data.account_label} />} className="cursor-pointer">
         <div className="flex items-center justify-between mb-2.5">
           <span className="text-[10px] font-bold tracking-[0.12em] uppercase text-green flex items-center gap-1.5">
             <span className="live-dot inline-block" />

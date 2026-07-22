@@ -1,5 +1,5 @@
 import type { PortfolioRiskData, Source } from '@/lib/widgets';
-import { SafeHtml, Sources, WidgetCard } from './Sources';
+import { AccountBadge, SafeHtml, Sources, WidgetCard } from './Sources';
 
 export function PortfolioRisk({
   data,
@@ -9,7 +9,7 @@ export function PortfolioRisk({
   sources: Source[];
 }) {
   return (
-    <WidgetCard eyebrow="Portfolio risk audit">
+    <WidgetCard eyebrow="Portfolio risk audit" headerRight={<AccountBadge label={data.account_label} />}>
       {/* Big risk score */}
       <div className="flex items-center gap-3.5 bg-red-bg/40 border border-red/20 rounded-xl px-4 py-3 mb-3.5">
         <div className="text-[28px] font-semibold text-red -tracking-tight leading-none">

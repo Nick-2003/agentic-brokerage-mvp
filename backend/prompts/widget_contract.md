@@ -22,7 +22,8 @@ Every widget has:
       "S&P futures point +0.4% higher, the **10Y yield** holds at 4.32%, and **DXY** is firm into the Fed minutes this afternoon.",
       "Watch **NVDA** for follow-through above $945 (next resistance $960) and **AMD** ahead of next week's earnings — flagged unusual call volume."
     ],
-    "as_of_note": "Figures are end-of-day — the close of the US session on Wed 01 Jul 2026 (IBKR statement data, not live/intraday). Generated 02 Jul 20:01 HKT / 02 Jul 12:01 GMT."
+    "as_of_note": "Figures are end-of-day — the close of the US session on Wed 01 Jul 2026 (IBKR statement data, not live/intraday). Generated 02 Jul 20:01 HKT / 02 Jul 12:01 GMT.",
+    "account_label": "Real · IBKR"
   },
   "sources": [
     {"name": "Your portfolio"},
@@ -33,6 +34,8 @@ Every widget has:
 ```
 
 `as_of_note` (optional) is a data-freshness line rendered as a footnote under the brief — it tells the reader *what day* the figures are from and *when* they were generated. **Copy it VERBATIM from `get_portfolio`'s `freshness_note` field** — never write or reformat the timestamp yourself (you can't know the real generation time). Omit the field if `get_portfolio` returned no `freshness_note` (e.g. no `as_of`).
+
+`account_label` (optional, 076) — which account these figures are from. **Copy it VERBATIM from the tool result's `account_label`** (`get_portfolio` → `"Real · IBKR"`). Renders as a chip; it's how the reader tells the real book from paper. Omit if the tool result had none.
 
 ## research_card
 
@@ -119,7 +122,8 @@ Every widget has:
     "portfolio_pct": 9.5,
     "within_risk_rule": true,
     "bracket_source": "from_prompt",
-    "notes_html": "Sized within your 2% per-trade rule. OCO bracket arms TP and SL together."
+    "notes_html": "Sized within your 2% per-trade rule. OCO bracket arms TP and SL together.",
+    "account_label": "Paper · Alpaca"
   },
   "sources": [
     {"name": "Your 2% rule"},
@@ -131,6 +135,7 @@ Every widget has:
 
 - `side`: `buy` or `sell`
 - `bracket_source`: `from_prompt` (user specified TP/SL in their message) or `from_research` (we pulled from the research card)
+- `account_label` (optional, 076): orders/positions are **Alpaca paper** — copy `"Paper · Alpaca"` verbatim from the position tool result so the card is never mistaken for the real IBKR book.
 
 ## live_trade
 
@@ -152,7 +157,8 @@ Every widget has:
     "filled_at": "2026-05-19T22:32:00Z",
     "news_since_fill": [
       {"headline": "Goldman raises NVDA price target to $1,200, citing data-center share gains", "source": "Bloomberg", "ts": "2026-05-20T11:14:00Z"}
-    ]
+    ],
+    "account_label": "Paper · Alpaca"
   },
   "sources": [
     {"name": "Alpaca paper fill"},
@@ -161,6 +167,8 @@ Every widget has:
   ]
 }
 ```
+
+`account_label` (optional, 076): copy `"Paper · Alpaca"` verbatim from `get_open_position` / `list_open_positions` — a `live_trade` is always a paper position, never the real IBKR book.
 
 - `news_since_fill` is **optional**. Include only if `get_company_news(since=filled_at)` returned at least one item. Cap at 3. Order by `ts` descending (newest first). Drop the `{"name":"News since fill"}` source entry when the field is omitted.
 - `order_id` and `filled_at` are **optional** (Proposal 010). They are order-level facts: include them when the card is emitted right after a fill (the `place_paper_order` → `get_open_position` flow, where `place_paper_order` returned the order id/fill time). They are legitimately **absent when monitoring an existing position** — `get_open_position` against real Alpaca returns a *position*, not its originating order, so it carries no `order_id`/`filled_at`. Omit them rather than invent values; the card renders without them.
@@ -219,7 +227,8 @@ Every widget has:
       "unrealized_pnl_pct": 0.23,
       "tp": 1100,
       "sl": 880
-    }
+    },
+    "account_label": "Paper · Alpaca"
   },
   "sources": [
     {"name": "Alpaca paper fill"},
@@ -227,6 +236,8 @@ Every widget has:
   ]
 }
 ```
+
+`account_label` (optional, 076): the `trade` half is an Alpaca paper position — copy `"Paper · Alpaca"` verbatim from the position tool result.
 
 ## portfolio_risk
 
@@ -257,7 +268,8 @@ Every widget has:
     "suggestions": [
       "<strong>De-correlate.</strong> Trim NVDA or MSFT by ~5% NAV; rotate into a non-correlated factor.",
       "<strong>Add a hedge.</strong> 5% notional in SH or 2% in SOXS caps drawdown."
-    ]
+    ],
+    "account_label": "Real · IBKR"
   },
   "sources": [
     {"name": "Your holdings"},
@@ -269,6 +281,7 @@ Every widget has:
 
 - `severity` in `sector_exposure` items: `normal | warn | danger`
 - `severity` in `flags` items: `low | med | high`
+- `account_label` (optional, 076): a `portfolio_risk` analyses the REAL IBKR book — copy `"Real · IBKR"` verbatim from `get_portfolio`.
 
 ## Output rules
 

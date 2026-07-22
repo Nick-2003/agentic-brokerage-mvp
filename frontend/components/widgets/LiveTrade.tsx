@@ -1,5 +1,5 @@
 import type { LiveTradeData, Source } from '@/lib/widgets';
-import { Sources, WidgetCard } from './Sources';
+import { AccountBadge, Sources, WidgetCard } from './Sources';
 
 export function LiveTrade({ data, sources }: { data: LiveTradeData; sources: Source[] }) {
   const positive = data.unrealized_pnl >= 0;
@@ -8,7 +8,7 @@ export function LiveTrade({ data, sources }: { data: LiveTradeData; sources: Sou
   const news = data.news_since_fill ?? [];
 
   return (
-    <WidgetCard eyebrow="Live trade · armed">
+    <WidgetCard eyebrow="Live trade · armed" headerRight={<AccountBadge label={data.account_label} />}>
       <div className="flex items-baseline gap-2 flex-wrap mb-1">
         <span className={`text-[22px] font-semibold -tracking-tight ${sideClass}`}>{sideLabel}</span>
         <span className="text-[22px] font-semibold -tracking-tight">{data.shares} {data.ticker}</span>

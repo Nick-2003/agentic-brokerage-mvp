@@ -1,7 +1,7 @@
 'use client';
 
 import type { OrderTicketData, Source } from '@/lib/widgets';
-import { SafeHtml, Sources, WidgetCard } from './Sources';
+import { AccountBadge, SafeHtml, Sources, WidgetCard } from './Sources';
 
 type Props = {
   data: OrderTicketData;
@@ -15,7 +15,7 @@ export function OrderTicket({ data, sources, onConfirm, onEdit }: Props) {
   const sideLabel = data.side === 'sell' ? 'Sell' : 'Buy';
 
   return (
-    <WidgetCard eyebrow="Order · pending your review">
+    <WidgetCard eyebrow="Order · pending your review" headerRight={<AccountBadge label={data.account_label} />}>
       <div className="flex items-baseline gap-2 flex-wrap mb-1">
         <span className={`text-[22px] font-semibold -tracking-tight ${sideClass}`}>{sideLabel}</span>
         <span className="text-[22px] font-semibold -tracking-tight">{data.shares} {data.ticker}</span>

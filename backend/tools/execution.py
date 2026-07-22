@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from . import ToolDef, register
+from . import ToolDef, register, tag_account  # 076 — venue labelling
 from .market import MOCK_QUOTES
 
 DATA_DIR = Path(__file__).parent.parent / "data"
@@ -239,7 +239,7 @@ async def get_open_position(args: dict[str, Any], user_id: str) -> dict[str, Any
                 paper=True,
             )
             p = client.get_open_position(ticker)
-            return {
+            return tag_account({  # 076 — Alpaca positions are always PAPER
                 "ticker": ticker,
                 "shares": float(p.qty),
                 "side": "long" if float(p.qty) > 0 else "short",
@@ -248,7 +248,7 @@ async def get_open_position(args: dict[str, Any], user_id: str) -> dict[str, Any
                 "unrealized_pnl": float(p.unrealized_pl),
                 "unrealized_pnl_pct": float(p.unrealized_plpc) * 100,
                 "is_mock": False,
-            }
+            }, "paper_alpaca")
         except Exception as e:
             return {"error": "alpaca_position_fetch_failed", "message": str(e), "ticker": ticker}
 
@@ -264,7 +264,7 @@ async def get_open_position(args: dict[str, Any], user_id: str) -> dict[str, Any
     shares = latest["shares"]
     pnl = (current - fill) * shares * (1 if latest["side"] == "buy" else -1)
     pnl_pct = (current - fill) / fill * 100 * (1 if latest["side"] == "buy" else -1)
-    return {
+    return tag_account({  # 076 — paper_alpaca (mock order book)
         "ticker": ticker,
         "order_id": latest["order_id"],
         "side": "long" if latest["side"] == "buy" else "short",
@@ -277,7 +277,7 @@ async def get_open_position(args: dict[str, Any], user_id: str) -> dict[str, Any
         "sl_armed_at": latest.get("sl_price"),
         "filled_at": latest["filled_at"],
         "is_mock": True,
-    }
+    }, "paper_alpaca")
 
 
 async def list_open_positions(args: dict[str, Any], user_id: str) -> dict[str, Any]:
@@ -291,7 +291,7 @@ async def list_open_positions(args: dict[str, Any], user_id: str) -> dict[str, A
                 paper=True,
             )
             positions = client.get_all_positions()
-            return {
+            return tag_account({  # 076 — paper_alpaca
                 "positions": [
                     {
                         "ticker": p.symbol,
@@ -303,7 +303,7 @@ async def list_open_positions(args: dict[str, Any], user_id: str) -> dict[str, A
                     for p in positions
                 ],
                 "is_mock": False,
-            }
+            }, "paper_alpaca")
         except Exception as e:
             return {"error": "alpaca_list_failed", "message": str(e)}
 
@@ -321,7 +321,7 @@ async def list_open_positions(args: dict[str, Any], user_id: str) -> dict[str, A
             "current_price": current,
             "unrealized_pnl": round((current - o["fill_price"]) * o["shares"], 2),
         })
-    return {"positions": rows, "is_mock": True}
+    return tag_account({"positions": rows, "is_mock": True}, "paper_alpaca")  # 076
 
 
 # ---------------------------------------------------------------------------

@@ -28,7 +28,7 @@ from typing import Any
 
 import freshness  # 061 — shared "figures are end-of-day / generated at" note
 
-from . import ToolDef, register
+from . import ToolDef, account_label, register, tag_account  # 076 — venue labelling
 
 log = logging.getLogger(__name__)
 
@@ -48,6 +48,8 @@ MOCK_PORTFOLIO = {
     "currency": "$",
     "is_paper": True,
     "is_mock": True,
+    "account_kind": "mock",              # 076
+    "account_label": "Demo data",        # 076 — model copies this into the widget chip
     "positions": [
         {"ticker": "NVDA",  "shares": 18,  "avg_cost": 884.00, "market_value": 16965.00, "unrealized_pnl": 1053.00},
         {"ticker": "TSLA",  "shares": 65,  "avg_cost": 226.30, "market_value": 16152.50, "unrealized_pnl": 1443.00},
@@ -77,7 +79,7 @@ async def _fetch_alpaca_portfolio(user_id: str) -> dict[str, Any]:
     day_pnl = equity - last_equity
     day_pnl_pct = (day_pnl / last_equity * 100) if last_equity else 0.0
 
-    return {
+    return tag_account({  # 076 — paper_alpaca
         "total_equity": equity,
         "cash": float(account.cash),
         "buying_power": float(account.buying_power),
@@ -96,7 +98,7 @@ async def _fetch_alpaca_portfolio(user_id: str) -> dict[str, Any]:
             }
             for p in positions
         ],
-    }
+    }, "paper_alpaca")
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +198,8 @@ def _map_ibkr_snapshot(snap: dict) -> dict[str, Any]:
         "connected": True,              # 040: this user has an IBKR connection
         "is_paper": False,
         "is_mock": bool(snap.get("is_mock")),
+        "account_kind": "real_ibkr",    # 076
+        "account_label": account_label("real_ibkr"),  # 076 — "Real · IBKR"
         "positions": positions,
     }
 
@@ -220,6 +224,9 @@ def _nil_portfolio() -> dict[str, Any]:
         "connected": False,
         "is_paper": False,
         "is_mock": False,
+        # 076 — not connected: `none` kind, NO label (nothing to badge; the widget
+        # isn't emitted anyway — the model replies "connect a brokerage").
+        "account_kind": "none",
         "positions": [],
     }
 
@@ -293,7 +300,11 @@ def _sample_creds() -> tuple[str, str] | None:
 def _sample_mock() -> dict[str, Any]:
     """The curated static demo book, tagged as a sample — used when the sample is
     enabled but no SAMPLE_ALPACA_* creds are set (so guests still see SOMETHING)."""
-    return {**MOCK_PORTFOLIO, "is_sample": True, "source": "alpaca_sample", "read_only": True}
+    # 076 — the sample book is Alpaca paper, not the demo mock; override the kind.
+    return tag_account(
+        {**MOCK_PORTFOLIO, "is_sample": True, "source": "alpaca_sample", "read_only": True},
+        "sample",
+    )
 
 
 async def _fetch_sample_alpaca_portfolio(api_key: str, api_secret: str) -> dict[str, Any]:
@@ -328,6 +339,8 @@ async def _fetch_sample_alpaca_portfolio(api_key: str, api_secret: str) -> dict[
         "is_sample": True,          # 053 — clearly NOT the user's own money
         "source": "alpaca_sample",
         "read_only": True,
+        "account_kind": "sample",   # 076
+        "account_label": account_label("sample"),  # 076 — "Sample · Alpaca paper"
         "positions": [
             {
                 "ticker": p.symbol,
@@ -415,6 +428,8 @@ register(
             "additionalProperties": False,
         },
         callable=get_portfolio,
-        thought_template="Reading your paper portfolio",
+        # 076 — was "Reading your paper portfolio", which was wrong: the default
+        # source is the user's REAL read-only IBKR book, not paper. Rail-neutral now.
+        thought_template="Reading your portfolio",
     )
 )
