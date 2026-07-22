@@ -5,7 +5,7 @@
 This is the **single source of truth for the HTTP boundary** between:
 
 - **Frontend** — Next.js 15 PWA on Vercel (the mobile app). Owns `frontend/`.
-- **Backend** — **Python · FastAPI + uvicorn**, deployed on **Railway**. Owns `backend/`. Runs a Claude agent loop (Anthropic SDK directly) and streams Server-Sent Events. (The earlier Node-on-Vercel design in this doc was wrong and never built — Plan A / Python is LOCKED, see `CLAUDE.md`.)
+- **Backend** — **Python · FastAPI + uvicorn**, deployed on **Railway**. Owns `backend/`. Runs an agent loop on the LLM rail selected by `LLM_RAIL` (Anthropic SDK, or a raw-`httpx` OpenAI-format loop for OpenAI/DeepSeek; 069–074) and streams Server-Sent Events. (The earlier Node-on-Vercel design in this doc was wrong and never built — Plan A / Python is LOCKED, see `CLAUDE.md`.)
 
 **Rules:**
 
@@ -78,19 +78,27 @@ No auth, no body. Returns `200` with:
 ```json
 {
   "ok": true,
-  "model": "claude-opus-4-5",
+  "rail": "deepseek",
+  "model": "deepseek-chat",
+  "max_output_tokens": 4096,
+  "openai_key_present": false,
+  "deepseek_key_present": true,
+  "fallback_enabled": true,
   "tools_registered": ["get_portfolio", "get_quote", "...", "chart_apply_indicator"],
   "alpaca_configured": true,
-  "anthropic_key_present": true,
+  "anthropic_key_present": false,
   "require_auth": false,
   "auth_configured": true,
   "persistence_configured": true
 }
 ```
 
-- `model` — the `ANTHROPIC_MODEL` in use.
+- `rail` (073) — the active primary from `LLM_RAIL` (`anthropic` | `openai` | `deepseek`).
+- `model` (073) — the **active rail's** model id, not always `ANTHROPIC_MODEL`. (Pre-073 this always reported the Anthropic constant, which was misleading mid-cutover.)
+- `max_output_tokens` (073) — the per-call output cap resolved for the active rail (`llm_limits`).
+- `openai_key_present` / `deepseek_key_present` / `anthropic_key_present` / `fallback_enabled` (073) — booleans derived from key presence/prefix + the fallback flag. Never the key values. Used to spot mis-configured deploys.
 - `tools_registered` — the agent's tool names (18 as of 2026-06-01). Diagnostic only; not part of the chat contract.
-- `alpaca_configured` / `anthropic_key_present` — booleans derived from key presence/prefix. Used to spot mis-configured deploys.
+- `alpaca_configured` — boolean derived from key presence/prefix.
 - `require_auth` (P4.1) — value of the `REQUIRE_AUTH` env var as a bool. **Must be `true` in production.**
 - `auth_configured` (P4.1) — `true` when **either** `SUPABASE_URL` (asymmetric path: JWKS) **or** `SUPABASE_JWT_SECRET` (HS256 path) is set to a non-placeholder value. A deploy with `require_auth: true` but `auth_configured: false` is mis-configured (every authed request would 401 / 500).
 - `persistence_configured` (P4.2) — `true` when `SUPABASE_URL` + `SUPABASE_ANON_KEY` are both real (non-placeholder). When `false`, the persistence layer (§6b) silently no-ops — chat still streams, but turns aren't saved.

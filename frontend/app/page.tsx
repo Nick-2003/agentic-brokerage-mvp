@@ -462,7 +462,7 @@ function SidePanel({
     <div className="ml-8 w-[320px] text-[#f5f5f0] text-[13px] leading-relaxed self-start mt-12">
       <h2 className="text-lg font-medium text-white mb-2">Agentic Brokerage — Live</h2>
       <p className="opacity-85 mb-4">
-        Tap a prompt below, or type into the chat bar at the bottom of the phone. Every response streams from real Claude. Widgets appear inline — tap{' '}
+        Tap a prompt below, or type into the chat bar at the bottom of the phone. Every response streams live from the model — the chip on each answer shows which one. Widgets appear inline — tap{' '}
         <strong className="text-white">Pin to home</strong> to keep them.
       </p>
 
@@ -481,13 +481,28 @@ function SidePanel({
         ))}
       </div>
 
-      <div className="mt-6 text-[11px] text-white/45">
-        Backend status: <a href="/api/healthz" target="_blank" className="underline">/api/healthz</a>
-      </div>
-      <div className="mt-6 text-[11px] text-white/45">
-        Portfolio briefings: <a href="/connect" target="_blank" className="underline">/connect</a>
+      <div className="mt-6 flex flex-col gap-2">
+        <LinkButton href="/api/healthz">Backend status</LinkButton>
+        <LinkButton href="/connect">Portfolio briefings</LinkButton>
       </div>
     </div>
+  );
+}
+
+// 075 — the two info-panel destinations as buttons, not underlined text links.
+// Both open a new tab (an API URL and a full-page /connect load), so a styled
+// anchor is correct — no router/onClick wiring. Style mirrors the sibling
+// `Prompt` button below for visual consistency.
+function LinkButton({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="block w-full text-left px-3 py-2 rounded bg-white/[0.06] border border-white/[0.08] hover:bg-white/[0.1] active:scale-[0.98] transition text-[11px] text-white/70"
+    >
+      {children}
+    </a>
   );
 }
 

@@ -79,14 +79,14 @@ Once pasted, the agent does this in one step:
 1. Writes them to `backend/.env`
 2. Writes the public ones to `frontend/.env.local`
 3. Runs `curl http://localhost:8000/healthz` — confirms all keys are recognised
-4. Runs a real Claude call: `curl -N -X POST .../api/chat -d '{"message":"give me a tldr on my portfolio"}'`
+4. Runs a real LLM call: `curl -N -X POST .../api/chat -d '{"message":"give me a tldr on my portfolio"}'`
 5. Verifies the SSE stream returns thoughts → tool_call → widget
 
 ---
 
 ## How to test it manually right now (no keys needed)
 
-Backend won't run without `ANTHROPIC_API_KEY` because that's the only key the agent needs to do *anything*. So manual tests today:
+The agent needs **one** LLM rail configured — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `DEEPSEEK_API_KEY`, selected by `LLM_RAIL` (default `anthropic`). Every rail is mock-first, so the backend also boots keyless in deterministic demo mode. So manual tests today:
 
 ### Test 1 — Tool registry imports clean (already ran ✓)
 
@@ -117,7 +117,7 @@ pnpm typecheck   # should pass — all types align with backend
 pnpm build       # production build
 ```
 
-### Test 4 — Frontend dev server runs (UI works, no real Claude)
+### Test 4 — Frontend dev server runs (UI works, no real LLM)
 
 ```bash
 cd /Users/tom/Code/agentic-brokerage-mvp/frontend
