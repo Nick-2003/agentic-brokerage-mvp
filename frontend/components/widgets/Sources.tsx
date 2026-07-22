@@ -38,22 +38,45 @@ export function SafeHtml({ html, className }: { html: string; className?: string
   return <span className={className} dangerouslySetInnerHTML={{ __html: cleaned }} />;
 }
 
+// 076 — account-venue chip. Tells the reader whether a widget shows their REAL
+// IBKR book or a PAPER Alpaca position, so the two can never be confused. The
+// label text is copied verbatim from the tool result by the agent; this only
+// styles it. Renders nothing when there's no label (e.g. unconnected).
+export function AccountBadge({ label }: { label?: string }) {
+  if (!label) return null;
+  // "Paper"/"Sample"/"Demo" read as not-real → amber; "Real" → muted neutral.
+  const isReal = /^real\b/i.test(label);
+  const tone = isReal
+    ? 'bg-bg border-border text-text-2'
+    : 'bg-amber-bg border-amber/30 text-amber';
+  return (
+    <span
+      className={`rounded px-2 py-0.5 text-[9.5px] font-semibold uppercase tracking-[0.1em] border ${tone}`}
+    >
+      {label}
+    </span>
+  );
+}
+
 // Card wrapper used by every widget so paddings, borders, and the eyebrow line are uniform.
 export function WidgetCard({
   eyebrow,
+  headerRight,
   children,
   className = '',
 }: {
   eyebrow?: string;
+  headerRight?: React.ReactNode; // 076 — right-aligned slot on the eyebrow row (e.g. AccountBadge)
   children: React.ReactNode;
   className?: string;
 }) {
   return (
     <div className={`bg-surface border border-border rounded-2xl p-4 shadow-sm animate-slide-in ${className}`}>
-      {eyebrow && (
+      {(eyebrow || headerRight) && (
         <div className="flex items-center gap-1.5 mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-accent">
-          <span className="text-[7px]">◆</span>
+          {eyebrow && <span className="text-[7px]">◆</span>}
           {eyebrow}
+          {headerRight && <span className="ml-auto normal-case tracking-normal">{headerRight}</span>}
         </div>
       )}
       {children}

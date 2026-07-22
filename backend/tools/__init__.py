@@ -28,6 +28,41 @@ class ToolDef(TypedDict):
 TOOL_REGISTRY: dict[str, ToolDef] = {}
 
 
+# ---------------------------------------------------------------------------
+# 076 — account venue labelling. The product reads REAL holdings from IBKR
+# (read-only) but ALSO exposes Alpaca PAPER positions (the execution reads) and
+# demo/sample books. Every portfolio/position payload carries `account_kind`
+# (machine) + `account_label` (the human chip the model copies into a widget),
+# so a paper position can never be mistaken for the real book, or vice versa.
+# One source of truth for the mapping, shared by portfolio.py + execution.py.
+# ---------------------------------------------------------------------------
+
+# kind → the short human label rendered as a widget chip. `none` (not connected)
+# and unknown kinds intentionally have NO label (nothing to badge).
+ACCOUNT_LABELS: dict[str, str] = {
+    "real_ibkr": "Real · IBKR",
+    "paper_alpaca": "Paper · Alpaca",
+    "sample": "Sample · Alpaca paper",
+    "mock": "Demo data",
+}
+
+
+def account_label(kind: str | None) -> str | None:
+    """Human chip for an `account_kind`, or None when there's nothing to badge."""
+    return ACCOUNT_LABELS.get(kind or "")
+
+
+def tag_account(payload: dict[str, Any], kind: str) -> dict[str, Any]:
+    """Stamp `account_kind` + `account_label` onto a portfolio/position payload
+    (in place) and return it. Keeps the two fields in lockstep so a caller can't
+    set one and forget the other."""
+    payload["account_kind"] = kind
+    label = account_label(kind)
+    if label is not None:
+        payload["account_label"] = label
+    return payload
+
+
 def register(tool_def: ToolDef) -> None:
     """Register a tool. Called at import time by tool modules."""
     name = tool_def["name"]

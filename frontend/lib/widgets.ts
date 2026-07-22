@@ -11,6 +11,9 @@ export type MorningBriefData = {
   // 061 — optional data-freshness footnote (what day the figures are from +
   // when they were generated). Copied verbatim from get_portfolio.freshness_note.
   as_of_note?: string;
+  // 076 — which account these figures are from (e.g. "Real · IBKR"). Copied
+  // verbatim from the tool result's account_label. Rendered as a chip.
+  account_label?: string;
 };
 
 // ── research_card ──
@@ -57,6 +60,7 @@ export type OrderTicketData = {
   within_risk_rule?: boolean;
   bracket_source?: 'from_prompt' | 'from_research' | 'from_default';
   notes_html?: string;
+  account_label?: string; // 076 — "Paper · Alpaca"
 };
 
 // ── live_trade ──
@@ -79,6 +83,7 @@ export type LiveTradeData = {
   sl_armed_at?: number;
   filled_at?: string;
   news_since_fill?: NewsItem[];
+  account_label?: string; // 076 — "Paper · Alpaca"
 };
 
 // ── thesis ──
@@ -108,6 +113,7 @@ export type TrackerData = {
     tp?: number;
     sl?: number;
   };
+  account_label?: string; // 076 — "Paper · Alpaca"
 };
 
 // ── portfolio_risk ──
@@ -120,6 +126,7 @@ export type PortfolioRiskData = {
   sector_exposure: { label: string; pct: number; severity: SectorSeverity }[];
   flags: { severity: FlagSeverity; title: string; detail_html: string }[];
   suggestions: string[];
+  account_label?: string; // 076 — "Real · IBKR"
 };
 
 // ── union ──

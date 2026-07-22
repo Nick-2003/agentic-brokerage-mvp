@@ -1,9 +1,9 @@
 import type { MorningBriefData, Source } from '@/lib/widgets';
-import { SafeHtml, Sources, WidgetCard } from './Sources';
+import { AccountBadge, SafeHtml, Sources, WidgetCard } from './Sources';
 
 export function MorningBrief({ data, sources }: { data: MorningBriefData; sources: Source[] }) {
   return (
-    <WidgetCard eyebrow="Morning brief">
+    <WidgetCard eyebrow="Morning brief" headerRight={<AccountBadge label={data.account_label} />}>
       <div className="text-base font-semibold mb-2 -tracking-tight">
         <SafeHtml html={data.headline} />
       </div>
