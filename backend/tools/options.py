@@ -30,6 +30,25 @@ from . import ToolDef, register
 _DEFAULT_STRIKES = 6
 _MAX_STRIKES = 12
 
+# 079 — implied-volatility sanity floor.
+#
+# When the market is closed the delayed feed carries NO book: every bid/ask comes
+# back 0.0. yfinance's IV solver has no price to solve from, so it returns
+# placeholder/bisection artifacts rather than an error. Observed live on NVDA:
+#     bid=0.0 ask=0.0  IV=1.0000000000000003e-05   (solver floor sentinel)
+#     bid=0.0 ask=0.0  IV=0.007822421875           (~2^-7)
+#     bid=0.0 ask=0.0  IV=0.062509375              (~2^-4)
+#     bid=0.0 ask=0.0  IV=0.2500075                (~2^-2)
+# Passed through, those render as "0.8% / 6.3% / 25.0%" implied vol for a name
+# whose real IV is ~40-60% — a 0.8% IV implies an essentially free option, which
+# a trader could act on.
+#
+# NOTE this is precisely the blind spot in trust-principle #1: the number DID come
+# from a tool, so provenance is intact and the 067 validator would pass it. Sourced
+# is not the same as meaningful. So we suppress at the tool boundary: a field that
+# isn't there can't be misread, whereas a garbage number carries false authority.
+_IV_FLOOR = 1e-4
+
 
 def _yfinance_available() -> bool:
     try:
@@ -95,6 +114,9 @@ def _mock_chain(ticker: str, option_type: str, strikes: int) -> dict[str, Any]:
         "note": "Greeks (delta/gamma/theta/vega) aren't available from this data source yet.",
         "source": "mock",
         "is_mock": True,
+        # 079 — the demo chain carries a full synthetic book, so it's always usable.
+        "quote_status": "live",
+        "iv_available": True,
     }
     if option_type in ("calls", "both"):
         out["calls"] = [_mock_row(k, spot, True) for k in grid]
@@ -150,17 +172,61 @@ def _rows_around(df: Any, spot: float | None, strikes: int) -> list[dict[str, An
     out = []
     for r in window:
         iv = _num(r.get("impliedVolatility"))
+        bid, ask = _num(r.get("bid")), _num(r.get("ask"))
+
+        # 079 — no NBBO: the feed returned no book (both sides 0/absent). Emit
+        # None rather than 0.0 so the model can't render a misleading "0.0" price.
+        has_book = bool((bid or 0) > 0 or (ask or 0) > 0)
+        if not has_book:
+            bid = ask = None
+
+        # 079 — IV is only meaningful if it was solved from a real price. Suppress
+        # when there's no book, or when it's at/below yfinance's solver floor.
+        iv_pct = None
+        if iv is not None and iv > _IV_FLOOR and has_book:
+            iv_pct = round(iv * 100, 1)
+
+        # 079 — open interest degrades with the same snapshot. Observed live: OI
+        # was 0 on EVERY strike across EVERY expiration while volume ran 27k-92k.
+        # A contract with 92,363 volume cannot have zero open interest, and "0 OI"
+        # reads as "nobody holds this" — wrong in a way a reader would act on. When
+        # there's no book the whole snapshot is stale, so report OI as unavailable.
+        # A genuine 0 (new strike, live book) is still passed through untouched.
+        oi = _num(r.get("openInterest")) if has_book else None
+
         out.append({
             "strike": _num(r.get("strike")),
             "last": _num(r.get("lastPrice")),
-            "bid": _num(r.get("bid")),
-            "ask": _num(r.get("ask")),
-            "volume": _num(r.get("volume")),
-            "open_interest": _num(r.get("openInterest")),
-            "implied_vol_pct": round(iv * 100, 1) if iv is not None else None,
+            "bid": bid,
+            "ask": ask,
+            "volume": _num(r.get("volume")),   # real + intraday-populated; kept
+            "open_interest": oi,
+            "implied_vol_pct": iv_pct,
             "in_the_money": bool(r.get("inTheMoney")),
         })
     return out
+
+
+def _quote_health(*row_lists: list[dict[str, Any]]) -> tuple[str, bool]:
+    """079 — (quote_status, iv_available) across every returned row.
+
+    `live` = at least one row carried a real bid/ask; `no_nbbo` = the feed had no
+    book at all (market closed / delayed feed without NBBO), which is also why IV
+    would be unsolvable.
+    """
+    rows = [r for lst in row_lists for r in (lst or [])]
+    if not rows:
+        return "no_nbbo", False
+    has_book = any(r.get("bid") is not None or r.get("ask") is not None for r in rows)
+    has_iv = any(r.get("implied_vol_pct") is not None for r in rows)
+    return ("live" if has_book else "no_nbbo"), has_iv
+
+
+_NO_NBBO_NOTE = (
+    " Bid/ask, implied volatility and open interest are unavailable — the source "
+    "returned no live book (the market is likely closed). Last-trade prices and "
+    "volume are still real."
+)
 
 
 async def _fetch_chain(ticker: str, expiration: str | None, option_type: str, strikes: int) -> dict[str, Any]:
@@ -189,6 +255,14 @@ async def _fetch_chain(ticker: str, expiration: str | None, option_type: str, st
         out["calls"] = _rows_around(chain.calls, spot, strikes)
     if option_type in ("puts", "both"):
         out["puts"] = _rows_around(chain.puts, spot, strikes)
+
+    # 079 — tell the model whether these quotes are usable, so it can say
+    # "unavailable, market closed" instead of printing blanks as if they were data.
+    status, iv_ok = _quote_health(out.get("calls"), out.get("puts"))
+    out["quote_status"] = status
+    out["iv_available"] = iv_ok
+    if status == "no_nbbo":
+        out["note"] += _NO_NBBO_NOTE
     return out
 
 
