@@ -46,6 +46,11 @@ FILES = [
     (os.path.join(BACKEND, "agent.py"), os.path.join(PROP, "backend", "agent.py")),
 ]
 
+# 078 — LIVE MODE. 069 is applied and its staged dir was removed, so the proposal
+# IS the live tree: assert against what's installed and copy/restore nothing.
+# Previously this printed "missing: …" and bailed with exit 1 on every run.
+LIVE_MODE = not os.path.isdir(PROP)
+
 PASS, FAIL = "\033[92mPASS\033[0m", "\033[91mFAIL\033[0m"
 results: list[bool] = []
 
@@ -160,13 +165,21 @@ def run():
 
     orig_run_agent = agent.run_agent
     orig_ds = agent.run_agent_deepseek
+    orig_compat = agent.run_agent_openai_compat
     try:
         # failover path — real deepseek loop, scripted
         async def ds_stub(*a, **k):
             yield {"event": "message", "data": {"text": "hi from deepseek"}}
             yield {"event": "done", "data": {"elapsed_ms": 1, "iterations": 1, "input_tokens": 2, "output_tokens": 3}}
         agent.run_agent = _raise_failover
+        # 078 — patch what run_chat ACTUALLY calls. Since 074 the failover branch
+        # invokes `run_agent_openai_compat(..., client=deepseek_client)` directly
+        # rather than `run_agent_deepseek` (now only a back-compat wrapper), so
+        # stubbing the wrapper alone no longer intercepts the failover path.
+        # Both are patched: the wrapper for back-compat coverage, the compat loop
+        # because it is the live call site.
         agent.run_agent_deepseek = ds_stub
+        agent.run_agent_openai_compat = ds_stub
         evs = _events(agent.run_chat("q", "u1"))
         provs = [e for e in evs if e["event"] == "provider"]
         check("provider(anthropic) emitted first", provs and provs[0]["data"]["provider"] == "anthropic" and provs[0]["data"]["fallback"] is False)
@@ -184,6 +197,7 @@ def run():
     finally:
         agent.run_agent = orig_run_agent
         agent.run_agent_deepseek = orig_ds
+        agent.run_agent_openai_compat = orig_compat  # 078
 
 
 def main():
@@ -191,15 +205,18 @@ def main():
         os.environ.pop(k, None)
     backups = []
     try:
-        for live, prop in FILES:
-            if not os.path.isfile(prop):
-                print(f"missing: {prop}"); return 1
-            existed = os.path.isfile(live)
-            bak = live + ".069p2bak"
-            if existed:
-                shutil.copy2(live, bak)
-            backups.append((live, bak, existed))
-            shutil.copy2(prop, live)
+        if LIVE_MODE:
+            print("  (staged dir absent — 069 is applied; asserting against the LIVE tree)")
+        else:
+            for live, prop in FILES:
+                if not os.path.isfile(prop):
+                    print(f"missing: {prop}"); return 1
+                existed = os.path.isfile(live)
+                bak = live + ".069p2bak"
+                if existed:
+                    shutil.copy2(live, bak)
+                backups.append((live, bak, existed))
+                shutil.copy2(prop, live)
         run()
     finally:
         for live, bak, existed in backups:

@@ -59,16 +59,26 @@ def check(name, cond, detail=""):
 
 
 OVERWRITE = ["agent.py", "briefing.py", "main.py", ".env.example"]
+
+# 078 — LIVE MODE. Once a proposal is applied and its staged dir removed, the
+# proposal IS the live tree: assert against what's installed, apply/restore
+# nothing. Without this the test crashed on a missing staged file every run.
+LIVE_MODE = not os.path.isdir(PROP_BE)
 _created: list[str] = []  # 074 has no net-new backend files, but keep the guard
 
 
 def apply_proposal(backup_dir: str) -> None:
+    if LIVE_MODE:
+        print("  (staged dir absent — 074 is applied; asserting against the LIVE tree)")
+        return
     for f in OVERWRITE:
         shutil.copy2(os.path.join(BACKEND, f), os.path.join(backup_dir, f))
         shutil.copy2(os.path.join(PROP_BE, f), os.path.join(BACKEND, f))
 
 
 def restore(backup_dir: str) -> None:
+    if LIVE_MODE:
+        return
     for f in OVERWRITE:
         b = os.path.join(backup_dir, f)
         if os.path.isfile(b):

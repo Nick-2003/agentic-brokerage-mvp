@@ -59,8 +59,16 @@ OVERWRITE = [
     "prompts/widget_contract.md", "prompts/system.md",
 ]
 
+# 078 — LIVE MODE. Once a proposal is applied and its staged dir removed, the
+# proposal IS the live tree: assert against what's installed, apply/restore
+# nothing. Without this the test crashed on a missing staged file every run.
+LIVE_MODE = not os.path.isdir(PROP)
+
 
 def apply_proposal(backup_dir: str) -> None:
+    if LIVE_MODE:
+        print("  (staged dir absent — 076 is applied; asserting against the LIVE tree)")
+        return
     for f in OVERWRITE:
         src_live = os.path.join(BACKEND, f)
         bak = os.path.join(backup_dir, f.replace("/", "__"))
@@ -69,6 +77,8 @@ def apply_proposal(backup_dir: str) -> None:
 
 
 def restore(backup_dir: str) -> None:
+    if LIVE_MODE:
+        return
     for f in OVERWRITE:
         bak = os.path.join(backup_dir, f.replace("/", "__"))
         if os.path.isfile(bak):
