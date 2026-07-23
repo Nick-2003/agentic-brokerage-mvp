@@ -127,6 +127,17 @@ Chat turns are processed by an LLM that receives the turn's context — which fo
 > So with `LLM_FALLBACK_ENABLED=1`, DeepSeek becomes the **de facto primary processor for every chat turn and every daily brief**, not an occasional one. The residual risk below is therefore **continuous, not incidental**. Treat the register as describing a routine data flow.
 >
 > **Update (2026-07-21, proposal 074):** DeepSeek is now **explicitly selectable as the primary** (`LLM_RAIL=deepseek`), and that is the intended live configuration while both frontier rails are unfunded — so this is no longer "de facto via fallback" but the **configured** primary. The disclosure obligation below is therefore a **precondition** of running `LLM_RAIL=deepseek`, not a follow-up. The intended exit is `LLM_RAIL=openai` once OpenAI is funded (easier billing than Anthropic).
+>
+> ### ⚖️ Calibration (2026-07-23, proposal 080) — the earlier framing overweighted jurisdiction
+>
+> The notes above lean on "PRC jurisdiction" as though location were the primary compliance defect. For **this** product — HK-domiciled, HK/Asia users, an HKD-base IBKR account — that is **overstated**, and the correction matters because it changes what actually needs doing:
+>
+> - **Hong Kong's PDPO contains a cross-border transfer restriction — section 33 — that has never been brought into force.** HK law therefore imposes **no general bar on sending personal data offshore**, to the mainland or anywhere else. The earlier framing implicitly assumed a GDPR-shaped regime that does not govern these users.
+> - What *does* bind, and is location-agnostic, are the **Data Protection Principles**: **DPP1** (say what you collect and who receives it, at collection), **DPP3** (use only for the consented purpose), **DPP4** (secure it, including contractually via a processor). So the real obligation was never "host in the US" — it is the **sub-processor disclosure in the connect flow**, which remains outstanding and is the one genuinely required action.
+> - **Where location *would* become decisive:** any **EU/UK data subject** (GDPR Chapter V; China has no adequacy decision), **institutional/counterparty due diligence** that simply refuses PRC processing, or a threat model that specifically includes state access (PRC National Intelligence Law art. 7 — noting the US has analogous reach via the CLOUD Act and FISA 702, so this is a difference of threat model, not a clean binary).
+> - **What matters more than jurisdiction either way: retention and training-use.** A US provider that trains on inputs is worse for these users than a PRC provider with zero retention — that is the concrete harm channel, and it is provider policy, not geography. It remains **unverified for both DeepSeek and Moonshot** (see the register's MUST-VERIFY block).
+>
+> Practical consequence: **Moonshot-direct is a defensible choice for this product**, and is lateral to the DeepSeek position already live rather than a regression. Because Kimi K2.6 is open-weights, a US host (Together/DeepInfra) remains a **two-variable switch** if EU users or an institutional counterparty ever make location decisive. *(Not legal advice — confirm with someone qualified if this becomes commercially material.)*
 
 **Mitigations (still in force):**
 
@@ -145,6 +156,7 @@ Every third party that receives user data, what it gets, and how to stop it. Kee
 | --- | --- | --- | --- | --- | --- |
 | **Anthropic** | Primary LLM — chat turns + daily brief narrative | Holdings, position sizes, NAV, P&L, chat text, uploaded images. **No** `account_id`. | US | `ANTHROPIC_API_KEY` | Live (credits exhausted) |
 | **DeepSeek** (`deepseek-chat`) | Fallback LLM — chat + brief when the primary is usage-limited | Holdings, position sizes, NAV, P&L, chat text. **No** `account_id`, **no images**. | **PRC** ⚠️ | `LLM_RAIL=anthropic`/`openai` (074) to stop selecting it as primary; `LLM_FALLBACK_ENABLED=0` to disarm it as a fallback; `BRIEFING_FALLBACK_ENABLED=0` for the brief only | **LIVE, continuous, and CONFIGURED primary as of 2026-07-21 (074).** With Anthropic exhausted and OpenAI unfunded, `LLM_RAIL=deepseek` makes this the explicit primary for every chat turn and brief. See the material-change note above. Reverts to genuine fallback the moment a funded frontier rail is selected. |
+| **Kimi / Moonshot AI** (`kimi-k2.6`) | LLM rail — chat + brief. **Recommended primary (080)**: funded, vision-capable, parallel tool calls | Holdings, position sizes, NAV, P&L, chat text, **and uploaded images** (it is the only funded rail that can see them). **No** `account_id`. | **PRC** by default (Moonshot direct) — but **open weights, so the host is a 2-variable switch**: Together / DeepInfra (US) serve the same model | `LLM_RAIL` ≠ `kimi`; `KIMI_API_KEY` unset. Host changes via `KIMI_BASE_URL`+`KIMI_MODEL` | **Code staged (080), not yet carrying traffic.** Receives nothing until `LLM_RAIL=kimi` **and** a real `KIMI_API_KEY`. ⚠️ Retention/training terms **UNVERIFIED** — see MUST-VERIFY; flip this row to *Live* and land the connect-flow disclosure **before** real holdings flow. |
 | **OpenAI** | Intended US/EU primary, to end the continuous DeepSeek dependency | Same as Anthropic (incl. images if vision on) | US | `LLM_RAIL=anthropic`; `OPENAI_API_KEY` unset | **Code APPLIED (071); NOT yet carrying traffic.** Receives nothing until `LLM_RAIL=openai` **and** a real `OPENAI_API_KEY` are set (proposal 073). ⚠️ Flip this row to *Live* at 073 cutover step 7 — and the connect-flow privacy copy must name it **before** that, not after. |
 | **Interactive Brokers** | Read-only holdings/NAV via Flex Web Service | The user's own account data (source of truth) | US | Per-user Flex token; user can disconnect | Live |
 | **Twilio** | WhatsApp delivery of the daily brief | Phone number + brief text (holdings figures) | US | Per-user opt-out (STOP) | Live |
@@ -155,7 +167,9 @@ Every third party that receives user data, what it gets, and how to stop it. Kee
 | **PostHog** | Product analytics | Event names + properties, PII-scrubbed (W6.2b) | EU | `NEXT_PUBLIC_POSTHOG_KEY` unset → no-op | Live |
 | **FMP / Alpha Vantage / yfinance** | Market + research data | **Ticker symbols only** — no user identity or position sizes | US | Per-provider key / mock mode | Live |
 
-### ⚠️ MUST VERIFY before DeepSeek carries production traffic
+### ⚠️ MUST VERIFY before DeepSeek **or Kimi/Moonshot** carries production traffic
+
+*(080: the four questions below apply verbatim to Moonshot too — I could not resolve them from public sources for either provider. This is the gate that matters more than jurisdiction; see the Calibration note above.)*
 
 I have **not** verified these against DeepSeek's current terms, and they should not be assumed. Read the actual DPA/privacy policy and record the answers here:
 

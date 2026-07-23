@@ -55,6 +55,7 @@ from anthropic import (
 from anthropic.types import MessageParam, ToolUseBlock
 
 import deepseek_client  # 069 — DeepSeek fallback rail
+import kimi_client  # 080 — Kimi rail (funded + vision-capable)
 import llm_limits  # 073 — shared, env-driven output-token caps
 import openai_client  # 071 — OpenAI rail (selectable primary)
 import validation  # 067 — numeric-provenance validator (trust #1/#3)
@@ -92,6 +93,14 @@ _OPENAI_BILLING_MARKERS = (
     "insufficient_quota",
     "exceeded your current quota",
     "billing_hard_limit_reached",
+    # 080 — Kimi/Moonshot phrasings. ⚠️ MUST-VERIFY: these are defensive guesses;
+    # the only honest test is exhausting the account once and reading the body.
+    # 068's lesson — a rail whose exhaustion wording we don't match will simply
+    # never fail over, and the bug is invisible on exactly the rail we moved to.
+    "exceeded_current_quota",
+    "insufficient balance",
+    "account balance is insufficient",
+    "rate_limit_reached_error",
 )
 
 
@@ -155,7 +164,7 @@ def _should_failover(e: Exception, attachments: list[dict[str, Any]] | None) -> 
 #                        resort so nothing falls back beneath it.)
 # ---------------------------------------------------------------------------
 
-_VALID_RAILS = ("anthropic", "openai", "deepseek")
+_VALID_RAILS = ("anthropic", "openai", "deepseek", "kimi")
 
 
 def _rail() -> str:
@@ -1066,6 +1075,11 @@ _MODEL_LABELS = {
     "gpt-5-mini": "GPT-5 mini",
     "gpt-4.1": "GPT-4.1",
     "gpt-4o": "GPT-4o",
+    # 080 — Kimi. The US-hosted ids differ from Moonshot's, so label both; anything
+    # else still falls through to the raw id.
+    "kimi-k2.6": "Kimi K2.6",
+    "kimi-k2.5": "Kimi K2.5",
+    "moonshotai/Kimi-K2.6": "Kimi K2.6",
 }
 
 
@@ -1092,7 +1106,11 @@ async def run_chat(
     rail = _rail()
     # 074 — resolve the primary once. `None` = the Anthropic SDK loop (run_agent);
     # any other value is an OpenAI-format client module driving run_agent_openai_compat.
-    primary_client = {"openai": openai_client, "deepseek": deepseek_client}.get(rail)
+    primary_client = {
+        "openai": openai_client,
+        "deepseek": deepseek_client,
+        "kimi": kimi_client,  # 080 — vision-capable, so image turns are NOT refused
+    }.get(rail)
     primary_model = primary_client.model() if primary_client is not None else MODEL
 
     # A vision-incapable primary must REFUSE an image turn, never drop the image

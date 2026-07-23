@@ -25,7 +25,7 @@ The validated experience lives at `~/Downloads/agentic_brokerage_demo.html` (moc
 ```
 Frontend (Next.js on Vercel)
   ↕ HTTPS + SSE
-Backend (Python FastAPI on Railway; LLM rail = Anthropic | OpenAI | DeepSeek via LLM_RAIL)
+Backend (Python FastAPI on Railway; LLM rail = Anthropic | OpenAI | DeepSeek | Kimi via LLM_RAIL)
   ↕ tool calls
   IBKR Flex (read-only holdings) · Alpaca Paper API · yfinance · FMP research ·
   web-search news · TradingView MCP · Supabase Postgres
@@ -75,8 +75,8 @@ These are non-negotiable. They're what distinguishes us from a chat-with-PDF wra
 
 | Layer | Choice | Why |
 | --- | --- | --- |
-| LLM | **Multi-rail, selectable via `LLM_RAIL`** — `anthropic` (default, `claude-opus-4-5` via `ANTHROPIC_MODEL`) · `openai` (`OPENAI_MODEL`, 071/073) · `deepseek` (`deepseek-chat`, 074). On an Anthropic **usage-limit** error the turn auto-fails-over to **DeepSeek** (069/070). See `backend/.env.example` (the rail block) + `backend/agent.py` `_rail()`/`run_chat`. **⚠️ Live state (2026-07): Anthropic + OpenAI credits are exhausted, so the app runs on DeepSeek** — via the fallback today; `LLM_RAIL=deepseek` (074) makes that the explicit primary. | Best-available structured, cited finance synthesis; keeps the product live when a provider's billing lapses |
-| Agent runtime | **Anthropic SDK directly** for the Anthropic rail; **raw `httpx` OpenAI-format loop** (`run_agent_openai_compat`) for the OpenAI + DeepSeek rails — *not* `claude-agent-sdk` (rejected). MCP via backend-side stdio clients | Simpler SSE streaming control; one shared tool/trust loop across every rail |
+| LLM | **Multi-rail, selectable via `LLM_RAIL`** — `anthropic` (`claude-opus-4-5`) · `openai` (071/073) · `deepseek` (074) · **`kimi`** (`kimi-k2.6`, 080). A **usage-limit** error on any primary auto-fails-over to **DeepSeek** (069/070). See `backend/.env.example` (the rail block) + `backend/agent.py` `_rail()`/`run_chat`. **⚠️ Live state (2026-07): Anthropic + OpenAI credits are exhausted. `LLM_RAIL=kimi` is the recommended primary** — it's funded, **vision-capable** (so 059 image turns work; DeepSeek must refuse them), and does **parallel tool calls**; DeepSeek then sits beneath it as a genuine fallback. **Kimi's host is a config choice, not a code choice** — K2.6 is open-weights, so `KIMI_BASE_URL`+`KIMI_MODEL` switch between Moonshot (default) and US hosts (Together/DeepInfra) with no code change. | Best-available structured, cited finance synthesis; keeps the product live when a provider's billing lapses |
+| Agent runtime | **Anthropic SDK directly** for the Anthropic rail; **raw `httpx` OpenAI-format loop** (`run_agent_openai_compat`) for the OpenAI + DeepSeek + Kimi rails, sharing `openai_compat`'s wire translations — *not* `claude-agent-sdk` (rejected). MCP via backend-side stdio clients | Simpler SSE streaming control; one shared tool/trust loop across every rail |
 | Backend | FastAPI + uvicorn | SSE-first, fast cold start |
 | Frontend | Next.js 15 on Vercel | Free hosting, magic link auth, SSE-friendly |
 | Auth + DB | Supabase | Magic link + Postgres + RLS in one |
