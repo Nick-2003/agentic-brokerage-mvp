@@ -63,6 +63,7 @@ import webhooks  # noqa: E402  (W6 — Twilio inbound STOP/START webhook)
 from agent import MODEL, _classify_agent_error, _rail, run_chat  # noqa: E402  (069: run_chat wraps run_agent + DeepSeek failover; 073: _rail for /healthz)
 import deepseek_client  # noqa: E402  — 073: /healthz key-presence only
 import llm_limits  # noqa: E402  — 073: report the active cap
+import kimi_client  # noqa: E402  — 080: /healthz rail + key-presence
 import openai_client  # noqa: E402  — 073: /healthz rail + key-presence
 
 log = logging.getLogger(__name__)
@@ -124,6 +125,7 @@ async def healthz() -> dict[str, Any]:
     active_model = {
         "openai": openai_client.model,
         "deepseek": deepseek_client.deepseek_model,
+        "kimi": kimi_client.kimi_model,  # 080
     }.get(rail, lambda: MODEL)()
     return {
         "ok": True,
@@ -132,6 +134,7 @@ async def healthz() -> dict[str, Any]:
         "max_output_tokens": llm_limits.max_output_tokens(rail),
         "openai_key_present": openai_client.openai_available(),
         "deepseek_key_present": deepseek_client.deepseek_available(),
+        "kimi_key_present": kimi_client.kimi_available(),  # 080 — boolean only
         "fallback_enabled": deepseek_client.fallback_enabled(),
         "tools_registered": list(TOOL_REGISTRY.keys()),
         "alpaca_configured": bool(

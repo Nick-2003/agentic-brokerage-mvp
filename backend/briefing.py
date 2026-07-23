@@ -40,6 +40,7 @@ from anthropic import AsyncAnthropic
 
 import deepseek_client  # 070 — DeepSeek fallback when the primary is usage-limited
 import llm_limits  # 073 — shared output caps (stdlib-only; keeps the cron light)
+import kimi_client  # 080 — Kimi as a selectable primary for the brief too
 import openai_client  # 071 — OpenAI as a selectable primary for the brief too
 import freshness  # 061 — shared freshness-note logic (was inline here, 052)
 import ibkr_flex
@@ -96,6 +97,8 @@ def briefing_mock_enabled() -> bool:
         return not deepseek_client.deepseek_available()
     if rail == "openai":
         return not openai_client.openai_available()
+    if rail == "kimi":  # 080
+        return not kimi_client.kimi_available()
     return not (os.getenv("ANTHROPIC_API_KEY") or "").strip()
 
 
@@ -143,7 +146,7 @@ def _brief_fallback_enabled() -> bool:
 # land in both places or the cron stays broken. Duplicated rather than imported
 # for the same reason `_USAGE_LIMIT_MARKERS` is: the cron service must never have
 # to import the whole agent module (tool registry + Anthropic client) to send a brief.
-_VALID_RAILS = ("anthropic", "openai", "deepseek")  # 074 — DeepSeek as primary
+_VALID_RAILS = ("anthropic", "openai", "deepseek", "kimi")  # 074 DeepSeek · 080 Kimi
 
 
 def _brief_rail() -> str:
@@ -606,6 +609,17 @@ async def generate_briefing(snapshot: dict, market_context: dict | None = None) 
                 )
                 text = (oa.get("text") or "").strip()
                 model = openai_client.model()
+            elif rail == "kimi":
+                # 080 — Kimi as the chosen primary. Same tool-less shape. No
+                # "written by" disclosure: like the 074 DeepSeek-primary branch,
+                # a deliberately chosen model is NOT a degradation, so the
+                # "the usual model was unavailable" wording would be false.
+                km = await kimi_client.complete(
+                    system, [{"role": "user", "content": user_msg}],
+                    max_tokens=llm_limits.brief_max_output_tokens("kimi"),
+                )
+                text = (km.get("text") or "").strip()
+                model = kimi_client.model()
             elif rail == "deepseek":
                 # 074 — DeepSeek AS the chosen primary (not a fallback). Same
                 # tool-less shape. A LIGHT attribution note is appended below;
