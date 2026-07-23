@@ -102,3 +102,4 @@ from . import research  # noqa: E402, F401
 from . import technicals  # noqa: E402, F401
 from . import execution  # noqa: E402, F401
 from . import risk  # noqa: E402, F401
+from . import options  # noqa: E402, F401  — 077 (data-only options chain)

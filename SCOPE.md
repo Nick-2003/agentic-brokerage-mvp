@@ -91,6 +91,12 @@ The amendment process:
 3. If the evidence still holds, edit this file to move the feature from "NOT in MVP" to "In MVP" with the date and the evidence link
 4. Update CLAUDE.md if the architecture has to change
 
+### Amendments log
+
+- **2026-07 (proposal 077) — added: read-only options data (`get_option_chain`).** Strikes, bid/ask/last, implied volatility, open interest for a ticker (yfinance, ~15-min delayed), rendered as a markdown table in a plain reply. Part of the **chat-track reactivation** (see the CLAUDE.md banner update).
+  - **⚠️ Honesty note:** this did **not** clear the 3-user-interview bar above — it's a **founder-directed** addition, not user-evidence-driven. Recorded here per the rule's *spirit* (no silent drift), while flagging the deviation openly.
+  - **Explicitly deferred:** **Greeks** (delta/gamma/theta/vega) and any options **widget** — a later change, sourced from a connected options MCP server rather than in-house Black-Scholes.
+
 ## Sign-off
 
 This scope is written down so that "should we build X?" is replaced with "does X clear the amendment rule?" That's the only change that matters.
