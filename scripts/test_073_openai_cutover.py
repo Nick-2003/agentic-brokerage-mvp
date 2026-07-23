@@ -79,8 +79,17 @@ NET_NEW = ["llm_limits.py"]
 # startup. A restore must never delete a file it did not create.
 _created: list[str] = []
 
+# 078 — LIVE MODE. Once a proposal is applied and its staged dir removed, the
+# proposal IS the live tree: assert against what's installed, apply/restore
+# nothing. Without this the test crashed on a missing staged file (and only the
+# `_created` guard above stopped the `finally` from deleting live modules).
+LIVE_MODE = not os.path.isdir(PROP_BE)
+
 
 def apply_proposal(backup_dir: str) -> None:
+    if LIVE_MODE:
+        print("  (staged dir absent — 073 is applied; asserting against the LIVE tree)")
+        return
     for f in OVERWRITE:
         shutil.copy2(os.path.join(BACKEND, f), os.path.join(backup_dir, f))
         shutil.copy2(os.path.join(PROP_BE, f), os.path.join(BACKEND, f))
@@ -96,6 +105,8 @@ def apply_proposal(backup_dir: str) -> None:
 
 
 def restore(backup_dir: str) -> None:
+    if LIVE_MODE:
+        return
     for f in OVERWRITE:
         b = os.path.join(backup_dir, f)
         if os.path.isfile(b):
@@ -318,10 +329,13 @@ def run() -> None:
           payload2.get("rail") == "anthropic" and payload2.get("model") == agent.MODEL)
 
     # ---------------------------------------------------------------- G
-    print("\nG. frontend (static, against the STAGED copies)")
-    sse = open(os.path.join(PROP_FE, "lib", "sse.ts")).read()
-    tc = open(os.path.join(PROP_FE, "components", "ThinkingCard.tsx")).read()
-    pg = open(os.path.join(PROP_FE, "app", "page.tsx")).read()
+    # 078 — read the LIVE frontend once 073 is applied (the staged copies are gone);
+    # the staged copies otherwise. Same assertions either way.
+    fe_root = os.path.join(REPO, "frontend") if LIVE_MODE else PROP_FE
+    print(f"\nG. frontend (static, against the {'LIVE' if LIVE_MODE else 'STAGED'} copies)")
+    sse = open(os.path.join(fe_root, "lib", "sse.ts")).read()
+    tc = open(os.path.join(fe_root, "components", "ThinkingCard.tsx")).read()
+    pg = open(os.path.join(fe_root, "app", "page.tsx")).read()
     check("'openai' in the provider union", "'openai'" in sse)
     check("no hardcoded 'Claude was' in the fallback notice", "Claude was" not in tc)
     check("reasonPhrase is rail-prefix agnostic (endsWith)", "endsWith('billing')" in tc)
