@@ -1274,6 +1274,48 @@ So the guarantee moved into code: one `_html_emphasis_to_markdown()` at the **si
 
 **Assumptions/corrections.** Guessed the MCP exception class was `MCPServerUnreachable`; it is **`MCPUnreachable`** — the test caught it on the first run. 081 and 082 are independent (disjoint files) and were regression-tested together anyway.
 
-**State: the full suite is green for the first time this arc — 13/13 (062 7 · 063 14 · 067 27 · 069_client 24 · 069_phase2 21 · 070 19 · 071 39 · 073 32 · 074 23 · 076 23 · 077 19 · 079 24 · 080 28).** 19 tools, `LLM_RAIL=kimi` with DeepSeek beneath. **⚠️ 082 is committed (#140); 081 is applied to the working tree but NOT yet committed** — `technicals.py`, `system.md` modified and `scripts/test_081_chart_degradation.py` untracked, so a redeploy from git would ship without it. Trading still disabled.
+**State: the full suite is green for the first time this arc — 13/13 (062 7 · 063 14 · 067 27 · 069_client 24 · 069_phase2 21 · 070 19 · 071 39 · 073 32 · 074 23 · 076 23 · 077 19 · 079 24 · 080 28).** 19 tools, `LLM_RAIL=kimi` with DeepSeek beneath. Both committed — **082 as #140, 081 as #141** (081 was briefly applied-but-uncommitted; committed same day). Trading still disabled.
 
 **Still open** from the failure-handling plan: no test asserts **what a user actually sees** when a subsystem is down (every suite covers success paths and refusals), and there is **no telemetry on tool error rates** — Langfuse already records tool results, so a "which tools error most" view would have surfaced the TradingView issue before a human did.
+
+---
+
+## 2026-07-24 · 083 — the Kimi failure error: an error that said nothing
+
+Found the way 081/082 were: **by using the product.** Two PostHog `chat_error` events, verbatim —
+
+```
+Error: KimiError: kimi request failed:
+```
+
+Nothing after the colon. Twice, on `LLM_RAIL=kimi` — the **primary** rail. The previous session's closing note said *"no test asserts what a user actually sees when a subsystem is down"*; this is what that gap looks like in production.
+
+**Three defects stacked, and fixing only the message would have left the turn dying anyway.**
+
+**1. Why the message was empty — an httpx footgun.** `kimi_client` raised `KimiError(f"kimi request failed: {e}{detail}")`. `detail` comes *only* from `e.response`, so an empty `detail` proves **no HTTP response ever arrived** — a transport failure, not a 4xx/5xx. And `str(e)` was empty *too*: httpx maps timeouts from a **message-less httpcore exception**, so `str(httpx.ReadTimeout(...))` is `''` (verified in the venv, and now asserted as a pre-condition in the test). **An empty `{e}` is the signature of a timeout.**
+
+**2. Why it timed out — the budget was set at the working latency.** `KIMI_TIMEOUT_S=60`, applied as a per-attempt read timeout. Both failures landed **~116s after the prompt**; the turns that *succeeded* in the same session took **116s and 117s**. A healthy Kimi iteration runs ~55s. That timeout wasn't unlucky, it had to fire.
+
+**3. Why the turn died instead of falling back.** `_failover_reason` knew billing prose, `429`, and 5xx statuses. A transport failure has **no status and no matching text** → `_should_failover` returned `None` → red bubble, while a funded, healthy DeepSeek sat unused. 069 built the chain for exactly this moment and it could not fire.
+
+**The fix is a new shared module, not three patches.** `deepseek_client` and `openai_client` carried the **identical** `f"… request failed: {e}"` line and the same flat 60s timeout — and DeepSeek is the *fallback*, so a blind spot there turns one failed turn into two. `backend/llm_transport.py` now owns the policy for every OpenAI-format rail (the 071 precedent; deliberately *not* inside `openai_compat`, whose contract is "pure functions, no I/O, no env"). Three things it changes:
+
+- **`<RAIL>_TIMEOUT_S` is a DEADLINE, not a per-attempt timeout** (default 60 → 120), plus a separate short `<RAIL>_CONNECT_TIMEOUT_S`. Every attempt gets only the time still left, so **retrying can never multiply the wait** — the property the test pins with 8 allowed attempts still stopping inside the budget.
+- **Bounded retry** on `network`/`overloaded` only. A read timeout isn't retried, and that needed **no special case**: it has already spent the budget, so the deadline refuses the next attempt. Falling out of a general rule beats another branch.
+- **An error is never empty.** The exception class is always named; a message-less timeout gets a synthesised description; the response body is still preserved for 065's verbose path.
+
+**Classification worth contrasting with 080.** Kimi's *quota* markers are, as 080's README admits, defensive guesses at provider prose — wrong wording means failover silently never fires. Transport failures need no guessing: `classify_transport_error` reads the **exception type**, which is a fact. `agent._transport_reason` prefers the provider-declared `reason` and falls back to the class name on `e.__cause__`. `LLM_FAILOVER_ON` gains `timeout,network` (reversible per-deployment); billing is checked **first**, because a quota-429 is both, and billing is the truer reason.
+
+**Flagged, beyond the reported bug, included anyway:** `_classify_agent_error` hardcoded `"Anthropic API — …"` and `"console.anthropic.com"` in its billing/rate-limit/auth branches. Since 071 the primary is chosen by `LLM_RAIL` and is currently **Kimi**, so every one of those messages named the wrong provider and pointed the operator at the wrong billing console. Now rail-derived. Shipping a timeout fix while the copy around it still said "Anthropic" would have been incoherent.
+
+**Not our bug (recorded so it isn't re-investigated):** the third event, `Read error: network error`, is `frontend/lib/sse.ts` reporting `net::ERR_NETWORK_CHANGED` — the client's network changed mid-stream. `sse_starlette` already sends keepalive pings; there is no server-side gap.
+
+**Free side-effect:** `briefing.py` calls `kimi_client.complete` directly, so the daily WhatsApp/email brief inherits the whole fix with no edit — it fails just as silently today, on the cron service.
+
+**⚠️ The fix is INERT without an env change.** `.env.example` set `KIMI_TIMEOUT_S=60` *explicitly*, so the deployed value is almost certainly 60, and **env beats the new code default**. Set `KIMI_TIMEOUT_S=120` on **both** Railway services — web *and* cron never share variables.
+
+**Decisions surfaced.** The 081/082 lesson generalises: *anything guaranteed only by a system-prompt rule* — **or by one rail's private copy of a policy** — breaks on the next rail change. That is why this went into a shared module rather than being patched three times.
+
+**Assumptions.** Failing over on a timeout trades a longer worst case (Kimi's 120s budget, then a fresh DeepSeek turn) for an answer instead of an error — Nicholas's call, and reversible via `LLM_FAILOVER_ON`. Kimi's quota wording remains an unverified guess; only exhausting the account once will settle it.
+
+**State: 14/14 suites green** (the 13 from 081/082 plus **083 70/70**), `main.py` imports clean, live tree git-clean after every run. Staged at `.proposed_changes/083-kimi-failure-handling/` — **not applied**; Nicholas applies + archives manually.

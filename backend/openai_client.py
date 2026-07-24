@@ -34,9 +34,10 @@ import logging
 import os
 from typing import Any
 
-import httpx
+import httpx  # noqa: F401 — kept in this module's API surface (probes/tests import it here)
 
 import llm_limits
+import llm_transport  # 083 — shared timeout/retry/error policy for every OpenAI-format rail
 import openai_compat
 
 log = logging.getLogger(__name__)
@@ -67,7 +68,9 @@ def provider_name() -> str:
 
 
 def _timeout() -> float:
-    return float(os.getenv("OPENAI_TIMEOUT_S", "60"))
+    """TOTAL wall-clock budget for one model call, retries included (083).
+    Was a flat 60s per-attempt read timeout. Kept as a thin delegator."""
+    return llm_transport.budget_seconds(provider_name().upper())
 
 
 def _use_completion_tokens() -> bool:
@@ -102,7 +105,16 @@ def can_fall_back(attachments: list[dict[str, Any]] | None) -> bool:
 
 
 class OpenAIError(Exception):
-    """Any OpenAI fetch/parse failure. Caught by the rail dispatcher."""
+    """Any OpenAI fetch/parse failure. Caught by the rail dispatcher.
+
+    083: carries a machine-readable `reason`, same contract as `KimiError` /
+    `DeepSeekError`. Keyword-only and optional — existing constructions still work.
+    """
+
+    def __init__(self, message: str, *, reason: str | None = None) -> None:
+        super().__init__(message)
+        self.reason = reason
+        self.failover_reason = reason
 
 
 def _mock_complete(messages: list[dict[str, Any]]) -> dict[str, Any]:
@@ -145,25 +157,18 @@ async def complete(
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = "auto"
+    # 083 — shared transport. The response body is still preserved inside the
+    # message (the 065 verbose-error path needs the provider's own reason, e.g.
+    # `insufficient_quota`, to classify a usage limit rather than a generic fail).
     try:
-        async with httpx.AsyncClient(timeout=_timeout()) as client:
-            resp = await client.post(
-                f"{_base_url()}/chat/completions",
-                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                json=payload,
-            )
-        resp.raise_for_status()
-        data = resp.json()
-    except (httpx.HTTPError, ValueError) as e:
-        # Preserve the response body when there is one — the 065 verbose-error
-        # path needs the provider's own reason (e.g. `insufficient_quota`) to
-        # classify this as a usage limit rather than a generic API failure.
-        detail = ""
-        r = getattr(e, "response", None)
-        if r is not None:
-            try:
-                detail = f" — {r.text[:300]}"
-            except Exception:  # noqa: BLE001 — detail is best-effort only
-                detail = ""
-        raise OpenAIError(f"openai request failed: {e}{detail}") from e
+        data = await llm_transport.post_chat_completion(
+            url=f"{_base_url()}/chat/completions",
+            api_key=key,
+            payload=payload,
+            provider="openai",
+            prefix=provider_name().upper(),
+            model=openai_model(),
+        )
+    except llm_transport.LLMTransportError as e:
+        raise OpenAIError(str(e), reason=e.reason) from (e.__cause__ or e)
     return openai_compat.parse_choice(data)
