@@ -31,9 +31,10 @@ import logging
 import os
 from typing import Any
 
-import httpx
+import httpx  # noqa: F401 — kept in this module's API surface (probes/tests import it here)
 
 import llm_limits
+import llm_transport  # 083 — shared timeout/retry/error policy for every OpenAI-format rail
 import openai_compat
 
 log = logging.getLogger(__name__)
@@ -52,7 +53,9 @@ def deepseek_model() -> str:
 
 
 def _timeout() -> float:
-    return float(os.getenv("DEEPSEEK_TIMEOUT_S", "60"))
+    """TOTAL wall-clock budget for one model call, retries included (083).
+    Was a flat 60s per-attempt read timeout. Kept as a thin delegator."""
+    return llm_transport.budget_seconds(provider_name().upper())
 
 
 def deepseek_available() -> bool:
@@ -95,7 +98,19 @@ def can_fall_back(attachments: list[dict[str, Any]] | None) -> bool:
 
 
 class DeepSeekError(Exception):
-    """Any DeepSeek fetch/parse failure. Caught by the failover orchestrator."""
+    """Any DeepSeek fetch/parse failure. Caught by the failover orchestrator.
+
+    083: carries a machine-readable `reason` like `KimiError` does. DeepSeek is
+    the LAST rail, so nothing falls back beneath it — but the reason still reaches
+    `_classify_agent_error`, which is the difference between a user reading
+    "timed out, try again" and reading an empty error. `reason` is keyword-only
+    and optional, so existing single-arg constructions still work.
+    """
+
+    def __init__(self, message: str, *, reason: str | None = None) -> None:
+        super().__init__(message)
+        self.reason = reason
+        self.failover_reason = reason
 
 
 # --- translations -------------------------------------------------------------
@@ -145,15 +160,19 @@ async def complete(
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = "auto"
+    # 083 — shared transport. This rail had it WORST: no response body was kept at
+    # all, so a DeepSeek 4xx surfaced with the provider's reason discarded — and a
+    # timeout surfaced with nothing at all. It is the fallback, so a blind spot
+    # here turns one failed turn into two.
     try:
-        async with httpx.AsyncClient(timeout=_timeout()) as client:
-            resp = await client.post(
-                f"{_base_url()}/chat/completions",
-                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                json=payload,
-            )
-        resp.raise_for_status()
-        data = resp.json()
-    except (httpx.HTTPError, ValueError) as e:
-        raise DeepSeekError(f"deepseek request failed: {e}") from e
+        data = await llm_transport.post_chat_completion(
+            url=f"{_base_url()}/chat/completions",
+            api_key=key,
+            payload=payload,
+            provider="deepseek",
+            prefix=provider_name().upper(),
+            model=deepseek_model(),
+        )
+    except llm_transport.LLMTransportError as e:
+        raise DeepSeekError(str(e), reason=e.reason) from (e.__cause__ or e)
     return _parse_choice(data)

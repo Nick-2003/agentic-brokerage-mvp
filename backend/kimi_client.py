@@ -27,8 +27,9 @@ import logging
 import os
 from typing import Any
 
-import httpx
+import httpx  # noqa: F401 — re-exported timeout helpers keep httpx in this module's API
 
+import llm_transport  # 083 — shared timeout/retry/error policy for every OpenAI-format rail
 import openai_compat
 
 log = logging.getLogger(__name__)
@@ -62,7 +63,14 @@ def provider_name() -> str:
 
 
 def _timeout() -> float:
-    return float(os.getenv("KIMI_TIMEOUT_S", "60"))
+    """TOTAL wall-clock budget for one model call, retries included (083).
+
+    Was a flat 60s per-attempt read timeout — measured to be right at the edge of
+    a healthy turn (live iterations completed in ~55s), so an ordinary slow turn
+    surfaced as `KimiError: kimi request failed:` with an EMPTY message. Kept as a
+    thin delegator so anything reading it keeps working.
+    """
+    return llm_transport.budget_seconds(provider_name().upper())
 
 
 def kimi_available() -> bool:
@@ -94,7 +102,19 @@ def can_fall_back(attachments: list[dict[str, Any]] | None) -> bool:
 
 
 class KimiError(Exception):
-    """Any Kimi fetch/parse failure. Caught by the rail dispatcher."""
+    """Any Kimi fetch/parse failure. Caught by the rail dispatcher.
+
+    083: carries a machine-readable `reason` (`timeout`/`network`/`rate_limit`/
+    `overloaded`/None) so `agent._failover_reason` can route a TRANSPORT failure
+    to the DeepSeek fallback. Before this, a timeout matched none of the billing/
+    429/5xx markers and simply ended the turn. `reason` is keyword-only and
+    optional, so every existing single-arg `KimiError("…")` still works.
+    """
+
+    def __init__(self, message: str, *, reason: str | None = None) -> None:
+        super().__init__(message)
+        self.reason = reason
+        self.failover_reason = reason
 
 
 def _mock_complete(messages: list[dict[str, Any]]) -> dict[str, Any]:
@@ -137,25 +157,21 @@ async def complete(
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = "auto"
+    # 083 — one shared transport: deadline-bounded retries, and an error that is
+    # NEVER empty. The response body is still preserved inside the message, which
+    # is what 065's verbose-error path and the failover classifier read to tell a
+    # usage limit from a config bug.
     try:
-        async with httpx.AsyncClient(timeout=_timeout()) as client:
-            resp = await client.post(
-                f"{_base_url()}/chat/completions",
-                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                json=payload,
-            )
-        resp.raise_for_status()
-        data = resp.json()
-    except (httpx.HTTPError, ValueError) as e:
-        # Preserve the response body — 065's verbose-error path and the failover
-        # classifier both need the provider's own wording to tell a usage limit
-        # from a config bug.
-        detail = ""
-        r = getattr(e, "response", None)
-        if r is not None:
-            try:
-                detail = f" — {r.text[:300]}"
-            except Exception:  # noqa: BLE001 — detail is best-effort only
-                detail = ""
-        raise KimiError(f"kimi request failed: {e}{detail}") from e
+        data = await llm_transport.post_chat_completion(
+            url=f"{_base_url()}/chat/completions",
+            api_key=key,
+            payload=payload,
+            provider="kimi",
+            prefix=provider_name().upper(),
+            model=kimi_model(),
+        )
+    except llm_transport.LLMTransportError as e:
+        # Re-raise as this rail's own type (callers/tests catch KimiError), keeping
+        # the original httpx exception as __cause__ so the class name survives.
+        raise KimiError(str(e), reason=e.reason) from (e.__cause__ or e)
     return openai_compat.parse_choice(data)

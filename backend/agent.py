@@ -80,7 +80,14 @@ class ProviderFailover(Exception):
 
 
 def _failover_reasons() -> set[str]:
-    raw = os.getenv("LLM_FAILOVER_ON", "billing,rate_limit,overloaded")
+    # 083 — `timeout,network` added to the default. A Kimi read timeout used to
+    # match NOTHING here (no status, no billing prose), so the turn ended on a red
+    # bubble while a funded, healthy fallback rail sat unused. A transport failure
+    # is transient by definition, which is the same category as `overloaded`.
+    # Turn-restart is safe for the same reason 069 gave: every tool is a read
+    # while TRADING_ENABLED=0. Set LLM_FAILOVER_ON=billing,rate_limit,overloaded
+    # to restore the pre-083 fail-fast behaviour per deployment.
+    raw = os.getenv("LLM_FAILOVER_ON", "billing,rate_limit,overloaded,timeout,network")
     return {r.strip() for r in raw.split(",") if r.strip()}
 
 
@@ -104,6 +111,39 @@ _OPENAI_BILLING_MARKERS = (
 )
 
 
+# 083 — httpx transport exception names, matched on the error OR its __cause__.
+# A backstop for any rail that raises a bare httpx error without the `reason`
+# attribute (an Anthropic-SDK `APIConnectionError` wraps one, for instance).
+_NETWORK_EXC_NAMES = frozenset({
+    "ConnectError", "ReadError", "WriteError", "CloseError", "NetworkError",
+    "RemoteProtocolError", "ProtocolError", "ProxyError", "TransportError",
+    "ConnectionError", "ConnectionResetError",
+})
+
+
+def _transport_reason(e: Exception) -> str | None:
+    """The provider-declared failure reason, else None (083).
+
+    `timeout` / `network` / `rate_limit` / `overloaded` when the rail classified
+    it; the name-based backstop below only ever yields `timeout` / `network`.
+
+    Prefers the provider-declared `failover_reason` (set by `llm_transport` via
+    `KimiError`/`DeepSeekError`/`OpenAIError`) over guessing at prose — the 080
+    README's own caveat is that exhaustion WORDING is a guess, and this is the
+    class of failure where we don't have to guess: an exception type is a fact.
+    """
+    hint = getattr(e, "failover_reason", None)
+    if isinstance(hint, str) and hint:
+        return hint
+    for exc in (e, getattr(e, "__cause__", None)):
+        name = type(exc).__name__ if exc is not None else ""
+        if "Timeout" in name:
+            return "timeout"
+        if name in _NETWORK_EXC_NAMES:
+            return "network"
+    return None
+
+
 def _failover_reason(e: Exception) -> str | None:
     """Map a PRIMARY-rail error to a coarse failover reason, or None if it's not a
     usage-limit failure (auth/bad-request/etc. must NOT fail over — a config bug
@@ -111,12 +151,20 @@ def _failover_reason(e: Exception) -> str | None:
 
     Handles BOTH primaries (071): Anthropic SDK exceptions and OpenAI HTTP errors,
     whose bodies `openai_client.complete` preserves for exactly this reason.
+    083 adds transport failures (timeout/network) via the provider-declared hint.
     """
     text = str(e).lower()
+    # Billing FIRST, deliberately: a quota-exhaustion 429 carries the marker in its
+    # body AND classifies as `rate_limit` by status. Billing is the truer reason,
+    # and it's the one whose user-facing copy tells the operator to top up.
     if any(m in text for m in _BILLING_MARKERS) or any(
         m in text for m in _OPENAI_BILLING_MARKERS
     ):
         return "billing"
+    # 083 — the provider's own classification, ahead of the status/text heuristics.
+    transport = _transport_reason(e)
+    if transport is not None:
+        return transport
     if isinstance(e, RateLimitError) or "rate limit" in text or "429" in text:
         return "rate_limit"
     status = getattr(e, "status_code", None)
@@ -616,6 +664,38 @@ _MSG_GENERIC = "Something went wrong generating that. Please try again."
 
 _DETAIL_MAX = 300  # cap a provider message so it can't dump a huge blob
 
+# 083 — the verbose copy below used to hardcode "Anthropic API" and
+# "console.anthropic.com". Since 071 the primary is chosen by LLM_RAIL and is
+# currently KIMI, so those messages named the wrong provider and pointed the
+# operator at the wrong billing console. Rail-derived instead.
+_RAIL_API_LABELS = {
+    "anthropic": "Anthropic API",
+    "openai": "OpenAI API",
+    "deepseek": "DeepSeek API",
+    "kimi": "Kimi (Moonshot) API",
+}
+_RAIL_KEY_NAMES = {
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "kimi": "KIMI_API_KEY",
+}
+_RAIL_BILLING_FIX = {
+    "anthropic": "add credits at console.anthropic.com → Plans & Billing, then retry.",
+    "openai": "add credits at platform.openai.com → Billing, then retry.",
+    "deepseek": "top up at platform.deepseek.com, then retry.",
+    "kimi": "top up at platform.moonshot.ai, then retry.",
+}
+
+
+def _api_label() -> str:
+    """The active rail's human name, for user-facing error copy."""
+    return _RAIL_API_LABELS.get(_rail(), "The model API")
+
+
+def _billing_fix() -> str:
+    return _RAIL_BILLING_FIX.get(_rail(), "top up the provider account, then retry.")
+
 
 def _verbose_errors() -> bool:
     return os.getenv("CHAT_VERBOSE_ERRORS", "1") != "0"
@@ -650,12 +730,39 @@ def _classify_agent_error(e: Exception) -> tuple[str, str]:
     def _reason(fallback: str) -> str:
         return (pmsg or fallback).strip()[:_DETAIL_MAX]
 
+    api = _api_label()  # 083 — the ACTIVE rail, not a hardcoded "Anthropic"
+
     # Billing / quota — the account can't make calls.
     if any(m in text for m in _BILLING_MARKERS):
         if verbose:
             return (
-                f"Anthropic API — billing/credits: {_reason('your credit balance is too low.')} "
-                "(Fix: add credits at console.anthropic.com → Plans & Billing, then retry.)",
+                f"{api} — billing/credits: {_reason('your credit balance is too low.')} "
+                f"(Fix: {_billing_fix()})",
+                "provider_unavailable",
+            )
+        return _MSG_UNAVAILABLE, "provider_unavailable"
+
+    # 083 — TRANSPORT failure. This branch is the reported bug: a Kimi read
+    # timeout fell through every branch below to the generic one, which renders
+    # `f"Error: {type(e).__name__}: {str(e)}"` — and `str(e)` on a mapped httpx
+    # timeout is EMPTY, so the user saw "Error: KimiError: kimi request failed:"
+    # with nothing after the colon. Placed above the SDK-class branches because
+    # an Anthropic `APIConnectionError` wrapping a timeout is a timeout first.
+    transport = _transport_reason(e)
+    if transport == "timeout":
+        if verbose:
+            return (
+                f"{api} — timed out: the model didn't answer within the time budget. "
+                "Try again, or ask for one thing at a time. "
+                "(Operator: raise <RAIL>_TIMEOUT_S if this is routine.)",
+                "provider_timeout",
+            )
+        return _MSG_BUSY, "provider_timeout"
+    if transport == "network":
+        if verbose:
+            return (
+                f"{api} — connection failed ({type(e).__name__}): couldn't reach the "
+                "provider. Check connectivity and retry.",
                 "provider_unavailable",
             )
         return _MSG_UNAVAILABLE, "provider_unavailable"
@@ -664,7 +771,7 @@ def _classify_agent_error(e: Exception) -> tuple[str, str]:
     if isinstance(e, RateLimitError) or "rate limit" in text or "429" in text:
         if verbose:
             return (
-                f"Anthropic API — rate limited (HTTP {status or 429}): too many requests. "
+                f"{api} — rate limited (HTTP {status or 429}): too many requests. "
                 "Wait a moment and try again.",
                 "rate_limited",
             )
@@ -672,10 +779,11 @@ def _classify_agent_error(e: Exception) -> tuple[str, str]:
 
     # Auth / permission — a key/config problem, not the user.
     if isinstance(e, (AuthenticationError, PermissionDeniedError)):
+        key_hint = "Check " + _RAIL_KEY_NAMES.get(_rail(), "the rail's API key") + "."
         return (
             (
-                f"Anthropic API — authentication (HTTP {status or 401}): the API key was "
-                f"rejected. {_reason('Check ANTHROPIC_API_KEY.')}"
+                f"{api} — authentication (HTTP {status or 401}): the API key was "
+                f"rejected. {_reason(key_hint)}"
                 if verbose
                 else _MSG_UNAVAILABLE
             ),
@@ -686,7 +794,7 @@ def _classify_agent_error(e: Exception) -> tuple[str, str]:
     if isinstance(e, APIConnectionError):
         return (
             (
-                f"Anthropic API — connection failed ({type(e).__name__}): couldn't reach the "
+                f"{api} — connection failed ({type(e).__name__}): couldn't reach the "
                 "provider. Check connectivity and retry."
                 if verbose
                 else _MSG_UNAVAILABLE
@@ -698,12 +806,18 @@ def _classify_agent_error(e: Exception) -> tuple[str, str]:
     if isinstance(e, APIStatusError):
         if verbose:
             label = f"HTTP {status}" + (f" {etype}" if etype else "")
-            return (f"Anthropic API error ({label}): {_reason(str(e))}", "provider_error")
+            return (f"{api} error ({label}): {_reason(str(e))}", "provider_error")
         return _MSG_UNAVAILABLE, "provider_error"
 
     # Non-provider failure (a bug in our loop / an unexpected crash).
     if verbose:
-        return (f"Error: {type(e).__name__}: {str(e)[:_DETAIL_MAX]}", "agent_error")
+        # 083 — `or "(no detail)"` completes the never-an-empty-error guarantee:
+        # this is the branch the empty-message Kimi timeout rendered through, and
+        # any other message-less exception would read the same way.
+        return (
+            f"Error: {type(e).__name__}: {str(e)[:_DETAIL_MAX] or '(no detail)'}",
+            "agent_error",
+        )
     return _MSG_GENERIC, "agent_error"
 
 
