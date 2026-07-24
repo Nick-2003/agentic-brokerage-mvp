@@ -73,17 +73,24 @@ def run() -> None:
 
 
 def main() -> int:
-    if not os.path.isfile(PROP):
-        print(f"missing proposal file: {PROP}")
-        return 1
+    # 082 — LIVE MODE (078's rule, which this older test predates). 062's staged
+    # dir was removed after it was applied, so the temp-apply below could no
+    # longer find its source and the whole suite went red. When the staged dir is
+    # gone the proposal IS the live tree: assert against what's installed and
+    # apply/restore nothing.
+    live_mode = not os.path.isfile(PROP)
     bak = LIVE + ".062bak"
-    shutil.copy2(LIVE, bak)
-    try:
-        shutil.copy2(PROP, LIVE)
+    if live_mode:
+        print("(staged dir absent — 062 is applied; asserting against the LIVE tree)")
         run()
-    finally:
-        shutil.copy2(bak, LIVE)
-        os.remove(bak)
+    else:
+        shutil.copy2(LIVE, bak)
+        try:
+            shutil.copy2(PROP, LIVE)
+            run()
+        finally:
+            shutil.copy2(bak, LIVE)
+            os.remove(bak)
 
     total, passed = len(results), sum(results)
     print(f"\n{passed}/{total} checks passed")

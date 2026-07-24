@@ -424,6 +424,73 @@ def _restore_screenshot_in_widget(
 
 
 # ---------------------------------------------------------------------------
+# 082 — normalise inline HTML emphasis → Markdown in PLAIN replies.
+#
+# The chat bubble renders Markdown and deliberately does NOT parse raw HTML
+# (049), so a model that writes `<strong>NVDA</strong>` in a plain reply shows
+# the literal angle brackets. 062 fixed this with a system-prompt rule — and it
+# came back.
+#
+# The lesson: **062 tried to fix a model behaviour with a prompt, and prompts
+# don't survive a model swap.** That rule was tuned against Claude; the rail is
+# now Kimi (080) and has been DeepSeek (074) in between. Worse, 077 massively
+# widened the blast radius — plain replies used to be rare ("what does PEG
+# mean?"), but every options-chain answer is now a plain reply *and a table*,
+# which invites emphasis markup.
+#
+# So this is deterministic, in ONE place, on the single message-emission path —
+# which means it holds for every current and future rail. The prompt rule stays
+# (it reduces occurrences); we simply stop *relying* on it.
+#
+# Scope discipline:
+#   • ONLY the four emphasis tags the prompt rule names (strong/b/em/i).
+#   • This is NOT a general HTML sanitiser and must not become one. Converting
+#     to Markdown emphasis is safe precisely because `**` is Markdown, not HTML;
+#     every other tag stays literal text, preserving 049's no-raw-HTML choice.
+#   • Code spans and fenced blocks are left ALONE — "what does `<strong>` do?"
+#     must keep its angle brackets.
+#   • WIDGET text fields are untouched: they legitimately use `<strong>` and are
+#     rendered through DOMPurify (`SafeHtml`). Only the plain-message branch of
+#     `_finalize_terminal_widget` calls this.
+# ---------------------------------------------------------------------------
+
+# Split on fenced blocks (```…```) and inline code spans (`…`) so we never
+# rewrite an example the user explicitly asked to see.
+_CODE_SEGMENT_RE = re.compile(r"(```.*?```|`[^`\n]*`)", re.DOTALL)
+
+# Optional attributes tolerated (`<strong class="x">`); inner text must be
+# non-empty, else `<strong></strong>` would become a broken `****`.
+# No DOTALL: emphasis shouldn't span paragraphs.
+_EMPHASIS_PATTERNS = (
+    (re.compile(r"<(strong|b)\b[^>]*>(.+?)</\1>", re.IGNORECASE), r"**\2**"),
+    (re.compile(r"<(em|i)\b[^>]*>(.+?)</\1>", re.IGNORECASE), r"_\2_"),
+)
+
+
+def _html_emphasis_to_markdown(text: str) -> str:
+    """Convert `<strong>`/`<b>`/`<em>`/`<i>` pairs to Markdown, outside code.
+
+    Idempotent (a second pass finds no tags) and conservative: unmatched or
+    stray tags are left as-is rather than guessed at.
+    """
+    if not text or "<" not in text:
+        return text
+
+    def _convert(chunk: str) -> str:
+        for pattern, repl in _EMPHASIS_PATTERNS:
+            # Loop so nested pairs (<strong><em>x</em></strong>) fully resolve.
+            for _ in range(3):
+                chunk, n = pattern.subn(repl, chunk)
+                if not n:
+                    break
+        return chunk
+
+    # Odd indices are the captured code segments — pass them through verbatim.
+    parts = _CODE_SEGMENT_RE.split(text)
+    return "".join(p if i % 2 else _convert(p) for i, p in enumerate(parts))
+
+
+# ---------------------------------------------------------------------------
 # 069 — shared terminal emission (widget/message + 067 trust validation).
 # Extracted so BOTH provider loops (Anthropic and DeepSeek) run the IDENTICAL
 # trust check + fail-closed behaviour — a weaker fallback model must not get a
@@ -483,6 +550,10 @@ async def _finalize_terminal_widget(
             tracer.set_output(out)
             yield {"event": "widget", "data": widget}
     elif full_text:
+        # 082 — plain replies are rendered as Markdown, not HTML: normalise any
+        # inline emphasis tags the model slipped in so they render as bold/italic
+        # instead of literal angle brackets. Widget fields (above) are untouched.
+        full_text = _html_emphasis_to_markdown(full_text)
         tracer.set_output({"kind": "message", "text": full_text})
         yield {"event": "message", "data": {"text": full_text}}
 
