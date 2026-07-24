@@ -759,6 +759,59 @@ async def get_technical_levels(args: dict[str, Any], user_id: str) -> dict[str, 
     return await _yfinance_technical_levels(ticker, timeframe, indicators)
 
 
+# ---------------------------------------------------------------------------
+# 081 — third tier for the chart VERBS.
+#
+# `get_technical_levels` has three tiers (mock → TradingView MCP → yfinance-
+# computed) and degrades gracefully. The chart verbs below had only TWO
+# (mock | MCP) and hard-errored when TradingView Desktop wasn't reachable —
+# so "add RSI to NVDA" returned `{"error": "tradingview_mcp_unreachable"}` and
+# the model narrated its own status prose at the user.
+#
+# The asymmetry was never justified: since 044 the frontend renders charts
+# in-app from data, so the *indicator values and levels* are perfectly
+# serviceable without TradingView. Only the live-chart manipulation (and its
+# screenshot) genuinely requires TV Desktop.
+#
+# So: on MCP failure, fall through to the SAME tier-3 helper the read path uses,
+# and annotate honestly that the live chart could not be driven. `sources`
+# already self-labels as "Daily OHLC via yfinance · Nd" (029's discipline), so
+# the card can never claim live TradingView over computed numbers.
+# ---------------------------------------------------------------------------
+
+
+async def _chart_verb_fallback(
+    ticker: str,
+    timeframe: str,
+    indicators: list[str],
+    *,
+    mcp_error: Exception,
+    error_code: str,
+) -> dict[str, Any]:
+    """Degrade a chart verb to yfinance-computed levels, or surface the honest error.
+
+    Never fabricates: if the computed tier ALSO fails, the caller gets the original
+    MCP error rather than a hollow success.
+    """
+    if not _yfinance_ta_available():
+        return {"error": error_code, "ticker": ticker, "message": str(mcp_error)}
+
+    log.info("chart verb: TradingView unreachable for %s (%s); computing from yfinance",
+             ticker, error_code)
+    out = await _yfinance_technical_levels(ticker, timeframe, indicators)
+    if "error" in out:
+        # Computed tier failed too — report the ORIGINAL cause, not a second-order one.
+        return {"error": error_code, "ticker": ticker, "message": str(mcp_error)}
+
+    # Machine-readable so the agent states this plainly instead of inventing prose.
+    out["chart_control"] = "unavailable"
+    out["chart_control_reason"] = (
+        "The live TradingView chart could not be driven "
+        f"({error_code}). Indicator values below are computed from daily data."
+    )
+    return out
+
+
 async def chart_apply_indicator(args: dict[str, Any], user_id: str) -> dict[str, Any]:
     """Add (or remove) an indicator and return the updated ta_chart payload."""
     ticker = (args.get("ticker") or "").upper()
@@ -784,7 +837,13 @@ async def chart_apply_indicator(args: dict[str, Any], user_id: str) -> dict[str,
         # Re-read the chart state so the agent gets a fresh, complete payload
         return await _real_technical_levels(ticker, timeframe, [indicator])
     except MCPClientError as e:
-        return {"error": e.code, "ticker": ticker, "message": str(e)}
+        # 081 — the indicator the user asked for is still computable without TV.
+        out = await _chart_verb_fallback(
+            ticker, timeframe, [indicator], mcp_error=e, error_code=e.code
+        )
+        if "error" not in out:
+            out["_action"] = action
+        return out
 
 
 async def chart_draw_levels(args: dict[str, Any], user_id: str) -> dict[str, Any]:
@@ -820,7 +879,18 @@ async def chart_draw_levels(args: dict[str, Any], user_id: str) -> dict[str, Any
             })
         return await _real_technical_levels(ticker, timeframe, ["SMA 50", "SMA 200"])
     except MCPClientError as e:
-        return {"error": e.code, "ticker": ticker, "message": str(e)}
+        # 081 — the levels are the USER's own numbers, so they survive the outage:
+        # carry them through (as the mock branch does) and let the in-app chart
+        # render them. Only the TradingView drawing itself is lost.
+        out = await _chart_verb_fallback(
+            ticker, timeframe, ["SMA 50", "SMA 200"], mcp_error=e, error_code=e.code
+        )
+        if "error" not in out:
+            out["key_levels"] = {
+                "support": [round(float(v), 2) for v in support],
+                "resistance": [round(float(v), 2) for v in resistance],
+            }
+        return out
 
 
 async def chart_scroll_to_date(args: dict[str, Any], user_id: str) -> dict[str, Any]:
@@ -846,7 +916,16 @@ async def chart_scroll_to_date(args: dict[str, Any], user_id: str) -> dict[str, 
         await tv_call("chart_scroll_to_date", {"date": target_date})
         return await _real_technical_levels(ticker, timeframe, ["SMA 50", "SMA 200"])
     except MCPClientError as e:
-        return {"error": e.code, "ticker": ticker, "message": str(e)}
+        # 081 — scrolling is a genuine VIEWPORT action with no data equivalent, so
+        # the fallback deliberately reports `_scroll_requested`, NOT `_scrolled_to`:
+        # the levels are real, but the chart was never moved and we must not imply
+        # otherwise. (`_scrolled_to` is set only on the paths that actually scrolled.)
+        out = await _chart_verb_fallback(
+            ticker, timeframe, ["SMA 50", "SMA 200"], mcp_error=e, error_code=e.code
+        )
+        if "error" not in out:
+            out["_scroll_requested"] = target_date
+        return out
 
 
 # ---------------------------------------------------------------------------

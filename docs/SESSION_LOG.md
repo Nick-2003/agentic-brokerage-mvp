@@ -1246,3 +1246,34 @@ Ten proposals, all **applied & committed** (PRs #129–#138). The through-line: 
 **Assumptions introduced (all flagged, none silently accepted):** Kimi's quota-exhaustion wording is a **defensive guess** — if it doesn't match, failover silently won't fire (068's trap again); Moonshot/DeepSeek retention terms unverified; 079's healthy `live` branch has only been exercised against fixtures, never during US market hours.
 
 **State:** `LLM_RAIL=kimi` primary with DeepSeek beneath — a real two-deep chain for the first time. 19 tools. Trust #1/#3 enforced in code (`enforce`) plus, since 079, a tool-boundary sanity layer the validator structurally cannot provide. Trading still disabled.
+
+---
+
+## 2026-07-24 · 081–082 — failure handling: stop inventing prose, stop trusting prompts
+
+Two fixes, both **found by using the product** rather than by reading it — the 077/080 smoke-test screenshots surfaced them. They look unrelated (a chart error, a bold-text glitch) but share a root: **behaviour that was only ever guaranteed by a system prompt, on a stack whose model changes every few weeks.**
+
+**082 — `<strong>` leaking into plain replies, again.** 062 fixed this in July with a prompt rule; the rule is **still in `system.md`** (verified — nothing was lost or overwritten). What changed sat underneath it:
+
+1. **The rail changed.** 062 was tuned against Claude. The primary has since been DeepSeek (074) and is now Kimi (080). *A prompt instruction is a per-model behaviour, and prompts don't survive a model swap.*
+2. **077 widened the blast radius.** Plain replies used to be rare ("what does PEG mean?"). Now **every options-chain answer is a plain reply *and* a table** — the exact context that invites emphasis markup.
+
+So the guarantee moved into code: one `_html_emphasis_to_markdown()` at the **single** message-emission site in `_finalize_terminal_widget`. Because both provider loops funnel through that shared finalizer, **one call site covers every current and future rail** — asserted structurally, not assumed. Deliberately **not a sanitiser**: only the four emphasis tags the prompt already names, so `<div>`/`<script>` stay literal and 049's no-raw-HTML choice for chat bubbles survives. Widget fields are byte-identical (they legitimately use `<strong>` via DOMPurify); code spans and fenced blocks pass through verbatim so *"what does `<strong>` do?"* keeps its angle brackets. Conservative on empty/stray/nested; idempotent. **The prompt rule stays — it reduces occurrences — but it is no longer load-bearing.**
+
+*Also caught:* `test_062` asserts the **prompt text**, never the output. That is precisely why the bug could return unnoticed, and why 082's suite asserts **behaviour**. `test_062` was additionally **crashing** (pre-existing — its staged dir was removed post-apply; 078's LIVE-MODE fix predated this older test), so 082 converted it.
+
+**081 — "Live chart overlay could not be updated (TradingView MCP unavailable)".** Two separate problems.
+
+**First: that sentence is not in the codebase.** Grepped for it — the *model* wrote it. The tool returned a structured `{"error": "tradingview_mcp_unreachable", …}` and Kimi paraphrased it into its own status prose. Roughly faithful here, but composing failure explanations is a habit that eventually produces a confident wrong one. New rule: **relay the tool's own `message`/`error`; never invent status prose** — *a plausible-sounding invented cause is worse than an accurate terse one.* Same logic as "no number without a source," applied to explanations.
+
+**Second: an asymmetry that was never justified.** `get_technical_levels` has three tiers (mock → TradingView MCP → **yfinance-computed**) and degrades gracefully; the `chart_*` verbs had **two** and hard-errored the moment TV Desktop was unreachable. That made sense when a chart *was* TradingView — but since **044** the frontend renders charts in-app from data, so indicator values and levels never needed TradingView at all. Only the live manipulation and its screenshot do. A shared `_chart_verb_fallback()` now reuses the *same* tier-3 helper: `chart_apply_indicator` computes the requested indicator; `chart_draw_levels` **keeps the user's own S/R** (user input survives the outage); `chart_scroll_to_date` returns **`_scroll_requested`, never `_scrolled_to`** — the viewport genuinely did not move, and encoding otherwise would bake a small lie into the payload. Degraded payloads carry `chart_control: "unavailable"` + a reason, and `sources` already self-labels *"Daily OHLC via yfinance · Nd"* (029), so a degraded card cannot claim live TradingView. **Never fabricates:** if the computed tier also fails, the caller gets the **original** MCP error, not a hollow success.
+
+**Root cause of the sighting itself was config:** `backend/.env` had `USE_MOCK_TA=0` while the comment directly above it said to leave it at `1` — so every `chart_*` call tried to reach TV Desktop. Flipped; 081 removes the underlying cliff regardless.
+
+**Decisions surfaced.** *Anything guaranteed only by a system-prompt rule is a candidate to break on the next rail change* — that is now the standing test for whether a fix belongs in code. The notable one still outstanding: 077's "copy options numbers verbatim," since markdown replies bypass the 067 validator entirely.
+
+**Assumptions/corrections.** Guessed the MCP exception class was `MCPServerUnreachable`; it is **`MCPUnreachable`** — the test caught it on the first run. 081 and 082 are independent (disjoint files) and were regression-tested together anyway.
+
+**State: the full suite is green for the first time this arc — 13/13 (062 7 · 063 14 · 067 27 · 069_client 24 · 069_phase2 21 · 070 19 · 071 39 · 073 32 · 074 23 · 076 23 · 077 19 · 079 24 · 080 28).** 19 tools, `LLM_RAIL=kimi` with DeepSeek beneath. **⚠️ 082 is committed (#140); 081 is applied to the working tree but NOT yet committed** — `technicals.py`, `system.md` modified and `scripts/test_081_chart_degradation.py` untracked, so a redeploy from git would ship without it. Trading still disabled.
+
+**Still open** from the failure-handling plan: no test asserts **what a user actually sees** when a subsystem is down (every suite covers success paths and refusals), and there is **no telemetry on tool error rates** — Langfuse already records tool results, so a "which tools error most" view would have surfaced the TradingView issue before a human did.
