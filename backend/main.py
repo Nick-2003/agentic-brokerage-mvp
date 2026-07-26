@@ -60,7 +60,13 @@ import security  # noqa: E402  (W6.6 — rate limit + security headers)
 import token_budget  # noqa: E402  (P5 / 034 — per-user daily LLM token budget)
 import waitlist_api  # noqa: E402  (W4 — IBKR connect + waitlist router)
 import webhooks  # noqa: E402  (W6 — Twilio inbound STOP/START webhook)
-from agent import MODEL, _classify_agent_error, _rail, run_chat  # noqa: E402  (069: run_chat wraps run_agent + DeepSeek failover; 073: _rail for /healthz)
+from agent import (  # noqa: E402  (069: run_chat wraps run_agent + DeepSeek failover; 073: _rail; 084: failover_status)
+    MODEL,
+    _classify_agent_error,
+    _rail,
+    failover_status,
+    run_chat,
+)
 import deepseek_client  # noqa: E402  — 073: /healthz key-presence only
 import llm_limits  # noqa: E402  — 073: report the active cap
 import kimi_client  # noqa: E402  — 080: /healthz rail + key-presence
@@ -136,6 +142,11 @@ async def healthz() -> dict[str, Any]:
         "deepseek_key_present": deepseek_client.deepseek_available(),
         "kimi_key_present": kimi_client.kimi_available(),  # 080 — boolean only
         "fallback_enabled": deepseek_client.fallback_enabled(),
+        # 084 — is the DeepSeek failover actually ARMED for the current rail? A deploy
+        # can have fallback_enabled=1 but LLM_FAILOVER_ON without `timeout`, so a Kimi
+        # timeout still dies (seen live 2026-07-26). `failover.armed=false` on a
+        # non-DeepSeek rail flags exactly that drift, instead of it being silent.
+        "failover": failover_status(),
         "tools_registered": list(TOOL_REGISTRY.keys()),
         "alpaca_configured": bool(
             os.getenv("ALPACA_API_KEY", "").startswith("PK")

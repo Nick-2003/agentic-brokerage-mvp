@@ -1319,3 +1319,33 @@ Nothing after the colon. Twice, on `LLM_RAIL=kimi` — the **primary** rail. The
 **Assumptions.** Failing over on a timeout trades a longer worst case (Kimi's 120s budget, then a fresh DeepSeek turn) for an answer instead of an error — Nicholas's call, and reversible via `LLM_FAILOVER_ON`. Kimi's quota wording remains an unverified guess; only exhausting the account once will settle it.
 
 **State: 14/14 suites green** (the 13 from 081/082 plus **083 70/70**), `main.py` imports clean, live tree git-clean after every run. Staged at `.proposed_changes/083-kimi-failure-handling/` — **not applied**; Nicholas applies + archives manually.
+
+---
+
+## 2026-07-26 · 084 — turn robustness: no silent turns, no raw-JSON leaks, a whole-turn cap
+
+Found the way 081/082/083 were — **by using the product.** 083 fixed the empty timeout *message*; using the app then surfaced three *new* ways the primary rail failed in front of a user, plus a bug in 083's own copy. Two PostHog `chat_error` types + three screenshots.
+
+1. **A silent "DONE".** *"give me a tldr on my portfolio"* → `DONE·114s`, tools ran, **blank card** — no answer, no error.
+2. **Raw widget JSON dumped as chat.** *"how risky is my book?"* → a screenful of `{"type":"portfolio_risk",…}` pasted into the bubble.
+3. **A 189s turn, then an error** — and the error read *"…(Operator: raise `<RAIL>_TIMEOUT_S` if this is routine.)"*: an unrendered placeholder **plus an operator instruction**, shown to the user. That's my own 083 copy, and it's the exact thing 083 was supposed to end.
+
+The prior session's closing note predicted all of this: *"no test asserts what a user actually sees when a subsystem is down."* Every suite covered success paths and refusals; the blank-card and JSON-dump paths had no coverage at all.
+
+**Root cause of 1 and 2 is one function.** `_finalize_terminal_widget` — the shared terminal emitter (069, so all three rails funnel through it) — had exactly two branches: `if widget: … elif full_text: …`. That leaves two silent/ugly gaps:
+- **Empty terminal text** (the model put everything in the last tool round, then returned an empty assistant turn — routine on a slow rail) → **neither branch fires, nothing is emitted.** `done` closes the stream over a blank card.
+- **A truncated widget** (a slow rail cut off the large `portfolio_risk` object) → `_extract_widget_json` returns None (063's quote-repair fixes an unescaped quote, not a cut-off object), so it falls to `elif full_text:` and **dumps the raw JSON as a message.** The emitter couldn't tell prose from a widget that failed to parse.
+
+**The fix — the no-widget path now has three explicit outcomes, never zero.** A new conservative `_looks_like_widget_attempt` (a JSON-object shape **and** a `"type"` key) tells a broken widget from prose: broken → log the full text server-side, emit a graceful `widget_unrenderable`, and **never put the JSON in the payload**; prose → a `message` as before; **empty → an explicit `empty_response` error.** *A turn can no longer end silently* — asserted directly. One change, every rail.
+
+**The unbounded turn (3).** 083's `<RAIL>_TIMEOUT_S` is **per model-call**; a turn makes up to `MAX_TOOL_ITERATIONS` calls in series, so the *total* was uncapped (~20 min worst case). New `CHAT_TURN_BUDGET_S` (default 300s, 0 disables), checked at the top of both loops. On breach: an explicit `turn_timeout`, and **deliberately no failover** — a mid-turn restart on DeepSeek would *double* the wait, the opposite of a cap's purpose (the per-call failover from 083 still catches a single timing-out call). Uses `break` so it reports as a timeout, not a max-iterations stall.
+
+**The 083 copy (4).** Dropped the operator parenthetical and the `<RAIL>` placeholder from the user bubble entirely — the tuning hint belongs in logs + `.env.example`, and the full exception is already logged by the caller. Now just: *"Kimi (Moonshot) API — timed out: the model didn't answer in time. Try again, or ask for one thing at a time."*
+
+**Why the failover didn't fire, and the self-check for it.** Screenshot 3's turn *errored* rather than handing to DeepSeek: the deployed `LLM_FAILOVER_ON` predates 083's widened default and omits `timeout` — and **nothing reported that drift** (the trap 083's own operator step named — env beats code default). New `failover_status()` on `/healthz` reports `armed`, which is **false** when `timeout` is missing even though the key + flag are present, so the misconfig is visible instead of silent. `applicable:false` on the DeepSeek rail (nothing beneath the last resort is correct, not a misconfig).
+
+**Decisions surfaced.** The standing lesson held again: the finalizer's silent gap and the per-call-vs-per-turn budget were both invariants nothing tested from the *user's* side. 084 makes "what does the user see when this subsystem degrades" a first-class assertion for the LLM path — every terminal outcome is now an explicit, telemetry-visible event.
+
+**Assumptions.** `CHAT_TURN_BUDGET_S=300` is a guess at "long enough for a legitimate multi-tool turn (the successful ones took 114s), short enough that a user hasn't given up" — env-tunable, reversible. The turn cap is **not** wired to failover on purpose; if that turns out wrong, one line changes it.
+
+**State: 15/15 suites green** (the 14 through 083 plus **084 35/35**), `main.py` imports clean, live tree git-clean after every run. Staged at `.proposed_changes/084-turn-robustness/` — **not applied**; Nicholas applies + archives manually. **Operator: arm the failover** (`LLM_FAILOVER_ON` incl. `timeout,network`; `LLM_FALLBACK_ENABLED=1`; `DEEPSEEK_API_KEY` on the web service) and confirm `/healthz` → `failover.armed:true`. Trading still disabled.

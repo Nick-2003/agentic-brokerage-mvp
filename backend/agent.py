@@ -180,6 +180,33 @@ def _failover_reason(e: Exception) -> str | None:
     return None
 
 
+def failover_status() -> dict[str, Any]:
+    """Whether the DeepSeek failover is actually ARMED — surfaced on /healthz (084).
+
+    083's operator step warned that an env value beats the code default: a deploy
+    can have `LLM_FALLBACK_ENABLED=1` yet an `LLM_FAILOVER_ON` that omits `timeout`,
+    so a Kimi timeout still dies on the user (exactly what happened live 2026-07-26).
+    That drift was invisible — nothing reported it. This makes it a boolean anyone
+    can read.
+
+    `applicable` is False when the primary IS the last-resort rail (DeepSeek): there
+    is correctly nothing beneath it, so "not armed" is expected, not a misconfig.
+    """
+    reasons = sorted(_failover_reasons())
+    enabled = deepseek_client.fallback_enabled()
+    key_present = deepseek_client.deepseek_available()
+    applicable = _rail() != "deepseek"
+    return {
+        "applicable": applicable,
+        "reasons": reasons,
+        "fallback_enabled": enabled,
+        "deepseek_key_present": key_present,
+        "timeout_covered": "timeout" in reasons,
+        # Armed = the fallback can actually fire for the common transient failures.
+        "armed": bool(applicable and enabled and key_present and "timeout" in reasons),
+    }
+
+
 def _should_failover(e: Exception, attachments: list[dict[str, Any]] | None) -> str | None:
     """The reason to fail over, or None. Requires: fallback on, DeepSeek usable,
     this turn is fall-back-eligible (no images — DeepSeek has no vision), and the
@@ -237,6 +264,34 @@ def _load_system_prompt() -> str:
 SYSTEM_PROMPT = _load_system_prompt()
 MODEL = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-5")
 MAX_ITERATIONS = int(os.getenv("MAX_TOOL_ITERATIONS", "10"))
+
+# 084 — a wall-clock budget for the WHOLE turn, distinct from the PER-CALL budget
+# (`<RAIL>_TIMEOUT_S`, 083). A turn can run several model calls back-to-back
+# (`MAX_ITERATIONS` × per-call budget = up to ~20 min), each individually under
+# its own timeout, so nothing capped the total — the 189s-then-error / minutes-long
+# turns seen live on 2026-07-26. This bounds the whole turn; on breach the loop
+# stops with an explicit `turn_timeout` (never a silent hang). 0 disables.
+# NB: this is intentionally NOT a failover trigger — a mid-turn restart on DeepSeek
+# would DOUBLE the wait, the opposite of what a turn cap is for. The per-call
+# failover (083) still handles a single timing-out model call.
+_TURN_TIMEOUT_MSG = (
+    "That took too long to put together, so I stopped. "
+    "Please try again, or ask for one thing at a time."
+)
+
+
+def _turn_budget_s() -> float:
+    """Total wall-clock budget for one chat turn, seconds. `CHAT_TURN_BUDGET_S`
+    (default 300); 0 or invalid disables the cap."""
+    try:
+        return max(0.0, float(os.getenv("CHAT_TURN_BUDGET_S", "300")))
+    except (TypeError, ValueError):
+        return 300.0
+
+
+def _turn_over_budget(start_time: float) -> bool:
+    budget = _turn_budget_s()
+    return budget > 0 and (time.monotonic() - start_time) > budget
 
 
 _client: AsyncAnthropic | None = None
@@ -336,6 +391,25 @@ def _extract_widget_json(text: str) -> dict[str, Any] | None:
     if not m:
         return None
     return _loads_widget(m.group(1))
+
+
+def _looks_like_widget_attempt(text: str) -> bool:
+    """True when the terminal text is a FAILED widget JSON rather than prose (084).
+
+    `_extract_widget_json` returns None both for "plain prose, no JSON" and for
+    "JSON that wouldn't parse" — but those two must be handled differently: prose
+    is shown as-is, a broken widget must NOT be dumped raw to the user. This tells
+    them apart so a truncated/oversized card (063's quote-repair can only fix an
+    unescaped quote, not a cut-off object — the exact failure a slow rail produces)
+    becomes a retry message instead of a screenful of `{"type":"portfolio_risk"…`.
+
+    Conservative: requires both a JSON-object shape AND a widget `"type"` key, so
+    ordinary prose is not mistaken for a widget.
+    """
+    s = text.strip()
+    if not s or '"type"' not in s:
+        return False
+    return s.startswith("{") or "```json" in s or _JSON_BLOCK_RE.search(text) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -597,6 +671,21 @@ async def _finalize_terminal_widget(
                 out["validation"] = audit
             tracer.set_output(out)
             yield {"event": "widget", "data": widget}
+    elif _looks_like_widget_attempt(full_text):
+        # 084 — the model tried to emit a widget but it wouldn't parse (typically a
+        # truncated/oversized card from a slow rail — the raw JSON dump seen live on
+        # 2026-07-26). NEVER leak raw JSON to the user; return a graceful, telemetry-
+        # visible retry instead. The full text is logged server-side for debugging.
+        log.warning(
+            "terminal widget unparseable (%d chars) — not leaking raw JSON: %s",
+            len(full_text), full_text[:200],
+        )
+        msg = (
+            "I generated that card but it didn't come through cleanly. "
+            "Please try again."
+        )
+        tracer.set_output({"kind": "error", "code": "widget_unrenderable"})
+        yield {"event": "error", "data": {"message": msg, "code": "widget_unrenderable"}}
     elif full_text:
         # 082 — plain replies are rendered as Markdown, not HTML: normalise any
         # inline emphasis tags the model slipped in so they render as bold/italic
@@ -604,6 +693,20 @@ async def _finalize_terminal_widget(
         full_text = _html_emphasis_to_markdown(full_text)
         tracer.set_output({"kind": "message", "text": full_text})
         yield {"event": "message", "data": {"text": full_text}}
+    else:
+        # 084 — the rail returned NEITHER a widget nor any text (empty terminal
+        # turn — the silent "DONE" with a blank card seen live on 2026-07-26).
+        # Never end a turn silently: emit an explicit, telemetry-visible notice so
+        # the user gets a clear outcome and the failure shows up in analytics.
+        log.warning("terminal turn produced no widget and no text — empty_response")
+        tracer.set_output({"kind": "error", "code": "empty_response"})
+        yield {
+            "event": "error",
+            "data": {
+                "message": "I wasn't able to generate a response to that. Please try again.",
+                "code": "empty_response",
+            },
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -751,10 +854,13 @@ def _classify_agent_error(e: Exception) -> tuple[str, str]:
     transport = _transport_reason(e)
     if transport == "timeout":
         if verbose:
+            # 084 — user-facing copy only. The 083 version leaked a literal
+            # "<RAIL>_TIMEOUT_S" placeholder AND an operator instruction into the
+            # chat bubble (seen live 2026-07-26). The tuning hint belongs in logs
+            # + docs, not in front of a user; the full error is logged by the caller.
             return (
-                f"{api} — timed out: the model didn't answer within the time budget. "
-                "Try again, or ask for one thing at a time. "
-                "(Operator: raise <RAIL>_TIMEOUT_S if this is routine.)",
+                f"{api} — timed out: the model didn't answer in time. "
+                "Try again, or ask for one thing at a time.",
                 "provider_timeout",
             )
         return _MSG_BUSY, "provider_timeout"
@@ -895,6 +1001,14 @@ async def run_agent(
 
     try:
         while iterations < MAX_ITERATIONS:
+            # 084 — stop before starting another model call if the whole-turn budget
+            # is spent. `break` (not the `else` below) so this is reported as a
+            # turn timeout, not a max-iterations stall.
+            if _turn_over_budget(start_time):
+                log.warning("run_agent turn budget exceeded after %d iterations", iterations)
+                tracer.set_output({"kind": "error", "code": "turn_timeout"})
+                yield {"event": "error", "data": {"message": _TURN_TIMEOUT_MSG, "code": "turn_timeout"}}
+                break
             iterations += 1
 
             # Stream the next assistant turn. We don't yield content_block deltas
@@ -1119,6 +1233,14 @@ async def run_agent_openai_compat(
 
     try:
         while iterations < MAX_ITERATIONS:
+            # 084 — whole-turn wall-clock cap (see run_agent). `break` avoids the
+            # `else` max-iterations branch so this reports as a turn timeout.
+            if _turn_over_budget(start_time):
+                log.warning("run_agent_openai_compat[%s] turn budget exceeded after %d iterations",
+                            client.model(), iterations)
+                tracer.set_output({"kind": "error", "code": "turn_timeout"})
+                yield {"event": "error", "data": {"message": _TURN_TIMEOUT_MSG, "code": "turn_timeout"}}
+                break
             iterations += 1
             iter_started = time.monotonic()
             resp = await client.complete(
