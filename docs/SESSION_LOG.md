@@ -1318,7 +1318,7 @@ Nothing after the colon. Twice, on `LLM_RAIL=kimi` — the **primary** rail. The
 
 **Assumptions.** Failing over on a timeout trades a longer worst case (Kimi's 120s budget, then a fresh DeepSeek turn) for an answer instead of an error — Nicholas's call, and reversible via `LLM_FAILOVER_ON`. Kimi's quota wording remains an unverified guess; only exhausting the account once will settle it.
 
-**State: 14/14 suites green** (the 13 from 081/082 plus **083 70/70**), `main.py` imports clean, live tree git-clean after every run. Staged at `.proposed_changes/083-kimi-failure-handling/` — **not applied**; Nicholas applies + archives manually.
+**State: 14/14 suites green** (the 13 from 081/082 plus **083 70/70**), `main.py` imports clean, live tree git-clean after every run. **APPLIED & committed as #142 (`d03c555`)** and deployed — the new timeout copy was then seen live (which is how 084's follow-on failures surfaced).
 
 ---
 
@@ -1348,4 +1348,4 @@ The prior session's closing note predicted all of this: *"no test asserts what a
 
 **Assumptions.** `CHAT_TURN_BUDGET_S=300` is a guess at "long enough for a legitimate multi-tool turn (the successful ones took 114s), short enough that a user hasn't given up" — env-tunable, reversible. The turn cap is **not** wired to failover on purpose; if that turns out wrong, one line changes it.
 
-**State: 15/15 suites green** (the 14 through 083 plus **084 35/35**), `main.py` imports clean, live tree git-clean after every run. Staged at `.proposed_changes/084-turn-robustness/` — **not applied**; Nicholas applies + archives manually. **Operator: arm the failover** (`LLM_FAILOVER_ON` incl. `timeout,network`; `LLM_FALLBACK_ENABLED=1`; `DEEPSEEK_API_KEY` on the web service) and confirm `/healthz` → `failover.armed:true`. Trading still disabled.
+**State: 15/15 suites green** (the 14 through 083 plus **084 35/35**), `main.py` imports clean, live tree git-clean after every run. **APPLIED & committed as #143 (`fb8dd74` "084 Different failures found")** and deployed. **Operator step still outstanding (code can't do it): arm the failover** — `LLM_FAILOVER_ON` incl. `timeout,network`; `LLM_FALLBACK_ENABLED=1`; `DEEPSEEK_API_KEY` on the web service — then confirm `GET /healthz` → `failover.armed:true` (084 added that field precisely so this is checkable, not silent). Until then a Kimi timeout still ends the turn with the explicit `provider_timeout` message rather than handing off to DeepSeek. Trading still disabled.
