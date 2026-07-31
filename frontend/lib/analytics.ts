@@ -135,3 +135,25 @@ export function hashText(text: string): string {
   }
   return h.toString(36);
 }
+
+type LlmTurnProperties = {
+  turn_id: string;
+  primary_provider: string;
+  primary_model: string;
+  final_provider: string;
+  final_model: string;
+  fallback_used: boolean;
+  fallback_reason?: string | null;
+  intent: string;
+  output_kind: 'message' | 'widget' | 'error';
+  widget_type?: string | null;
+  latency_ms: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  iterations?: number;
+  status: 'success' | 'error';
+  error_code?: string | null;
+};
+
+export const trackLlmTurnCompleted = (props: LlmTurnProperties) =>
+  capture('llm_turn_completed', props);
