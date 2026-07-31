@@ -39,3 +39,9 @@ next-env.d.ts
 .vscode/
 .idea/
 *.swp
+
+*.tsbuildinfo
+/*.tsbuildinfo
+frontend/tsconfig.tsbuildinfo
+.proposed_changes/
+self_management/
