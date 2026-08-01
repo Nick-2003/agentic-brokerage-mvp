@@ -28,6 +28,12 @@ from typing import Any
 
 import freshness  # 061 — shared "figures are end-of-day / generated at" note
 
+from broker_provider import (
+    CallbackPortfolioProvider,
+    PortfolioRequest,
+    portfolio_providers,
+)
+
 from . import ToolDef, account_label, register, tag_account  # 076 — venue labelling
 
 log = logging.getLogger(__name__)
@@ -274,6 +280,25 @@ async def _fetch_ibkr_portfolio(user_id: str) -> dict[str, Any]:
             "message": f"Could not reach IBKR Flex: {e}",
         }
 
+async def _fetch_ibkr_provider(request: PortfolioRequest) -> dict[str, Any]:
+    """Adapt the existing Flex implementation to the provider-neutral boundary.
+
+    Flex currently has one connection/account per user, so the optional IDs are
+    intentionally ignored. SnapTrade will use them when its provider is added.
+    """
+    return await _fetch_ibkr_portfolio(request.user_id)
+
+
+portfolio_providers.register(
+    CallbackPortfolioProvider(
+        name="ibkr_flex",
+        data_source="Interactive Brokers Flex Web Service",
+        fetch=_fetch_ibkr_provider,
+    ),
+    # Safe when tests reload this module in the same interpreter.
+    replace=True,
+)
+
 
 # ---------------------------------------------------------------------------
 # Sample portfolio (053) — a dedicated read-only Alpaca PAPER book for GUEST/DEMO
@@ -385,7 +410,10 @@ async def get_portfolio(args: dict[str, Any], user_id: str) -> dict[str, Any]:
         return await _sample_portfolio()
 
     if portfolio_source() == "ibkr":
-        return await _fetch_ibkr_portfolio(user_id)
+        return await portfolio_providers.get_snapshot(
+            "ibkr_flex",
+            PortfolioRequest(user_id=user_id),
+        )
 
     # --- legacy Alpaca path (PORTFOLIO_SOURCE=alpaca) -------------------------
     # If Alpaca keys present and look real, use the real broker. Otherwise mock.
