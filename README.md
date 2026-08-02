@@ -12,7 +12,7 @@ A prompt-first mobile brokerage where every action — research, charting, tradi
 
 **Status:** waitlist product **deployed & live** (the full `land → connect IBKR → daily WhatsApp/email brief` loop runs in production: Railway web + briefing cron, Vercel, Supabase). Chat MVP: feature-complete through P5, **paused**.
 
-**Start every dev session by reading:** [CLAUDE.md](./CLAUDE.md) · [SCOPE.md](./SCOPE.md) · [METRICS.md](./METRICS.md) · [SECURITY.md](./SECURITY.md) · `.self_management/CONTEXT_TRANSFER.md`.
+**Start every dev session by reading:** [CLAUDE.md](./CLAUDE.md) · [SCOPE.md](./SCOPE.md) · [METRICS.md](./METRICS.md) · [SECURITY.md](./SECURITY.md) · [docs/ICP.md](./docs/ICP.md) · `.self_management/CONTEXT_TRANSFER.md`.
 
 ## Local setup
 

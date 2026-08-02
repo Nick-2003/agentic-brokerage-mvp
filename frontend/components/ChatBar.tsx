@@ -186,7 +186,7 @@ export function ChatBar({ onSubmit, onMicTap, disabled }: Props) {
   const showPlaceholder = value.length === 0 && attachments.length === 0;
 
   return (
-    <div className="absolute inset-x-0 bottom-0 z-50 px-4 pb-6 pt-3 bg-gradient-to-t from-bg via-bg/95 to-transparent">
+    <div className="absolute inset-x-0 bottom-0 z-50 px-4 pb-6 pt-3 bg-bg">
       {/* Attachment thumbnails — shown above the bar so the user SEES what's
           being sent with the message (059). */}
       {attachments.length > 0 && (

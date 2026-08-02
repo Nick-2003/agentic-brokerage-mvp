@@ -112,7 +112,7 @@ export default function BriefPage() {
   }, [token]);
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-[#2c2c2a] to-[#444441] flex justify-center p-6">
+    <main className="min-h-screen bg-[#070706] flex justify-center p-6">
       <div className="w-full max-w-md self-start mt-8">
         <div className="text-[12px] font-semibold tracking-[0.08em] text-[#f5f5f0] opacity-70 mb-2">
           DAILY PORTFOLIO BRIEFING

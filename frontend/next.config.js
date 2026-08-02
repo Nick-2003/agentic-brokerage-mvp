@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  devIndicators: false,
   // 032b: isomorphic-dompurify (the widget SafeHtml sanitizer) pulls in jsdom,
   // whose runtime asset `default-stylesheet.css` doesn't survive Next's server
   // bundling → the `/` prerender crashed with `ENOENT … default-stylesheet.css`.
@@ -51,7 +52,7 @@ const nextConfig = {
       // Next ships inline bootstrap + some libs eval; no nonce setup here.
       "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.posthog.com",
       "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: blob: https://*.supabase.co https://*.tradingview.com",
+      "img-src 'self' data: blob: https://*.supabase.co https://*.tradingview.com https://icons.duckduckgo.com",
       "font-src 'self' data:",
       // Supabase REST/auth/realtime + PostHog ingest. /api/* is same-origin (proxied).
       "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.posthog.com",

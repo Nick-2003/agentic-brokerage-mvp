@@ -123,7 +123,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
 function Splash({ children }: { children: React.ReactNode }) {
   return (
-    <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#2c2c2a] to-[#444441] text-[#f5f5f0] text-sm">
+    <main className="min-h-screen flex items-center justify-center bg-[#070706] text-[#f5f5f0] text-sm">
       {children}
     </main>
   );
@@ -169,7 +169,7 @@ function LoginScreen({ onDemo }: { onDemo?: () => void }) {
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#2c2c2a] to-[#444441] p-6">
+    <main className="min-h-screen flex items-center justify-center bg-[#070706] p-6">
       <div className="w-full max-w-sm bg-bg rounded-3xl shadow-2xl p-7 text-text">
         <div className="text-[12px] font-semibold tracking-[0.08em] text-text-2">INVESTING</div>
         <h1 className="mt-2 text-2xl font-semibold">Sign in</h1>

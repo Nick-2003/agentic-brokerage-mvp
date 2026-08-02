@@ -34,6 +34,7 @@ const config: Config = {
         'pulse-dot': 'pulseDot 1.6s ease-in-out infinite',
         'caret-blink': 'caretBlink 0.9s steps(1) infinite',
         'spin-slow': 'spin 0.8s linear infinite',
+        'macro-marquee': 'macroMarquee 18s linear infinite',
       },
       keyframes: {
         slideIn: {
@@ -47,6 +48,10 @@ const config: Config = {
         caretBlink: {
           '0%, 50%': { opacity: '1' },
           '51%, 100%': { opacity: '0' },
+        },
+        macroMarquee: {
+          from: { transform: 'translateX(0)' },
+          to: { transform: 'translateX(calc(-50% - 4px))' },
         },
       },
     },

@@ -84,7 +84,7 @@ export default function ConnectPage() {
   const configured = mounted && authConfigured();
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-[#2c2c2a] to-[#444441] flex justify-center p-6">
+    <main className="min-h-screen bg-[#070706] flex justify-center p-6">
       <div className="w-full max-w-md space-y-5">
         {/* Hero */}
         <header className="text-[#f5f5f0] pt-6 pb-1">
