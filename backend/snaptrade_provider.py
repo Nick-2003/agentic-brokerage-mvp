@@ -72,7 +72,9 @@ def _base_total(details: dict[str, Any], base_currency: str) -> float | None:
     currency = _nested(
         details,
         ("balance", "total", "currency", "code"),
+        ("balance", "total", "currency"),
         ("balance", "currency", "code"),
+        ("balance", "currency"),
         ("currency", "code"),
     )
     if currency and str(currency).upper() != base_currency:
@@ -147,8 +149,11 @@ def _position_row(
 def _as_of(details: dict[str, Any]) -> str | None:
     value = _nested(
         details,
+        ("sync_status", "holdings", "last_successful_sync"),
+        ("syncStatus", "holdings", "lastSuccessfulSync"),
         ("sync_status", "last_successful_sync"),
         ("syncStatus", "lastSuccessfulSync"),
+        ("data_freshness", "as_of"),
         ("last_successful_sync",),
         ("updated_at",),
     )
@@ -183,6 +188,9 @@ def normalise_snaptrade_portfolio(
     previous = total - day_pnl if total is not None and day_pnl is not None else None
     day_pnl_pct = day_pnl / previous * 100 if previous not in (None, 0) else None
     as_of = _as_of(details)
+    is_paper = bool(details.get("is_paper"))
+    account_kind = "paper_snaptrade" if is_paper else "real_snaptrade"
+    account_label = "Paper · SnapTrade" if is_paper else "Real · SnapTrade"
     warnings = []
     if skipped:
         warnings.append(f"{skipped} position(s) omitted because no symbol was available")
@@ -210,10 +218,10 @@ def normalise_snaptrade_portfolio(
         "source": "snaptrade",
         "read_only": True,
         "connected": True,
-        "is_paper": False,
+        "is_paper": is_paper,
         "is_mock": False,
-        "account_kind": "real_snaptrade",
-        "account_label": "Real · SnapTrade",
+        "account_kind": account_kind,
+        "account_label": account_label,
         "positions": normalised_positions,
         "normalization_warnings": warnings,
     }

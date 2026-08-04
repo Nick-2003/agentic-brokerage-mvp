@@ -1,0 +1,23 @@
+{
+  "details": {
+    "sync_status": {
+      "holdings": {
+        "initial_sync_completed": true,
+        "last_successful_sync": "2026-08-03T02:10:00.000Z"
+      }
+    },
+    "balance": {
+      "total": null
+    },
+    "status": "open",
+    "account_category": "INVESTMENT",
+    "is_paper": false
+  },
+  "balances": [],
+  "positions": {
+    "results": [],
+    "data_freshness": {
+      "as_of": "2026-08-03T02:10:00.000Z"
+    }
+  }
+}

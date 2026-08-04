@@ -73,11 +73,14 @@ def _account_currency(account: dict[str, Any], details: dict[str, Any]) -> str:
     value = _nested(
         details,
         ("balance", "total", "currency", "code"),
+        ("balance", "total", "currency"),
         ("balance", "currency", "code"),
+        ("balance", "currency"),
         ("currency", "code"),
     ) or _nested(
         account,
         ("balance", "total", "currency", "code"),
+        ("balance", "total", "currency"),
         ("balance", "currency", "code"),
         ("currency", "code"),
     )
