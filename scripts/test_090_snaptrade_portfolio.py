@@ -7,12 +7,17 @@ import os
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[3]
-sys.path[:0] = [
-    str(ROOT / ".proposed_changes/090-snaptrade-portfolio-normalisation/backend"),
-    str(ROOT / ".proposed_changes/089-minimal-snaptrade-client-routes/backend"),
-    str(ROOT / "backend"),
-]
+TEST_FILE = Path(__file__).resolve()
+IN_PROPOSAL = ".proposed_changes" in TEST_FILE.parts
+ROOT = TEST_FILE.parents[3] if IN_PROPOSAL else TEST_FILE.parents[1]
+if IN_PROPOSAL:
+    sys.path[:0] = [
+        str(ROOT / ".proposed_changes/090-snaptrade-portfolio-normalisation/backend"),
+        str(ROOT / ".proposed_changes/089-minimal-snaptrade-client-routes/backend"),
+        str(ROOT / "backend"),
+    ]
+else:
+    sys.path.insert(0, str(ROOT / "backend"))
 os.environ["SNAPTRADE_PORTFOLIO_CACHE_TTL_S"] = "300"
 
 from broker_provider import PortfolioRequest  # noqa: E402
