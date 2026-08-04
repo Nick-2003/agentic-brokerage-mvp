@@ -41,6 +41,7 @@ TOOL_REGISTRY: dict[str, ToolDef] = {}
 # and unknown kinds intentionally have NO label (nothing to badge).
 ACCOUNT_LABELS: dict[str, str] = {
     "real_ibkr": "Real · IBKR",
+    "real_snaptrade": "Real · SnapTrade",
     "paper_alpaca": "Paper · Alpaca",
     "sample": "Sample · Alpaca paper",
     "mock": "Demo data",

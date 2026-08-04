@@ -7,6 +7,9 @@ Source is switchable via `PORTFOLIO_SOURCE` (039):
     THEIR account. **A user who hasn't connected IBKR gets a nil portfolio** (no
     fabricated demo number). Values are in the account's BASE currency
     (e.g. HKD → `HK$`). Read-only — no trading.
+  • `snaptrade` — read-only balances and account-specific positions for the
+    caller's explicitly selected account. Provider identifiers and userSecret
+    remain behind the provider boundary.
   • `alpaca` — the legacy Alpaca paper path (kept, reversible).
 
 `get_portfolio` is the single source of truth for BOTH the agent's `morning_brief`
@@ -33,6 +36,7 @@ from broker_provider import (
     PortfolioRequest,
     portfolio_providers,
 )
+from snaptrade_provider import snaptrade_portfolio_provider
 
 from . import ToolDef, account_label, register, tag_account  # 076 — venue labelling
 
@@ -122,7 +126,7 @@ def _ccy_symbol(base: str | None) -> str:
 
 
 def portfolio_source() -> str:
-    """`ibkr` (default) or `alpaca`. Flip to `alpaca` to restore the legacy path."""
+    """`ibkr` (default), `snaptrade`, or legacy `alpaca`."""
     return (os.getenv("PORTFOLIO_SOURCE", "ibkr") or "ibkr").strip().lower()
 
 
@@ -299,6 +303,12 @@ portfolio_providers.register(
     replace=True,
 )
 
+portfolio_providers.register(
+    snaptrade_portfolio_provider,
+    # Safe when tests reload this module in the same interpreter.
+    replace=True,
+)
+
 
 # ---------------------------------------------------------------------------
 # Sample portfolio (053) — a dedicated read-only Alpaca PAPER book for GUEST/DEMO
@@ -409,9 +419,10 @@ async def get_portfolio(args: dict[str, Any], user_id: str) -> dict[str, Any]:
     if user_id == "demo" and _sample_enabled():
         return await _sample_portfolio()
 
-    if portfolio_source() == "ibkr":
+    source = portfolio_source()
+    if source in {"ibkr", "snaptrade"}:
         return await portfolio_providers.get_snapshot(
-            "ibkr_flex",
+            "ibkr_flex" if source == "ibkr" else "snaptrade",
             PortfolioRequest(user_id=user_id),
         )
 
@@ -445,10 +456,10 @@ register(
         description=(
             "Retrieve the user's current portfolio: total equity, cash, and all open "
             "positions with shares, average cost, market value, and unrealized P&L. "
-            "By default this is the user's read-only IBKR account — figures are in the "
-            "account's base currency (the `currency` field, e.g. HK$); `market_value` "
-            "and `unrealized_pnl` are in that base currency, `avg_cost` in the position's "
-            "`native_currency`."
+            "This uses the configured read-only brokerage provider and the user's "
+            "selected account. Top-line figures are in `base_currency`; position "
+            "values are blank rather than silently mislabelled when a provider does "
+            "not supply a safe base-currency conversion."
         ),
         input_schema={
             "type": "object",
