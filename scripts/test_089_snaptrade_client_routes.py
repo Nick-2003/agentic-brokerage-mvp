@@ -7,10 +7,15 @@ import os
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[3]
+TEST_FILE = Path(__file__).resolve()
+IN_PROPOSAL = ".proposed_changes" in TEST_FILE.parts
+ROOT = TEST_FILE.parents[3] if IN_PROPOSAL else TEST_FILE.parents[1]
 PROPOSED_BACKEND = ROOT / ".proposed_changes/089-minimal-snaptrade-client-routes/backend"
 LIVE_BACKEND = ROOT / "backend"
-sys.path[:0] = [str(PROPOSED_BACKEND), str(LIVE_BACKEND)]
+if IN_PROPOSAL:
+    sys.path[:0] = [str(PROPOSED_BACKEND), str(LIVE_BACKEND)]
+else:
+    sys.path.insert(0, str(LIVE_BACKEND))
 
 os.environ.update(
     SNAPTRADE_CLIENT_ID="client",
