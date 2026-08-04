@@ -12,6 +12,7 @@ IN_PROPOSAL = ".proposed_changes" in TEST_FILE.parts
 ROOT = TEST_FILE.parents[3] if IN_PROPOSAL else TEST_FILE.parents[1]
 PROPOSED_BACKEND = ROOT / ".proposed_changes/089-minimal-snaptrade-client-routes/backend"
 LIVE_BACKEND = ROOT / "backend"
+BOUNDARY_MODULE = "snaptrade_client.py" if IN_PROPOSAL else "snaptrade_gateway.py"
 BACKEND_UNDER_TEST = PROPOSED_BACKEND if IN_PROPOSAL else LIVE_BACKEND
 if IN_PROPOSAL:
     sys.path[:0] = [str(PROPOSED_BACKEND), str(LIVE_BACKEND)]
@@ -27,7 +28,10 @@ os.environ.update(
 import snaptrade_api as api  # noqa: E402
 from auth import AuthCtx  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
-from snaptrade_client import SnapTradeClient  # noqa: E402
+if IN_PROPOSAL:
+    from snaptrade_client import SnapTradeClient  # noqa: E402
+else:
+    from snaptrade_gateway import SnapTradeClient  # noqa: E402
 
 
 class Response:
@@ -172,7 +176,7 @@ async def test_routes() -> None:
 async def main() -> None:
     await test_client()
     await test_routes()
-    source = (BACKEND_UNDER_TEST / "snaptrade_client.py").read_text()
+    source = (BACKEND_UNDER_TEST / BOUNDARY_MODULE).read_text()
     assert "get_all_user_holdings" not in source  # deprecated for new customers
     print("089 snaptrade client/routes: PASS")
 
