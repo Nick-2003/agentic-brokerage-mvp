@@ -16,6 +16,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
+import SnapTradeConnection from '@/components/SnapTradeConnection';
 import {
   trackBriefingOptInChanged,
   trackConnectCompleted,
@@ -95,8 +96,8 @@ export default function ConnectPage() {
             Your portfolio, explained — every morning on WhatsApp.
           </h1>
           <p className="mt-2 text-[13px] opacity-80 leading-relaxed">
-            Connect Interactive Brokers once. Each morning we read your holdings, write a short
-            narrative of what moved and why, and send it to your phone.
+            Connect a brokerage once. Each morning we read your holdings, write a short narrative
+            of what moved and why, and send it to your phone.
           </p>
         </header>
 
@@ -137,8 +138,10 @@ export default function ConnectPage() {
           />
         )}
 
+        {session && token && <SnapTradeConnection token={token} />}
+
         <p className="text-center text-[11px] text-[#f5f5f0] opacity-50">
-          Your Flex token is read-only and stored encrypted. We never place trades.
+          Brokerage access is read-only. Sensitive credentials remain on the backend.
         </p>
         <p className="text-center text-[11px] pb-6">
           <a href="/" className="text-[#f5f5f0] opacity-60 underline underline-offset-2 hover:opacity-90">

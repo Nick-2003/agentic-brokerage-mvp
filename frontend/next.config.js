@@ -30,6 +30,10 @@ const nextConfig = {
       // W4 (pivot) — connect/waitlist endpoints.
       { source: '/api/waitlist', destination: `${backend}/api/waitlist` },
       { source: '/api/ibkr/:path*', destination: `${backend}/api/ibkr/:path*` },
+      // 092 — SnapTrade connection state/session/verify + local account selection.
+      { source: '/api/broker-connections', destination: `${backend}/api/broker-connections` },
+      { source: '/api/broker-connections/:path*', destination: `${backend}/api/broker-connections/:path*` },
+      { source: '/api/broker-accounts/:path*', destination: `${backend}/api/broker-accounts/:path*` },
       // W6.3 (pivot) — public brief permalink.
       { source: '/api/brief/:token', destination: `${backend}/api/brief/:token` },
       // 038 (pivot) — public email unsubscribe (so a PUBLIC_BASE_URL-based unsub
