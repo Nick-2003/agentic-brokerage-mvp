@@ -1,0 +1,30 @@
+{
+  "id": "00000000-0000-4000-8000-000000000101",
+  "brokerage_authorization": "00000000-0000-4000-8000-000000000201",
+  "name": "Fixture Brokerage Individual",
+  "number": "••0000",
+  "institution_account_id": null,
+  "institution_name": "Fixture Brokerage",
+  "created_date": "2026-08-01T00:00:00.000Z",
+  "sync_status": {
+    "transactions": {
+      "initial_sync_completed": true,
+      "last_successful_sync": "2026-08-03",
+      "first_transaction_date": "2026-01-02"
+    },
+    "holdings": {
+      "initial_sync_completed": true,
+      "last_successful_sync": "2026-08-03T02:00:00.000Z"
+    }
+  },
+  "balance": {
+    "total": {
+      "amount": 10000.0,
+      "currency": "USD"
+    }
+  },
+  "status": "open",
+  "raw_type": "Margin",
+  "account_category": "INVESTMENT",
+  "is_paper": false
+}

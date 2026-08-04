@@ -1,0 +1,39 @@
+{
+  "results": [
+    {
+      "instrument": {
+        "kind": "stock",
+        "id": "00000000-0000-4000-8000-000000000401",
+        "symbol": "AAPL",
+        "raw_symbol": "AAPL",
+        "description": "Fixture US Equity",
+        "currency": "USD",
+        "exchange": "XNAS",
+        "figi_instrument": null
+      },
+      "units": "10",
+      "price": "150",
+      "cost_basis": "100",
+      "currency": "USD"
+    },
+    {
+      "instrument": {
+        "kind": "stock",
+        "id": "00000000-0000-4000-8000-000000000402",
+        "symbol": "0700.HK",
+        "raw_symbol": "0700",
+        "description": "Fixture HK Equity",
+        "currency": "HKD",
+        "exchange": "XHKG",
+        "figi_instrument": null
+      },
+      "units": "100",
+      "price": "400",
+      "cost_basis": "350",
+      "currency": "HKD"
+    }
+  ],
+  "data_freshness": {
+    "as_of": "2026-08-03T02:00:00.000Z"
+  }
+}
