@@ -9,7 +9,7 @@
 The Supabase CLI operates against three conceptually different environments:
 
 | Target | Purpose | Typical flag |
-|---|---|---|
+| --- | --- | --- |
 | Local Docker stack | Migration development and destructive replay testing | `--local` |
 | Linked cloud project | Existing app database and migration history | `--linked` |
 | Optional staging project | Remote deployment rehearsal before production | `--linked` after re-linking |
@@ -409,7 +409,7 @@ manually to bypass a failed earlier migration.
 ## 15. Commands that require special caution
 
 | Command | Risk |
-|---|---|
+| --- | --- |
 | `supabase db reset --local` | Deletes local data; appropriate for migration testing |
 | `supabase db push --linked` | Changes the linked cloud database |
 | `supabase migration repair` | Alters recorded migration history |

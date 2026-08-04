@@ -57,6 +57,8 @@ import email_unsubscribe  # noqa: E402  (038 — unsubscribe-token config diagno
 import memory  # noqa: E402
 import observability  # noqa: E402
 import security  # noqa: E402  (W6.6 — rate limit + security headers)
+import snaptrade_api  # noqa: E402  (089 — read-only connection routes)
+import snaptrade_client  # noqa: E402  (089 — /healthz config only)
 import token_budget  # noqa: E402  (P5 / 034 — per-user daily LLM token budget)
 import waitlist_api  # noqa: E402  (W4 — IBKR connect + waitlist router)
 import webhooks  # noqa: E402  (W6 — Twilio inbound STOP/START webhook)
@@ -110,6 +112,8 @@ app.include_router(brief_api.router)
 app.include_router(chart_api.router)
 # 038 (pivot) — public email unsubscribe (GET/POST /api/email/unsubscribe).
 app.include_router(email_api.router)
+# 089 — authenticated, read-only SnapTrade connection lifecycle.
+app.include_router(snaptrade_api.router)
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +169,8 @@ async def healthz() -> dict[str, Any]:
         "langfuse_configured": observability.langfuse_configured(),
         # P4.3 memory diagnostics.
         "memory_configured": memory.memory_configured(),
+        # 089: boolean only; never expose app credentials or per-user secrets.
+        "snaptrade_configured": snaptrade_client.snaptrade_configured(),
         # W4 connect/waitlist diagnostics (Supabase + Flex-token encryption ready).
         "connect_storage_configured": connections.connect_storage_configured(),
         # 038 email-channel diagnostics: real send needs BOTH Resend creds AND an

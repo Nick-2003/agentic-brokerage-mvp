@@ -14,6 +14,9 @@ dependencies = [
     "pydantic>=2.9.0",
     "python-dotenv>=1.0.1",
     "httpx>=0.27.0",
+    # 089 — official generated client handles SnapTrade request signing. Keep an
+    # exact version until its generated method/response contract is re-verified.
+    "snaptrade-python-sdk==12.0.4",
     "alpaca-py>=0.33.0",
     "yfinance>=0.2.50",
     # MCP Python SDK — used by backend/mcp_client.py to host stdio MCP
