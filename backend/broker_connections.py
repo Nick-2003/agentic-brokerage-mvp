@@ -121,6 +121,40 @@ async def upsert_my_snaptrade_identity(
     return _public_connection(result.data[0]) if result.data else None
 
 
+async def get_my_snaptrade_identity_private(
+    user_jwt: str, user_id: str
+) -> dict[str, Any] | None:
+    """Resolve this caller's SnapTrade credentials for server-side API calls.
+
+    This is deliberately not an HTTP response model. The query runs with the
+    caller's JWT/RLS and the decrypted secret must never leave the backend.
+    """
+    client = await _client_for_user(user_jwt)
+    result = (
+        await client.table("broker_connections")
+        .select("*")
+        .eq("user_id", user_id)
+        .eq("provider", "snaptrade")
+        .limit(1)
+        .execute()
+    )
+    row = result.data[0] if result.data else None
+    if not row:
+        return None
+    try:
+        user_secret = broker_secret_crypto.decrypt_broker_secret(
+            row["encrypted_user_secret"]
+        )
+    except broker_secret_crypto.BrokerSecretCryptoError as exc:
+        raise BrokerConnectionStateError(exc.code, str(exc)) from exc
+    return {
+        "id": row["id"],
+        "external_user_id": row["external_user_id"],
+        "user_secret": user_secret,
+        "status": row["status"],
+    }
+
+
 async def confirm_my_snaptrade_connection(
     user_jwt: str,
     user_id: str,
