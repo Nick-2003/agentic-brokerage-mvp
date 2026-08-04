@@ -15,11 +15,14 @@ let initialized = false;
 // CREDENTIALS (incl. the long-lived refresh_token) would be sent to PostHog —
 // observed live. `scrubUrl` drops the fragment and redacts auth query params; it's
 // applied to every event's URL props via `sanitize_properties` below.
-const _AUTH_QS = /([?&](?:access_token|refresh_token|code|token|id_token|provider_token|expires_at|expires_in)=)[^&#]*/gi;
+const _SENSITIVE_QS = new RegExp(
+  '([?&](?:access_token|refresh_token|code|token|id_token|provider_token|expires_at|expires_in|connection_id|authorization_id|brokerage_authorization_id)=)[^&#]*',
+  'gi'
+);
 
 export function scrubUrl(u: unknown): unknown {
   if (typeof u !== 'string' || !u) return u;
-  return u.split('#')[0].replace(_AUTH_QS, '$1[redacted]'); // drop fragment; redact auth query
+  return u.split('#')[0].replace(_SENSITIVE_QS, '$1[redacted]');
 }
 
 export function initAnalytics() {
@@ -66,6 +69,20 @@ export const trackConnectFailed = (reason: string) =>
 
 export const trackBriefingOptInChanged = (optIn: boolean) =>
   capture('briefing_opt_in_changed', { opt_in: optIn });
+
+// 092 — provider-labelled brokerage funnel. No account/connection IDs, portal
+// URLs, userSecret, or brokerage names are captured.
+export const trackBrokerConnectionStarted = (provider: string) =>
+  capture('broker_connection_started', { provider });
+
+export const trackBrokerConnectionCompleted = (provider: string, accountCount: number) =>
+  capture('broker_connection_completed', { provider, account_count: accountCount });
+
+export const trackBrokerConnectionFailed = (provider: string, reasonCode: string) =>
+  capture('broker_connection_failed', { provider, reason_code: reasonCode });
+
+export const trackBrokerAccountSelected = (provider: string) =>
+  capture('broker_account_selected', { provider });
 
 // ── activation funnel ──
 export const trackChatSessionStarted = () => capture('chat_session_started');
