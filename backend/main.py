@@ -58,7 +58,7 @@ import memory  # noqa: E402
 import observability  # noqa: E402
 import security  # noqa: E402  (W6.6 — rate limit + security headers)
 import snaptrade_api  # noqa: E402  (089 — read-only connection routes)
-import snaptrade_client  # noqa: E402  (089 — /healthz config only)
+import snaptrade_gateway  # noqa: E402  (095 — /healthz config only)
 import token_budget  # noqa: E402  (P5 / 034 — per-user daily LLM token budget)
 import waitlist_api  # noqa: E402  (W4 — IBKR connect + waitlist router)
 import webhooks  # noqa: E402  (W6 — Twilio inbound STOP/START webhook)
@@ -170,7 +170,7 @@ async def healthz() -> dict[str, Any]:
         # P4.3 memory diagnostics.
         "memory_configured": memory.memory_configured(),
         # 089: boolean only; never expose app credentials or per-user secrets.
-        "snaptrade_configured": snaptrade_client.snaptrade_configured(),
+        "snaptrade_configured": snaptrade_gateway.snaptrade_configured(),
         # W4 connect/waitlist diagnostics (Supabase + Flex-token encryption ready).
         "connect_storage_configured": connections.connect_storage_configured(),
         # 038 email-channel diagnostics: real send needs BOTH Resend creds AND an

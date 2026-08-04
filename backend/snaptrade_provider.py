@@ -10,7 +10,7 @@ from typing import Any
 
 import broker_connections
 from broker_provider import PortfolioRequest
-from snaptrade_client import SnapTradeClient, SnapTradeClientError
+from snaptrade_gateway import SnapTradeClient, SnapTradeClientError
 
 ContextLoader = Callable[[str], Awaitable[dict[str, Any] | None]]
 ClientFactory = Callable[[], SnapTradeClient]

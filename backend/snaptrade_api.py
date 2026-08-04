@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 import broker_connections
 from auth import AuthCtx, resolve_auth
-from snaptrade_client import SnapTradeClient, SnapTradeClientError
+from snaptrade_gateway import SnapTradeClient, SnapTradeClientError
 
 router = APIRouter(prefix="/api", tags=["brokerage-connections"])
 _BROKER_SLUG = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
