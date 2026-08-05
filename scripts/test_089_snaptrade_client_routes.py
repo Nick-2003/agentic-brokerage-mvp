@@ -40,6 +40,20 @@ class Response:
 
 
 class Authentication:
+    def register_snap_trade_user(self, **kwargs):
+        assert kwargs == {"user_id": "app-user"}
+        return Response({"userId": "app-user", "userSecret": "secret"})
+
+    def login_snap_trade_user(self, **kwargs):
+        assert kwargs["connection_type"] == "read"
+        assert kwargs["custom_redirect"] == os.environ["SNAPTRADE_REDIRECT_URL"]
+        assert kwargs["immediate_redirect"] is True
+        return Response({"redirectURI": "https://app.snaptrade.com/snapTrade/redeemToken?x=1"})
+
+    def delete_snap_trade_user(self, **kwargs):
+        assert kwargs == {"user_id": "app-user"}
+        return Response({"status": "deleted", "userId": "app-user"})
+
     async def aregister_snap_trade_user(self, **kwargs):
         assert kwargs == {"user_id": "app-user"}
         return Response({"userId": "app-user", "userSecret": "secret"})
@@ -52,6 +66,13 @@ class Authentication:
 
 
 class Connections:
+    def list_brokerage_authorizations(self, **kwargs):
+        return Response([{"id": "authorization-1", "disabled": False}])
+
+    def list_brokerage_authorization_accounts(self, **kwargs):
+        assert kwargs["authorization_id"] == "authorization-1"
+        return Response([{"id": "external-account-1", "name": "Individual"}])
+
     async def alist_brokerage_authorizations(self, **kwargs):
         return Response([{"id": "authorization-1", "disabled": False}])
 
@@ -61,6 +82,17 @@ class Connections:
 
 
 class AccountInformation:
+    def get_user_account_details(self, **kwargs):
+        return Response(
+            {"balance": {"total": {"amount": 1000, "currency": {"code": "USD"}}}}
+        )
+
+    def get_user_account_balance(self, **kwargs):
+        return Response([{"currency": {"code": "USD"}, "cash": 250}])
+
+    def get_all_account_positions(self, **kwargs):
+        return Response({"results": [{"units": 1, "symbol": {"symbol": "AAPL"}}]})
+
     async def aget_user_account_details(self, **kwargs):
         return Response(
             {"balance": {"total": {"amount": 1000, "currency": {"code": "USD"}}}}
@@ -83,6 +115,7 @@ async def test_client() -> None:
     client = SnapTradeClient(sdk=SDK())
     registered = await client.register_user(user_id="app-user")
     assert registered == {"external_user_id": "app-user", "user_secret": "secret"}
+    await client.delete_user(user_id="app-user")
     portal = await client.create_portal_session(
         user_id="app-user", user_secret="secret", broker="INTERACTIVE_BROKERS"
     )
