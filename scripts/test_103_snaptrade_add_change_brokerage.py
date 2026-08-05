@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
-"""Static contract guard for proposal 103's active-state portal action."""
+"""Static contract guard for staged or applied proposal 103 frontend code."""
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[3]
+TEST_FILE = Path(__file__).resolve()
+IN_PROPOSAL = ".proposed_changes" in TEST_FILE.parts
+ROOT = TEST_FILE.parents[3] if IN_PROPOSAL else TEST_FILE.parents[1]
 PROPOSAL = ROOT / ".proposed_changes/103-snaptrade-add-change-brokerage"
-COMPONENT = PROPOSAL / "frontend/components/SnapTradeConnection.tsx"
+COMPONENT = (
+    PROPOSAL / "frontend/components/SnapTradeConnection.tsx"
+    if IN_PROPOSAL
+    else ROOT / "frontend/components/SnapTradeConnection.tsx"
+)
 source = COMPONENT.read_text()
 
 # The existing backend-only portal flow is reused; browser code still receives only
