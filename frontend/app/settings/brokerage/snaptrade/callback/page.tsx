@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   brokerageErrorMessage,
@@ -14,50 +14,83 @@ import { getAccessToken } from '@/lib/supabase';
 
 const CONNECTION_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
+type CallbackSnapshot = {
+  status: string;
+  connectionId: string;
+};
+
+type VerificationOutcome =
+  | { ok: true; accountCount: number }
+  | { ok: false; error: string };
+
 function CallbackContent() {
   const router = useRouter();
   const params = useSearchParams();
   const [error, setError] = useState<string | null>(null);
+  const callbackSnapshotRef = useRef<CallbackSnapshot | null>(null);
+  const verificationPromiseRef = useRef<Promise<VerificationOutcome> | null>(null);
+  const terminalOutcomeRef = useRef<'completed' | 'failed' | null>(null);
+  const urlScrubbedRef = useRef(false);
+
+  // Capture the provider result during the initial render. Next synchronizes native
+  // history changes with useSearchParams, so these values must outlive URL scrubbing.
+  if (callbackSnapshotRef.current === null) {
+    callbackSnapshotRef.current = {
+      status: (params.get('status') ?? '').toUpperCase(),
+      connectionId: params.get('connection_id') ?? '',
+    };
+  }
 
   useEffect(() => {
     let active = true;
-    const status = (params.get('status') ?? '').toUpperCase();
-    const connectionId = params.get('connection_id') ?? '';
+    const callback = callbackSnapshotRef.current;
 
-    // Remove provider identifiers from the address bar/history immediately. The
-    // analytics sanitizer is defense-in-depth for the earlier automatic pageview.
-    window.history.replaceState(null, '', window.location.pathname);
-
-    async function verify() {
-      if (status !== 'SUCCESS' || !CONNECTION_ID.test(connectionId)) {
-        const code = 'snaptrade_callback_invalid';
-        if (active) setError(code);
-        trackBrokerConnectionFailed('snaptrade', code);
-        return;
-      }
-      const token = await getAccessToken();
-      if (!token) {
-        const code = 'authentication_required';
-        if (active) setError(code);
-        trackBrokerConnectionFailed('snaptrade', code);
-        return;
-      }
-      const result = await verifySnapTradeConnection(token, connectionId);
-      if (!active) return;
-      if (!result.ok) {
-        setError(result.error);
-        trackBrokerConnectionFailed('snaptrade', result.error);
-        return;
-      }
-      trackBrokerConnectionCompleted('snaptrade', result.data.accounts.length);
-      router.replace('/connect?snaptrade=connected');
+    if (!urlScrubbedRef.current) {
+      urlScrubbedRef.current = true;
+      // Remove provider identifiers from the address bar/history immediately. The
+      // analytics sanitizer remains defense-in-depth for the initial pageview.
+      window.history.replaceState(null, '', window.location.pathname);
     }
 
-    void verify();
+    async function verify(): Promise<VerificationOutcome> {
+      if (!callback || callback.status !== 'SUCCESS' || !CONNECTION_ID.test(callback.connectionId)) {
+        return { ok: false, error: 'snaptrade_callback_invalid' };
+      }
+
+      const token = await getAccessToken();
+      if (!token) return { ok: false, error: 'authentication_required' };
+
+      const result = await verifySnapTradeConnection(token, callback.connectionId);
+      if (!result.ok) return { ok: false, error: result.error };
+      return { ok: true, accountCount: result.data.accounts.length };
+    }
+
+    // React Strict Mode may set up, clean up, and set up this effect again. Reuse the
+    // in-flight promise so verification is sent once, while the active lifecycle can
+    // still observe its result after the earlier lifecycle has been cleaned up.
+    if (verificationPromiseRef.current === null) {
+      verificationPromiseRef.current = verify();
+    }
+
+    void verificationPromiseRef.current.then((outcome) => {
+      if (!active || terminalOutcomeRef.current !== null) return;
+
+      if (!outcome.ok) {
+        terminalOutcomeRef.current = 'failed';
+        setError(outcome.error);
+        trackBrokerConnectionFailed('snaptrade', outcome.error);
+        return;
+      }
+
+      terminalOutcomeRef.current = 'completed';
+      trackBrokerConnectionCompleted('snaptrade', outcome.accountCount);
+      router.replace('/connect?snaptrade=connected');
+    });
+
     return () => {
       active = false;
     };
-  }, [params, router]);
+  }, [router]);
 
   return (
     <main className="flex min-h-screen justify-center bg-gradient-to-br from-[#2c2c2a] to-[#444441] p-6">
