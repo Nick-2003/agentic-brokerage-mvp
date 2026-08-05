@@ -165,6 +165,23 @@ export default function SnapTradeConnection({ token }: { token: string }) {
         </div>
       )}
 
+      {!loading && connection?.status === 'active' && (
+        <div className="mt-4 border-t border-border pt-4">
+          <button
+            type="button"
+            onClick={openPortal}
+            disabled={busy}
+            className="h-11 w-full rounded-2xl border border-border text-sm font-semibold transition-colors hover:border-accent disabled:opacity-50"
+          >
+            {busy ? 'Opening SnapTrade…' : 'Add or change brokerage'}
+          </button>
+          <p className="mt-2 text-[11px] text-text-3">
+            Opens SnapTrade to connect another supported brokerage. Existing imported accounts stay
+            available until their provider reports otherwise.
+          </p>
+        </div>
+      )}
+
       {error && (
         <div role="alert" className="mt-3 text-[12px] text-red">
           {brokerageErrorMessage(error)}
