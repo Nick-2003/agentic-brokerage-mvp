@@ -1381,3 +1381,62 @@ This is the first end-to-end proof that registration → secret encryption → p
 **Open frontend defect — successful callback shown as invalid.** Despite the active database state and imported account, the callback rendered *"SnapTrade did not return a valid successful connection."* The callback first reads valid `status=SUCCESS`/`connection_id`, starts `/verify`, then immediately removes the query with `window.history.replaceState`. Next.js synchronizes native history changes with `useSearchParams`, reruns the effect with empty parameters, cancels the first UI continuation, and sets `snaptrade_callback_invalid`; the already-started backend verification still succeeds. This is a **frontend false-negative**, not a provider or Supabase failure, and it can also create a false `broker_connection_failed` PostHog event while omitting `broker_connection_completed`.
 
 **Next actions:** return to `/connect` and select the imported Alpaca Paper account; then fix the callback so it snapshots the initial parameters once and processes verification once before/while scrubbing the URL. Do **not** delete the working SnapTrade or Supabase user and do not reconnect merely because of the callback message. The trade-setup agent remains planned, not implemented; its portfolio-sizing dependency is now materially de-risked by 085–097.
+
+---
+
+## 2026-08-05 · 100 — two-user brokerage isolation and the SnapTrade promotion gate
+
+**Isolation guarantee confirmed in the implementation and its database contract.** Brokerage rows are owned by the trusted Supabase Auth UUID and protected by RLS. The 22-assertion transactional pgTAP test in `supabase/tests/database/093_broker_connections_rls.test.sql` executes as two different `authenticated` JWT subjects, not as `postgres` or `service_role`. It proves that user A sees only A's connection and accounts, cannot read or update B's account even with B's known local UUID, cannot insert a B-owned account, and cannot select B's account through `select_my_broker_account`. The rejected selection leaves both users' existing selections unchanged. Repeating the reads as B confirms the boundary in the opposite direction; `anon` has neither connection-table read access nor selection-RPC execution. The partial unique index also prevents a user from selecting two accounts at once.
+
+**What counts as deployment confirmation.** `scripts/test_093_snaptrade_fixtures.py` printing `PASS` confirms that the fixtures and 22-test RLS contract are present and that the normalized adapter still works; it does **not** execute Postgres. A promotion candidate must also show `supabase test db` completing all 22 pgTAP assertions and the target deployment's two-user HTTP probe printing `SnapTrade staging two-user isolation: PASS`. An SQL Editor query run as `postgres`, an admin/service-role response, or two browser sessions that happen to show different accounts is not sufficient proof because each bypasses or incompletely exercises the user-facing boundary.
+
+### Promotion gate procedure and required evidence
+
+1. **Offline regression gate — prove the proposal stack still composes.** Run the applied 089, 090, 092, 093, 094, and 097 Python tests, then the frontend type-check and production build:
+
+   ```bash
+   backend/.venv/bin/python scripts/test_089_snaptrade_client_routes.py
+   backend/.venv/bin/python scripts/test_090_snaptrade_portfolio.py
+   backend/.venv/bin/python scripts/test_092_snaptrade_connection_ui.py
+   backend/.venv/bin/python scripts/test_093_snaptrade_fixtures.py
+   backend/.venv/bin/python scripts/test_094_snaptrade_post_apply_paths.py
+   backend/.venv/bin/python scripts/test_097_snaptrade_failure_diagnostics.py
+   pnpm --dir frontend typecheck
+   pnpm --dir frontend build
+   ```
+
+   Pass means every command exits zero. Stop promotion on any failure; do not classify a failing test as unrelated until its dependency or path assumption has been demonstrated.
+
+2. **Local migration/RLS gate — prove a clean database receives the same protection.** Start the local Supabase stack, reset it so every migration replays, run `supabase test db`, then lint and run database advisors:
+
+   ```bash
+   supabase start
+   supabase db reset --local
+   supabase test db
+   supabase db lint --local --schema public --fail-on error
+   supabase db advisors --local
+   ```
+
+   Pass requires a clean reset, all 22 brokerage RLS assertions, no lint error, and no unreviewed security advisor finding. The pgTAP file begins a transaction and rolls it back, so its two synthetic users and accounts must not persist. Test as `authenticated` with different `request.jwt.claim.sub` values; querying as `postgres` or `service_role` cannot validate RLS isolation.
+
+3. **Two-user staging HTTP gate — prove the deployed auth, routes, and RLS work together.** Create two disposable Supabase users in a non-production environment. Connect/import at least one brokerage account for each and obtain a fresh access JWT for each user. Do not use provider application credentials or SnapTrade `userSecret` values in the probe. Run:
+
+   ```bash
+   SNAPTRADE_ISOLATION_VERIFY=I_UNDERSTAND_STAGING_ONLY \
+   SNAPTRADE_VERIFY_BACKEND_URL=https://STAGING_BACKEND \
+   SNAPTRADE_VERIFY_USER_A_JWT='USER_A_ACCESS_JWT' \
+   SNAPTRADE_VERIFY_USER_B_JWT='USER_B_ACCESS_JWT' \
+   backend/.venv/bin/python scripts/snaptrade_isolation_probe.py
+   ```
+
+   Pass means each user's `GET /api/broker-connections` returns only their own local accounts, the two local account-ID sets are disjoint, no external IDs or secrets appear in either response, A selecting B's known account ID and B selecting A's both return 404/409, and neither failed attempt changes either user's selected account. Preserve the single final `PASS` line and the matching sanitized backend request records as release evidence; never store the JWTs in the repository, screenshots, PostHog, or the evidence note.
+
+4. **Callback and account-selection gate — prove the real user journey agrees with backend state.** In separate/private browser profiles, complete the portal for both staging users, return through the configured callback, select one owned account each, reload, and verify the choice persists. Pass requires exactly one completion outcome per callback, no false failure after a successful verification, and each profile displaying only its own account. The known callback `replaceState`/`useSearchParams` false-negative keeps this gate **closed** until fixed, even though the backend connection/import is active.
+
+5. **Privacy and observability gate — prove diagnostic data is useful without becoming a credential store.** Inspect Railway and PostHog for the two test journeys. Events should include stable app-level outcome/error codes plus provider/model labels where applicable, but must exclude access JWTs, SnapTrade `userSecret`, consumer key, client ID, raw authorization/connection/account identifiers, callback query values, and email. Brokerage events must be attributed to the authenticated app user only after a correct `posthog.identify(user.id)`/logout-reset lifecycle is implemented; until then, anonymous device IDs are not evidence of account isolation.
+
+6. **Read-only live-data gate — prove the selected account normalizes safely.** For one designated test user with a selected SnapTrade account, run the opt-in read-only verifier documented in `docs/SNAPTRADE_LIVE_VERIFICATION.md`. Pass requires `connected=true`, `read_only=true`, `is_mock=false`, provider `snaptrade`, a present base currency/equity, plausible position counts, understood freshness/warnings, and no external provider IDs or secrets in the rendered snapshot. This is not a trading test and must not place an order.
+
+7. **Rollback gate — prove promotion is reversible before changing the portfolio source.** Keep `PORTFOLIO_SOURCE=ibkr` as the known-good setting until gates 1–6 are green. Before promotion, rehearse changing back to `ibkr`, redeploying, and confirming the IBKR portfolio path remains healthy. Prefer the source flag rollback over destructive user deletion or migration reversal; retain SnapTrade connection rows for diagnosis unless there is a separately approved data-removal request.
+
+**Current decision:** the ownership/RLS design and its negative-path contract confirm that one authenticated user cannot read or select another user's brokerage account. Production promotion is **not yet fully green**: the target database and staging HTTP commands must provide their recorded `PASS` evidence, and the callback false-negative must be fixed before SnapTrade replaces IBKR as the default portfolio source.
