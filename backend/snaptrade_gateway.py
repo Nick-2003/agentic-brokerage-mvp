@@ -6,18 +6,37 @@ Routes and portfolio providers consume plain dictionaries/lists and stable error
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 import os
-from collections.abc import Awaitable, Callable
+import re
+from collections.abc import Callable, Mapping
 from typing import Any
 from urllib.parse import urlparse
+
+
+logger = logging.getLogger(__name__)
+_SAFE_DIAGNOSTIC = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 
 
 class SnapTradeClientError(RuntimeError):
     """Sanitised provider error; never includes credentials or raw response bodies."""
 
-    def __init__(self, code: str, message: str, *, status: int | None = None) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        status: int | None = None,
+        operation: str | None = None,
+        provider_code: str | None = None,
+        request_id: str | None = None,
+    ) -> None:
         self.code = code
         self.status = status
+        self.operation = operation
+        self.provider_code = provider_code
+        self.request_id = request_id
         super().__init__(message)
 
 
@@ -85,9 +104,46 @@ def _status_from_exception(exc: Exception) -> int | None:
         return None
 
 
-def _provider_error(exc: Exception) -> SnapTradeClientError:
+def _diagnostic(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text if _SAFE_DIAGNOSTIC.fullmatch(text) else None
+
+
+def _response_body(exc: Exception) -> Mapping[str, Any]:
+    body = getattr(exc, "body", None)
+    if isinstance(body, str):
+        try:
+            body = json.loads(body)
+        except (TypeError, ValueError):
+            return {}
+    return body if isinstance(body, Mapping) else {}
+
+
+def _provider_code_from_exception(exc: Exception) -> str | None:
+    body = _response_body(exc)
+    return _diagnostic(body.get("code") or body.get("status_code"))
+
+
+def _request_id_from_exception(exc: Exception) -> str | None:
+    headers = getattr(exc, "headers", None)
+    if not isinstance(headers, Mapping) and not hasattr(headers, "items"):
+        return None
+    for key, value in headers.items():
+        if str(key).lower() == "x-request-id":
+            return _diagnostic(value)
+    return None
+
+
+def _provider_error(exc: Exception, *, operation: str) -> SnapTradeClientError:
     status = _status_from_exception(exc)
-    if status in {401, 403}:
+    provider_code = _provider_code_from_exception(exc)
+    request_id = _request_id_from_exception(exc)
+    if status == 400 and provider_code == "1010":
+        code, message = (
+            "snaptrade_user_already_exists",
+            "SnapTrade user exists but no stored application identity was found",
+        )
+    elif status in {401, 403}:
         code, message = "snaptrade_auth_failed", "SnapTrade rejected the credentials"
     elif status == 404:
         code, message = "snaptrade_not_found", "SnapTrade resource was not found"
@@ -99,7 +155,28 @@ def _provider_error(exc: Exception) -> SnapTradeClientError:
         code, message = "snaptrade_unavailable", "SnapTrade is temporarily unavailable"
     else:
         code, message = "snaptrade_request_failed", "SnapTrade request failed"
-    return SnapTradeClientError(code, message, status=status)
+    return SnapTradeClientError(
+        code,
+        message,
+        status=status,
+        operation=operation,
+        provider_code=provider_code,
+        request_id=request_id,
+    )
+
+
+def _log_provider_error(error: SnapTradeClientError) -> None:
+    # Deliberately exclude exception strings and response bodies: generated SDK
+    # errors can contain userId/userSecret query parameters or raw provider data.
+    logger.warning(
+        "snaptrade_provider_error operation=%s status=%s provider_code=%s "
+        "request_id=%s app_code=%s",
+        error.operation or "unknown",
+        error.status if error.status is not None else "unknown",
+        error.provider_code or "unknown",
+        error.request_id or "unknown",
+        error.code,
+    )
 
 
 def _body(response: Any) -> Any:
@@ -112,22 +189,36 @@ class SnapTradeClient:
     def __init__(self, sdk: Any | None = None) -> None:
         self._sdk = sdk if sdk is not None else _sdk_factory()
 
-    async def _call(self, operation: Awaitable[Any]) -> Any:
+    async def _call(self, operation: str, request: Callable[[], Any]) -> Any:
         try:
-            response = await asyncio.wait_for(operation, timeout=_timeout_seconds())
+            # SDK 12.0.4's async non-2xx path raises before closing its temporary
+            # aiohttp session. Run the generated synchronous method in a worker
+            # thread instead; it uses urllib3 and does not create that session.
+            response = await asyncio.wait_for(
+                asyncio.to_thread(request), timeout=_timeout_seconds() + 1
+            )
         except TimeoutError as exc:
-            raise SnapTradeClientError(
-                "snaptrade_timeout", "SnapTrade did not respond before the timeout"
-            ) from exc
+            error = SnapTradeClientError(
+                "snaptrade_timeout",
+                "SnapTrade did not respond before the timeout",
+                operation=operation,
+            )
+            _log_provider_error(error)
+            raise error from exc
         except SnapTradeClientError:
             raise
         except Exception as exc:  # generated SDK exception types vary by release
-            raise _provider_error(exc) from exc
+            error = _provider_error(exc, operation=operation)
+            _log_provider_error(error)
+            raise error from exc
         return _body(response)
 
     async def register_user(self, *, user_id: str) -> dict[str, Any]:
         body = await self._call(
-            self._sdk.authentication.aregister_snap_trade_user(user_id=user_id)
+            "register_user",
+            lambda: self._sdk.authentication.register_snap_trade_user(
+                user_id=user_id
+            ),
         )
         if not isinstance(body, dict):
             raise SnapTradeClientError(
@@ -140,6 +231,15 @@ class SnapTradeClient:
                 "snaptrade_contract_invalid", "SnapTrade registration omitted user credentials"
             )
         return {"external_user_id": external_user_id, "user_secret": user_secret}
+
+    async def delete_user(self, *, user_id: str) -> None:
+        """Delete a just-created identity during registration compensation only."""
+        await self._call(
+            "delete_user",
+            lambda: self._sdk.authentication.delete_snap_trade_user(
+                user_id=user_id
+            ),
+        )
 
     async def create_portal_session(
         self,
@@ -159,7 +259,8 @@ class SnapTradeClient:
         if broker:
             kwargs["broker"] = broker
         body = await self._call(
-            self._sdk.authentication.alogin_snap_trade_user(**kwargs)
+            "create_portal_session",
+            lambda: self._sdk.authentication.login_snap_trade_user(**kwargs),
         )
         if not isinstance(body, dict):
             raise SnapTradeClientError(
@@ -177,9 +278,11 @@ class SnapTradeClient:
 
     async def list_connections(self, *, user_id: str, user_secret: str) -> list[dict[str, Any]]:
         body = await self._call(
-            self._sdk.connections.alist_brokerage_authorizations(
-                user_id=user_id, user_secret=user_secret
-            )
+            "list_connections",
+            lambda: self._sdk.connections.list_brokerage_authorizations(
+                user_id=user_id,
+                user_secret=user_secret,
+            ),
         )
         return self._list_body(body, "connections")
 
@@ -187,11 +290,12 @@ class SnapTradeClient:
         self, *, authorization_id: str, user_id: str, user_secret: str
     ) -> list[dict[str, Any]]:
         body = await self._call(
-            self._sdk.connections.alist_brokerage_authorization_accounts(
+            "list_connection_accounts",
+            lambda: self._sdk.connections.list_brokerage_authorization_accounts(
                 authorization_id=authorization_id,
                 user_id=user_id,
                 user_secret=user_secret,
-            )
+            ),
         )
         return self._list_body(body, "accounts")
 
@@ -199,9 +303,12 @@ class SnapTradeClient:
         self, *, account_id: str, user_id: str, user_secret: str
     ) -> dict[str, Any]:
         body = await self._call(
-            self._sdk.account_information.aget_user_account_details(
-                account_id=account_id, user_id=user_id, user_secret=user_secret
-            )
+            "get_account_details",
+            lambda: self._sdk.account_information.get_user_account_details(
+                account_id=account_id,
+                user_id=user_id,
+                user_secret=user_secret,
+            ),
         )
         if not isinstance(body, dict):
             raise SnapTradeClientError(
@@ -213,9 +320,12 @@ class SnapTradeClient:
         self, *, account_id: str, user_id: str, user_secret: str
     ) -> list[dict[str, Any]]:
         body = await self._call(
-            self._sdk.account_information.aget_user_account_balance(
-                account_id=account_id, user_id=user_id, user_secret=user_secret
-            )
+            "get_account_balances",
+            lambda: self._sdk.account_information.get_user_account_balance(
+                account_id=account_id,
+                user_id=user_id,
+                user_secret=user_secret,
+            ),
         )
         return self._list_body(body, "balances")
 
@@ -223,9 +333,12 @@ class SnapTradeClient:
         self, *, account_id: str, user_id: str, user_secret: str
     ) -> list[dict[str, Any]]:
         body = await self._call(
-            self._sdk.account_information.aget_all_account_positions(
-                account_id=account_id, user_id=user_id, user_secret=user_secret
-            )
+            "get_account_positions",
+            lambda: self._sdk.account_information.get_all_account_positions(
+                account_id=account_id,
+                user_id=user_id,
+                user_secret=user_secret,
+            ),
         )
         return self._list_body(body, "positions")
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from typing import Any
 
@@ -13,6 +14,7 @@ from auth import AuthCtx, resolve_auth
 from snaptrade_gateway import SnapTradeClient, SnapTradeClientError
 
 router = APIRouter(prefix="/api", tags=["brokerage-connections"])
+logger = logging.getLogger(__name__)
 _BROKER_SLUG = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 
 
@@ -41,7 +43,11 @@ def _http_error(exc: Exception) -> HTTPException:
         status = 404
     elif code in {"broker_account_not_found"}:
         status = 404
-    elif code in {"snaptrade_sync_in_progress"}:
+    elif code in {
+        "snaptrade_sync_in_progress",
+        "snaptrade_user_already_exists",
+        "snaptrade_registration_recovery_required",
+    }:
         status = 409
     else:
         status = 502
@@ -105,20 +111,68 @@ async def _identity_or_register(
     if identity:
         return identity
 
-    registered = await client.register_user(user_id=auth.user_id)
-    public = await broker_connections.upsert_my_snaptrade_identity(
-        user_jwt,
-        auth.user_id,
-        external_user_id=registered["external_user_id"],
-        user_secret=registered["user_secret"],
-    )
+    try:
+        registered = await client.register_user(user_id=auth.user_id)
+    except SnapTradeClientError as exc:
+        if exc.code != "snaptrade_user_already_exists":
+            raise
+        # A concurrent request may have registered and stored this identity after
+        # our first read. Re-read once before declaring a genuine orphan.
+        raced_identity = await broker_connections.get_my_snaptrade_identity_private(
+            user_jwt, auth.user_id
+        )
+        if raced_identity:
+            logger.info("snaptrade_registration_race_recovered")
+            return raced_identity
+        raise
+    external_user_id = registered["external_user_id"]
+    try:
+        public = await broker_connections.upsert_my_snaptrade_identity(
+            user_jwt,
+            auth.user_id,
+            external_user_id=external_user_id,
+            user_secret=registered["user_secret"],
+        )
+    except Exception as exc:
+        # Do not log the exception string: a database client error can include the
+        # encrypted secret payload. The class name is enough to group failures.
+        logger.error(
+            "snaptrade_identity_store_failed error_type=%s", type(exc).__name__
+        )
+        await _compensate_unstored_registration(client, external_user_id)
+        raise HTTPException(
+            status_code=503, detail="broker_connection_store_failed"
+        ) from exc
     if not public or not public.get("id"):
-        raise HTTPException(status_code=500, detail="broker_connection_store_failed")
+        logger.error("snaptrade_identity_store_failed error_type=empty_result")
+        await _compensate_unstored_registration(client, external_user_id)
+        raise HTTPException(status_code=503, detail="broker_connection_store_failed")
     return {
         "id": public["id"],
-        "external_user_id": registered["external_user_id"],
+        "external_user_id": external_user_id,
         "user_secret": registered["user_secret"],
     }
+
+
+async def _compensate_unstored_registration(
+    client: SnapTradeClient, external_user_id: str
+) -> None:
+    """Remove only the identity created in this request before any portal exists."""
+    try:
+        await client.delete_user(user_id=external_user_id)
+    except SnapTradeClientError as exc:
+        logger.error(
+            "snaptrade_registration_compensation_failed status=%s provider_code=%s "
+            "request_id=%s app_code=%s",
+            exc.status if exc.status is not None else "unknown",
+            exc.provider_code or "unknown",
+            exc.request_id or "unknown",
+            exc.code,
+        )
+        raise HTTPException(
+            status_code=409, detail="snaptrade_registration_recovery_required"
+        ) from exc
+    logger.warning("snaptrade_registration_compensated")
 
 
 @router.get("/broker-connections")

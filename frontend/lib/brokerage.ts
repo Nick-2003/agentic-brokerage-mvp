@@ -118,6 +118,12 @@ const FRIENDLY_ERRORS: Record<string, string> = {
   snaptrade_sdk_missing: 'The SnapTrade backend dependency is unavailable.',
   snaptrade_timeout: 'SnapTrade took too long to respond. Please try again.',
   snaptrade_rate_limited: 'SnapTrade is temporarily rate-limiting requests. Try again shortly.',
+  snaptrade_user_already_exists:
+    'This SnapTrade profile already exists but its saved credentials are missing. Contact support before retrying.',
+  snaptrade_registration_recovery_required:
+    'SnapTrade registration needs manual recovery. Contact support before retrying.',
+  broker_connection_store_failed:
+    'The brokerage profile could not be saved. Wait a moment, then try again.',
   snaptrade_sync_in_progress: 'Your brokerage is still syncing. Retry in a moment.',
   snaptrade_accounts_not_ready: 'Your accounts are still syncing. Retry in a moment.',
   snaptrade_connection_disabled: 'This connection needs to be reconnected.',
