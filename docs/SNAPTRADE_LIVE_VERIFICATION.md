@@ -111,11 +111,11 @@ IDs, tickers, holdings values, provider errors, and credentials.
 
 Do not switch `PORTFOLIO_SOURCE=snaptrade` until all of the following are true:
 
-- fixture, prior regression, TypeScript, and Next build checks pass;
-- local pgTAP isolation and database lint/advisors pass;
-- two preview users cannot read or select each other's accounts;
-- callback identifiers are absent from PostHog and logs;
+- fixture, prior regression, TypeScript, and Next build checks pass; the SnapTrade modules still compose after subsequent repository changes.
+- local pgTAP isolation and database lint/advisors pass; isolation is enforced by PostgreSQL under real authenticated JWT claims, not merely by Python filtering.
+- two preview users cannot read or select each other's accounts; JWT resolution, FastAPI routes, Supabase RLS, public response shaping, and account selection work together in deployment.
+- callback identifiers are absent from PostHog and logs; the UI reports exactly the same outcome as backend state and does not manufacture a failure event.
 - the read-only live summary reports `connected=true`, `is_mock=false`, a base
-  currency, equity presence, and plausible position count;
-- actual account data freshness is understood for the current SnapTrade plan;
-- `PORTFOLIO_SOURCE=ibkr` remains documented and tested as rollback.
+  currency, equity presence, and plausible position count; operational evidence is useful while remaining free of credentials and raw financial/provider identifiers.
+- actual account data freshness is understood for the current SnapTrade plan; a selected account becomes a trustworthy provider-neutral portfolio without placing an order.
+- `PORTFOLIO_SOURCE=ibkr` remains documented and tested as rollback; promotion is a reversible source switch, not a migration that traps production on SnapTrade.
