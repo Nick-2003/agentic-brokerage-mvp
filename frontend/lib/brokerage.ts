@@ -106,9 +106,12 @@ export async function selectBrokerAccount(
   accountId: string
 ): Promise<ApiResult<{ selected_account_id: string; state: BrokerageState }>> {
   return request<{ selected_account_id: string; state: BrokerageState }>(
-    `/api/broker-accounts/${encodeURIComponent(accountId)}/select`,
+    '/api/broker-accounts/select',
     token,
-    { method: 'POST' }
+    {
+      method: 'POST',
+      body: JSON.stringify({ account_id: accountId }),
+    }
   );
 }
 

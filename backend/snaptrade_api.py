@@ -5,6 +5,7 @@ import asyncio
 import logging
 import re
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -25,6 +26,10 @@ class SnapTradeSessionRequest(BaseModel):
 class SnapTradeVerifyRequest(BaseModel):
     # This is a callback hint only. The route verifies it against SnapTrade.
     external_connection_id: str = Field(..., min_length=1, max_length=128)
+
+
+class BrokerAccountSelectRequest(BaseModel):
+    account_id: UUID
 
 
 def _require_user(auth: AuthCtx) -> str:
@@ -287,13 +292,15 @@ async def verify_snaptrade_connection(
         raise _http_error(exc) from exc
 
 
-@router.post("/broker-accounts/{account_id}/select")
+@router.post("/broker-accounts/select")
 async def select_broker_account(
-    account_id: str, auth: AuthCtx = Depends(resolve_auth)
+    req: BrokerAccountSelectRequest, auth: AuthCtx = Depends(resolve_auth)
 ) -> dict[str, Any]:
     user_jwt = _require_user(auth)
     try:
-        selected_id = await broker_connections.select_my_broker_account(user_jwt, account_id)
+        selected_id = await broker_connections.select_my_broker_account(
+            user_jwt, str(req.account_id)
+        )
         return {
             "selected_account_id": selected_id,
             "state": await broker_connections.list_my_brokerage_state(user_jwt),

@@ -49,8 +49,9 @@ async def cross_select(
     client: httpx.AsyncClient, attacker_token: str, victim_account_id: str
 ) -> None:
     response = await client.post(
-        f"/api/broker-accounts/{victim_account_id}/select",
+        "/api/broker-accounts/select",
         headers={"Authorization": f"Bearer {attacker_token}"},
+        json={"account_id": victim_account_id},
     )
     assert response.status_code in {404, 409}, (
         f"cross-user account selection was not rejected: HTTP {response.status_code}"
