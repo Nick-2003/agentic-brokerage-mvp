@@ -26,6 +26,15 @@ export type BrokerageState = {
   accounts: BrokerAccount[];
 };
 
+const PERSONALIZED_IBKR_NAME = /^(?:Interactive Brokers|IBKR)\s*\(/i;
+
+export function brokerageAccountDisplayName(name: string): string {
+  const normalized = name.trim();
+  return PERSONALIZED_IBKR_NAME.test(normalized)
+    ? 'Interactive Brokers'
+    : normalized || 'Brokerage account';
+}
+
 type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; error: string; status: number };

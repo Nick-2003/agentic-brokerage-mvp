@@ -46,7 +46,15 @@ export function initAnalytics() {
     persistence: 'localStorage',
     // Strip auth tokens out of any URL property before it leaves the browser.
     sanitize_properties: (props) => {
-      for (const k of ['$current_url', '$referrer', '$pathname', '$initial_current_url']) {
+      for (const k of [
+        '$current_url',
+        '$referrer',
+        '$pathname',
+        '$initial_current_url',
+        '$initial_referrer',
+        '$session_entry_url',
+        '$session_entry_referrer',
+      ]) {
         if (k in props) props[k] = scrubUrl(props[k]);
       }
       return props;
