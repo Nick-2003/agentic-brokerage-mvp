@@ -102,9 +102,15 @@ def _account_currency(account: dict[str, Any], details: dict[str, Any]) -> str:
 
 
 def _account_name(account: dict[str, Any]) -> str:
-    # Never persist the provider's raw account number. SnapTrade's display name is safe.
+    # Provider display names can contain an account holder's personal name. Remove
+    # the observed IBKR personalized form before it reaches persistence or an API.
     value = account.get("name") or account.get("institution_name") or "Brokerage account"
-    return str(value).strip()[:120] or "Brokerage account"
+    name = str(value).strip()[:120] or "Brokerage account"
+    if re.match(
+        r"^(?:Interactive Brokers|IBKR)\s*\(", name, flags=re.IGNORECASE
+    ):
+        return "Interactive Brokers"
+    return name
 
 
 async def _identity_or_register(

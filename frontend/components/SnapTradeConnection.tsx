@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  brokerageAccountDisplayName,
   brokerageErrorMessage,
   createSnapTradeSession,
   getBrokerageState,
@@ -139,7 +140,9 @@ export default function SnapTradeConnection({ token }: { token: string }) {
               }`}
             >
               <span>
-                <span className="block text-sm font-medium">{account.masked_name}</span>
+                <span className="block text-sm font-medium">
+                  {brokerageAccountDisplayName(account.masked_name)}
+                </span>
                 <span className="block text-[11px] text-text-3">
                   {account.base_currency} · {account.status}
                 </span>
