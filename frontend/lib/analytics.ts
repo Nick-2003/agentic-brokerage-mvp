@@ -35,6 +35,13 @@ export function initAnalytics() {
   if (!key || key.startsWith('phc_REPLACE')) return;
   posthog.init(key, {
     api_host: host,
+    // Gate 5: DOM autocapture serializes rendered text and attributes. Live
+    // evidence included a signed-in email and person-bearing broker account name.
+    // This application uses explicit typed events instead.
+    autocapture: false,
+    // Keep replay disabled in code even if project-side remote config changes.
+    disable_session_recording: true,
+    // Pageviews remain useful and pass through the URL sanitizer below.
     capture_pageview: true,
     persistence: 'localStorage',
     // Strip auth tokens out of any URL property before it leaves the browser.
