@@ -8,6 +8,8 @@
 import posthog from 'posthog-js';
 
 let initialized = false;
+let queuedUserId: string | null = null;
+let identifiedUserId: string | null = null;
 
 // SECURITY (W6.2b): the Supabase magic-link redirect lands with the session in the
 // URL — `…/connect#access_token=…&refresh_token=…` (implicit flow) or `?code=…`
@@ -44,6 +46,35 @@ export function initAnalytics() {
     },
   });
   initialized = true;
+
+  // Supabase session resolution and PostHog initialization are independent client
+  // effects. Apply an identity that arrived first instead of losing that lifecycle.
+  if (queuedUserId) {
+    posthog.identify(queuedUserId);
+    identifiedUserId = queuedUserId;
+  }
+}
+
+// Use only the trusted Supabase Auth UUID. Email, brokerage identifiers, account
+// numbers, and provider secrets must never be passed to this helper.
+export function identifyAnalyticsUser(userId: string): void {
+  if (typeof window === 'undefined') return;
+  const normalized = userId.trim();
+  if (!normalized) return;
+  queuedUserId = normalized;
+  if (!initialized || identifiedUserId === normalized) return;
+
+  // A direct A→B transition without an observed sign-out must not merge people.
+  if (identifiedUserId) posthog.reset();
+  posthog.identify(normalized);
+  identifiedUserId = normalized;
+}
+
+export function resetAnalyticsUser(): void {
+  if (typeof window === 'undefined') return;
+  queuedUserId = null;
+  identifiedUserId = null;
+  if (initialized) posthog.reset();
 }
 
 // ── account lifecycle ──
