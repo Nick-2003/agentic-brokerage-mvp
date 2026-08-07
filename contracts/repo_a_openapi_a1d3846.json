@@ -1,0 +1,1173 @@
+{
+  "components": {
+    "schemas": {
+      "Attachment": {
+        "description": "One user-uploaded image for a single chat turn (059).\n\n`data` is raw base64 (NO `data:<mime>;base64,` prefix \u2014 the client strips it).\nEphemeral: forwarded to the model for this turn only, never persisted.",
+        "properties": {
+          "data": {
+            "maxLength": 7000000,
+            "minLength": 1,
+            "title": "Data",
+            "type": "string"
+          },
+          "kind": {
+            "const": "image",
+            "default": "image",
+            "title": "Kind",
+            "type": "string"
+          },
+          "media_type": {
+            "maxLength": 64,
+            "title": "Media Type",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "media_type",
+          "data"
+        ],
+        "title": "Attachment",
+        "type": "object"
+      },
+      "BrokerAccountSelectRequest": {
+        "properties": {
+          "account_id": {
+            "format": "uuid",
+            "title": "Account Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "account_id"
+        ],
+        "title": "BrokerAccountSelectRequest",
+        "type": "object"
+      },
+      "ChatRequest": {
+        "properties": {
+          "attachments": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/Attachment"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attachments"
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
+          "message": {
+            "default": "",
+            "maxLength": 4096,
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "title": "ChatRequest",
+        "type": "object"
+      },
+      "ConnectRequest": {
+        "properties": {
+          "email_opt_in": {
+            "default": false,
+            "title": "Email Opt In",
+            "type": "boolean"
+          },
+          "flex_query_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Flex Query Id",
+            "type": "string"
+          },
+          "flex_token": {
+            "maxLength": 512,
+            "minLength": 8,
+            "title": "Flex Token",
+            "type": "string"
+          },
+          "opt_in": {
+            "default": true,
+            "title": "Opt In",
+            "type": "boolean"
+          },
+          "whatsapp_number": {
+            "maxLength": 24,
+            "title": "Whatsapp Number",
+            "type": "string"
+          }
+        },
+        "required": [
+          "flex_token",
+          "flex_query_id",
+          "whatsapp_number"
+        ],
+        "title": "ConnectRequest",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "OptInRequest": {
+        "properties": {
+          "opt_in": {
+            "title": "Opt In",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "opt_in"
+        ],
+        "title": "OptInRequest",
+        "type": "object"
+      },
+      "SnapTradeSessionRequest": {
+        "properties": {
+          "broker": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Broker"
+          }
+        },
+        "title": "SnapTradeSessionRequest",
+        "type": "object"
+      },
+      "SnapTradeVerifyRequest": {
+        "properties": {
+          "external_connection_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "External Connection Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "external_connection_id"
+        ],
+        "title": "SnapTradeVerifyRequest",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "WaitlistRequest": {
+        "properties": {
+          "email": {
+            "maxLength": 254,
+            "minLength": 3,
+            "title": "Email",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "WaitlistRequest",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Backend for the prompt-first brokerage prototype",
+    "title": "Agentic Brokerage MVP",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/brief/{token}": {
+      "get": {
+        "operationId": "get_brief_api_brief__token__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Brief Api Brief  Token  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Brief",
+        "tags": [
+          "brief"
+        ]
+      }
+    },
+    "/api/broker-accounts/select": {
+      "post": {
+        "operationId": "select_broker_account_api_broker_accounts_select_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrokerAccountSelectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Select Broker Account Api Broker Accounts Select Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Select Broker Account",
+        "tags": [
+          "brokerage-connections"
+        ]
+      }
+    },
+    "/api/broker-connections": {
+      "get": {
+        "operationId": "list_broker_connections_api_broker_connections_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Broker Connections Api Broker Connections Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Broker Connections",
+        "tags": [
+          "brokerage-connections"
+        ]
+      }
+    },
+    "/api/broker-connections/snaptrade/session": {
+      "post": {
+        "operationId": "create_snaptrade_session_api_broker_connections_snaptrade_session_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SnapTradeSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Snaptrade Session Api Broker Connections Snaptrade Session Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Snaptrade Session",
+        "tags": [
+          "brokerage-connections"
+        ]
+      }
+    },
+    "/api/broker-connections/snaptrade/verify": {
+      "post": {
+        "operationId": "verify_snaptrade_connection_api_broker_connections_snaptrade_verify_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SnapTradeVerifyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Verify Snaptrade Connection Api Broker Connections Snaptrade Verify Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Verify Snaptrade Connection",
+        "tags": [
+          "brokerage-connections"
+        ]
+      }
+    },
+    "/api/chart-data": {
+      "get": {
+        "description": "Daily candle series for a ticker. Returns `{ticker, timeframe, currency,\ncandles, count}`. On no/unavailable data \u2192 `candles: []` (the frontend falls\nback to the inline SVG \u2014 never a fabricated series).",
+        "operationId": "chart_data_api_chart_data_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "ticker",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Ticker",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "timeframe",
+            "required": false,
+            "schema": {
+              "default": "1D",
+              "title": "Timeframe",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Chart Data Api Chart Data Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Chart Data",
+        "tags": [
+          "chart"
+        ]
+      }
+    },
+    "/api/chat": {
+      "post": {
+        "description": "Stream agent output as SSE; persist authenticated turns to Supabase;\nrecord one Langfuse trace per turn.\n\nSSE events: thought, tool_call, tool_result, widget, message, error, done.\nP4.2 adds: `conversation` (emitted once at the start with {id, title?}).\nPersistence and observability are both best-effort \u2014 a Supabase or Langfuse\nhiccup never breaks the user-facing stream.",
+        "operationId": "chat_api_chat_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Chat"
+      }
+    },
+    "/api/conversations": {
+      "get": {
+        "description": "List this user's conversations, most-recently-active first.\n\nDemo mode \u2192 empty list (no persistence). RLS guarantees this only ever\nreturns rows owned by the authenticated user.",
+        "operationId": "list_conversations_endpoint_api_conversations_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Conversations Endpoint Api Conversations Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Conversations Endpoint"
+      }
+    },
+    "/api/conversations/{conversation_id}": {
+      "get": {
+        "description": "Return the ordered messages of a conversation owned by this user.\n\nA foreign or non-existent id returns an empty list under RLS \u2014 surfaced as\na 404 so the frontend can distinguish \"no such conversation\" from \"empty\nresponse shape.\" Demo mode also 404s.",
+        "operationId": "get_conversation_endpoint_api_conversations__conversation_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Conversation Endpoint Api Conversations  Conversation Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Conversation Endpoint"
+      }
+    },
+    "/api/email/unsubscribe": {
+      "get": {
+        "operationId": "unsubscribe_get_api_email_unsubscribe_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "token",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unsubscribe Get",
+        "tags": [
+          "email"
+        ]
+      },
+      "post": {
+        "operationId": "unsubscribe_post_api_email_unsubscribe_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "token",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unsubscribe Post",
+        "tags": [
+          "email"
+        ]
+      }
+    },
+    "/api/ibkr/connect": {
+      "post": {
+        "operationId": "connect_ibkr_api_ibkr_connect_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Connect Ibkr Api Ibkr Connect Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Connect Ibkr",
+        "tags": [
+          "waitlist"
+        ]
+      }
+    },
+    "/api/ibkr/connection": {
+      "get": {
+        "operationId": "get_ibkr_connection_api_ibkr_connection_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Ibkr Connection Api Ibkr Connection Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Ibkr Connection",
+        "tags": [
+          "waitlist"
+        ]
+      }
+    },
+    "/api/ibkr/opt-in": {
+      "post": {
+        "operationId": "set_ibkr_opt_in_api_ibkr_opt_in_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptInRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Set Ibkr Opt In Api Ibkr Opt In Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Ibkr Opt In",
+        "tags": [
+          "waitlist"
+        ]
+      }
+    },
+    "/api/portfolio": {
+      "get": {
+        "description": "Lightweight portfolio summary for the frontend Hero header.\n\nReturns only the header fields (total equity + today's P&L) \u2014 NOT the full\npositions list \u2014 so the home screen header doesn't over-expose holdings on a\nnon-chat endpoint. `get_portfolio` is the single source of truth and is\nitself mock-gated, so demo mode (no token) returns the mock total.",
+        "operationId": "portfolio_endpoint_api_portfolio_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Portfolio Endpoint Api Portfolio Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Portfolio Endpoint"
+      }
+    },
+    "/api/twilio/inbound": {
+      "post": {
+        "operationId": "twilio_inbound_api_twilio_inbound_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Twilio Inbound",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
+    "/api/twilio/status": {
+      "post": {
+        "description": "Delivery-status callback \u2014 THE real STOP mirror for WhatsApp.\n\nTwilio intercepts the STOP keyword (so the inbound webhook never sees it) but\nblocks the number; the block surfaces ASYNCHRONOUSLY here as a `failed`/\n`undelivered` status with an opted-out `ErrorCode` (e.g. 63015 sandbox-not-\njoined / 63024 / 21610). On those we flip `opt_in` off so the W5 cron stops\nattempting. Wired per-message via `status_callback` on the send (whatsapp.py),\nso no Twilio-console config is needed. Returns 204 (Twilio ignores the body).",
+        "operationId": "twilio_status_api_twilio_status_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Twilio Status",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
+    "/api/waitlist": {
+      "post": {
+        "operationId": "join_waitlist_api_waitlist_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WaitlistRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Join Waitlist Api Waitlist Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Join Waitlist",
+        "tags": [
+          "waitlist"
+        ]
+      }
+    },
+    "/healthz": {
+      "get": {
+        "description": "Liveness probe \u2014 returns config diagnostics so we can spot mis-configured deploys.",
+        "operationId": "healthz_healthz_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Healthz Healthz Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Healthz"
+      }
+    }
+  }
+}
