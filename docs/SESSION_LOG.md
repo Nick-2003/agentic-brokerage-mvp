@@ -1440,3 +1440,127 @@ This is the first end-to-end proof that registration → secret encryption → p
 7. **Rollback gate — prove promotion is reversible before changing the portfolio source.** Keep `PORTFOLIO_SOURCE=ibkr` as the known-good setting until gates 1–6 are green. Before promotion, rehearse changing back to `ibkr`, redeploying, and confirming the IBKR portfolio path remains healthy. Prefer the source flag rollback over destructive user deletion or migration reversal; retain SnapTrade connection rows for diagnosis unless there is a separately approved data-removal request.
 
 **Current decision:** the ownership/RLS design and its negative-path contract confirm that one authenticated user cannot read or select another user's brokerage account. Production promotion is **not yet fully green**: the target database and staging HTTP commands must provide their recorded `PASS` evidence, and the callback false-negative must be fixed before SnapTrade replaces IBKR as the default portfolio source.
+
+---
+
+## 2026-08-07 · 101–112 — SnapTrade promotion gates cleared; reversible provider switch proven
+
+The 2026-08-05 entry correctly kept promotion closed. The next sequence fixed the
+known callback and observability defects, exercised the database and deployed
+negative paths, verified a selected live SnapTrade account, and rehearsed the full
+provider rollback. **All seven promotion gates now have passing evidence.** Trading
+remained disabled throughout; the final rehearsal state is
+`PORTFOLIO_SOURCE=ibkr`.
+
+### 101–104 — callback correctness, portable tests, and account switching
+
+**101 fixed the successful-callback false-negative.** The callback now snapshots
+the initial `status`/connection identifier and processes that snapshot once. URL
+scrubbing can no longer cause Next.js `useSearchParams` synchronization to cancel
+the valid continuation and emit a second invalid outcome. The callback calls the
+backend verify route once and presents one result.
+
+The first post-apply tests exposed a second class of defect: they calculated the
+repository root correctly only while inside `.proposed_changes/`, then looked above
+the repository after being copied to `scripts/`. The 102/104 corrections made the
+101, 092, 094, and later 103 tests work in both locations. This is now a standing
+test requirement: a proposed test must remain runnable after transfer to `scripts/`.
+
+**103 added “Add or change brokerage”.** A connected user can reopen the SnapTrade
+portal, import another supported brokerage, keep existing imported accounts, and
+select the account used for portfolio sizing. Live UI evidence showed multiple
+accounts retained and selectable, including Alpaca Paper and Interactive Brokers.
+This is account addition/selection, not provider-side removal; disconnect/delete
+remains a separate lifecycle feature.
+
+### 105–111 — authenticated analytics and identifier-free observability
+
+**105 introduced explicit analytics identity helpers.** PostHog initialization can
+queue the authenticated Supabase UUID, identity changes reset the previous person,
+and logout resets the analytics client. **106 wired those helpers to the initial
+Supabase session and every auth-state transition**, closing the earlier anonymous
+device-ID attribution gap.
+
+**107 removed local account UUIDs from access-log paths.** Account selection now
+uses fixed `POST /api/broker-accounts/select` with the local ID in the authenticated
+JSON body. The frontend and staging isolation probe use the same route, so Railway
+can retain useful method/path/status evidence without embedding an account ID.
+
+**108 disabled PostHog DOM autocapture and session recording.** Typed, deliberately
+shaped events remain; arbitrary rendered brokerage names, balances, and attributes
+are no longer serialized by default.
+
+**110 closed two findings from the first privacy reinspection.** URL sanitation now
+covers `$session_entry_url`, `$session_entry_referrer`, and `$initial_referrer`, so
+Supabase magic-link fragments cannot persist on later typed events. Personalized
+SnapTrade IBKR labels such as `Interactive Brokers (<holder name>)` are normalized
+to `Interactive Brokers` in future imports; a migration repaired existing rows,
+and backend/frontend defenses handle legacy responses. The affected Supabase
+sessions were revoked, the PostHog person was removed, and downloaded exports were
+deleted before the clean reinspection.
+
+**111 corrected the deployed cross-user negative path.** PostgreSQL/RLS properly
+hid the foreign account and raised `no_data_found` (`P0002`), but PostgREST surfaced
+that as `APIError`, which bypassed the existing not-found mapping and returned HTTP
+500. The persistence helper now translates only `P0002` to
+`broker_account_not_found`; unrelated database failures still propagate. After
+deployment the reciprocal two-user probe completed with:
+
+```text
+SnapTrade staging two-user isolation: PASS
+```
+
+### Final gate evidence
+
+1. **Offline/build gate — PASS.** The applied regression checks passed. The locked
+   frontend install was already current; `pnpm --dir frontend typecheck` and the
+   Next.js production build completed successfully. The build emitted only the
+   known multiple-parent-lockfile workspace-root warning.
+2. **Database gate — PASS.** After correcting the initially unhealthy local
+   Supabase container/reset, a clean migration replay succeeded, all **22/22**
+   brokerage pgTAP isolation assertions passed, lint reported no schema errors,
+   and advisors reported no issues.
+3. **Deployed two-user isolation gate — PASS.** Two distinct, unexpired ES256
+   Supabase access JWTs from the same issuer received their own state, had disjoint
+   accounts, and could not select each other's accounts. Proposal 111 changed the
+   correct RLS rejection from an accidental HTTP 500 to the intended 404.
+4. **Callback/account-selection gate — PASS.** Two real portal journeys completed;
+   callback verification agreed with backend state; accounts were isolated,
+   retained, selectable, and selection persisted. The prior duplicate/false-invalid
+   callback behavior is fixed.
+5. **Privacy/identity gate — PASS.** PostHog identification/reset was exercised for
+   separate sessions. Railway paths were identifier-free. Fresh PostHog/Railway
+   evidence contained no JWT, provider secret, raw provider/account identifier,
+   personalized IBKR name, or magic-link fragment. Test sessions, person, and
+   exported files were cleaned up.
+6. **Read-only live-data gate — PASS.** `scripts/snaptrade_live_verify.py` reported
+   `provider=snaptrade`, `connected=true`, `read_only=true`, present equity/base
+   currency/freshness, three plausible positions, a paper account, and zero
+   normalization warnings. It performed read-only account-detail/balance/position
+   calls and no registration, refresh, selection, or order call.
+7. **Rollback gate — PASS.** The operator proved `ibkr -> snaptrade -> ibkr` through
+   Railway variable changes and deployments while `TRADING_ENABLED=0`. Initial IBKR
+   and promoted SnapTrade portfolio summaries were HTTP 200, live, and non-sample.
+   After restoring `PORTFOLIO_SOURCE=ibkr`, the IBKR-connected user's final check
+   returned a present connection, equity and currency, with `is_mock=false` and
+   `is_sample=false`. Both providers' stored connection/account rows were retained;
+   no user deletion, data migration reversal, or token destruction was needed.
+
+The rehearsal also clarified three diagnostic rules. `/healthz` reports service and
+configuration health but not the active `PORTFOLIO_SOURCE`; identical health
+payloads under both providers are expected. `/api/portfolio` can intentionally
+return HTTP 200 with null equity/currency for a user who has no usable connection to
+the selected provider; that is not a passing portfolio check. Finally,
+`/api/ibkr/connection` nests its token-free public row under `connection`, so reading
+nonexistent top-level status keys produces misleading `None` values.
+
+**112 made the evidence repeatable.** `docs/SNAPTRADE_LIVE_VERIFICATION.md` is now
+the canonical seven-gate runbook. It contains prerequisites, exact terminal code,
+hidden JWT input, privacy constraints, pass criteria, cleanup, provider-specific
+user guidance, and the rollback procedure.
+
+**Current decision/state:** SnapTrade has cleared its technical promotion gate. The
+known-good post-rehearsal production setting is `PORTFOLIO_SOURCE=ibkr`; promotion
+to `snaptrade` is now a deliberate operator decision followed by redeployment.
+Emergency rollback is the rehearsed reverse variable change and redeployment.
+Keep `TRADING_ENABLED=0`. The trade-setup agent is still planned, not implemented.
