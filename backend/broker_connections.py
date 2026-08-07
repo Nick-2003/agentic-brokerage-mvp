@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from typing import Any, Iterable
 
+from postgrest.exceptions import APIError
 from supabase import AsyncClient, acreate_client
 
 import broker_secret_crypto
@@ -226,9 +227,18 @@ async def list_my_brokerage_state(user_jwt: str) -> dict[str, list[dict[str, Any
 async def select_my_broker_account(user_jwt: str, account_id: str) -> str:
     """Atomically select one active account through the security-invoker RPC."""
     client = await _client_for_user(user_jwt)
-    result = await client.rpc(
-        "select_my_broker_account", {"target_account_id": account_id}
-    ).execute()
+    try:
+        result = await client.rpc(
+            "select_my_broker_account", {"target_account_id": account_id}
+        ).execute()
+    except APIError as exc:
+        # The RPC deliberately raises PostgreSQL no_data_found when RLS hides a
+        # foreign/nonexistent account. Convert only that expected rejection.
+        if exc.code == "P0002":
+            raise BrokerConnectionStateError(
+                "broker_account_not_found", "active brokerage account was not found"
+            ) from exc
+        raise
     if not result.data:
         raise BrokerConnectionStateError(
             "broker_account_not_found", "active brokerage account was not found"
